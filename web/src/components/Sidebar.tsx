@@ -1,7 +1,9 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
-import type { Conversation, DirectoryContact } from '../types';
+import type { Conversation, DirectoryContact, SearchResult } from '../types';
+import { jumpToMessage } from '../jump';
+import { Highlight } from './InfoPanel';
 import { formatListTime } from '../util';
 import { type NotifyState, notifyState, requestNotifications } from '../notifications';
 import { setPrefs, usePrefs } from '../prefs';
@@ -16,6 +18,21 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'list' | 'new' | 'settings'>('list');
   const [menu, setMenu] = useState(false);
+  const [found, setFound] = useState<SearchResult[] | null>(null);
+
+  // Message search across all chats, below the matching chats.
+  useEffect(() => {
+    const term = query.trim();
+    if (term.length < 2) return setFound(null);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api.search(term).then((r) => !cancelled && setFound(r.results), () => !cancelled && setFound([]));
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query]);
 
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -63,13 +80,47 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
       <NotifyBanner onOpenSettings={() => setMode('settings')} />
       <div className="search">
         <Icon name="search" size={18} />
-        <input placeholder="Search chats" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search chats" />
+        <input
+          placeholder="Search chats and messages"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Escape' && setQuery('')}
+          aria-label="Search chats and messages"
+        />
+        {query && (
+          <button className="icon-btn sm" onClick={() => setQuery('')} aria-label="Clear search">
+            <Icon name="close" size={16} />
+          </button>
+        )}
       </div>
       <nav className="chat-list" aria-label="Chats">
+        {query && found && list.length > 0 && <h3 className="list-heading">Chats</h3>}
         {list.map((c) => (
           <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} />
         ))}
-        {!list.length && (
+        {found && found.length > 0 && (
+          <>
+            <h3 className="list-heading">Messages</h3>
+            {found.map((r) => (
+              <button key={r.id} className="chat-row search-hit" onClick={() => void jumpToMessage(r.conversationId, r.sentAt).catch(() => {})}>
+                <span className="chat-row-main">
+                  <span className="chat-row-top">
+                    <span className="chat-title">{r.conversationTitle}</span>
+                    <time>{formatListTime(r.sentAt)}</time>
+                  </span>
+                  <span className="chat-row-bottom">
+                    <span className="preview">
+                      {(r.group || r.outgoing) && <span className="preview-author">{r.outgoing ? 'You' : r.authorName}: </span>}
+                      <Highlight text={r.snippet} term={query.trim()} />
+                    </span>
+                  </span>
+                </span>
+              </button>
+            ))}
+          </>
+        )}
+        {query && found && !found.length && !list.length && <div className="empty-list"><p>No chats or messages match “{query}”.</p></div>}
+        {!list.length && !(query && found) && (
           <div className="empty-list">
             {query ? (
               <p>No chats match “{query}”.</p>

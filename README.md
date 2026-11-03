@@ -17,9 +17,14 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 ## What works
 
 - Linking via QR code, right in the web UI
-- Chat list with unread counts, search, typing and delivery state
+- Chat list with unread counts, typing and delivery state
+- Search: chats and messages from the chat list, or inside one chat (magnifier in the chat header); a result opens the chat at that message
 - 1:1 and group chats, with history stored in SQLite
-- Text, links, replies (quotes), reactions (quick bar plus every emoji), @mentions shown by name
+- Text, links, replies (quotes), reactions (quick bar plus every emoji)
+- @mentions: type `@` in a group to pick someone; mentions of you are highlighted
+- Text formatting, both ways: `*bold*`, `_italic_`, `~strikethrough~`, `` `monospace` ``, `||spoiler||` (click to reveal). Ctrl+B, Ctrl+I, Ctrl+Shift+X and Ctrl+Shift+M wrap the selection
+- Link previews that others send
+- Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Signal Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link

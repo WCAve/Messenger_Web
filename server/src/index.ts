@@ -10,6 +10,7 @@ import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
 import { recomputeGroupReadStatuses } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
+import { startExpiry, stopExpiry } from './expiry.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 const minLevel = LEVELS[(config.logLevel as keyof typeof LEVELS) ?? 'info'] ?? 20;
@@ -111,6 +112,8 @@ setTimeout(() => {
   }
 }, 2000);
 
+startExpiry((m) => log('info', m));
+
 startSignal({
   info: (m) => log('info', m),
   warn: (m) => log('warn', m),
@@ -125,6 +128,7 @@ server.listen(config.port, config.host, () =>
 const shutdown = () => {
   log('info', 'shutting down');
   stopSignal();
+  stopExpiry();
   server.close();
   server.closeAllConnections();
   db.close();

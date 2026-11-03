@@ -3,6 +3,7 @@ import { db, kvGet, kvSet } from './db.js';
 import { groupRecipientId } from './signal-api.js';
 import { avatarRev } from './avatars.js';
 import { cachedManifest, stickerUrl } from './stickers.js';
+import { type Ranges, type Rendered, plainText, renderRich } from './richtext.js';
 
 export interface StickerRef {
   packId: string;
@@ -42,6 +43,14 @@ export interface ConversationRow {
   last_message_at: number | null;
   archived: number;
   created_at: number;
+  expire_timer: number;
+}
+
+export interface LinkPreview {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  image?: Attachment | null;
 }
 
 export interface Attachment {
@@ -87,7 +96,17 @@ export interface MessageRow {
   received_at: number;
   sticker: string | null;
   ts_confirmed: number;
+  ranges: string | null;
+  preview: string | null;
+  expires_in: number;
+  expires_at: number | null;
 }
+
+/** Hooks other modules plug into (avoids import cycles). */
+export const storeHooks = {
+  /** Disappearing-message timers started or changed: reschedule the sweeper. */
+  timersChanged: () => {},
+};
 
 // ---------- self ----------
 
@@ -337,13 +356,33 @@ export function renderMentions(text: string | null | undefined): string | null {
   });
 }
 
+function mentionName(key: string): string {
+  if (key === 'self') return getSelfProfile()?.givenName || 'You';
+  return nameForKey(key);
+}
+
+/** The text of a message with names for mentions, and its style/mention ranges to match. */
+export function renderBody(body: string | null, rangesJson: string | null): Rendered | null {
+  if (!body) return null;
+  if (rangesJson) return renderRich(body, JSON.parse(rangesJson) as Ranges, mentionName);
+  // Older rows have mentions inline as "@<uuid or number>".
+  const mentions: { start: number; length: number; key: string }[] = [];
+  for (const match of body.matchAll(MENTION_RE)) {
+    const id = match[1];
+    const key = self.is(id, id) ? 'self' : findContact(id, id)?.key;
+    if (key && (key === 'self' || nameForKey(key) !== 'Unknown')) mentions.push({ start: match.index!, length: match[0].length, key });
+  }
+  return renderRich(body, mentions.length ? { mentions } : null, mentionName);
+}
+
 export function previewText(m: MessageRow): string {
   if (m.deleted) return 'This message was deleted';
   if (m.kind === 'sticker') {
     const s: StickerRef | null = m.sticker ? JSON.parse(m.sticker) : null;
     return [s && stickerEmoji(s), 'Sticker'].filter(Boolean).join(' ');
   }
-  if (m.body) return renderMentions(m.body)!;
+  const r = renderBody(m.body, m.ranges);
+  if (r?.text) return plainText(r);
   const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
   if (atts.length) {
     const a = atts[0];
@@ -381,6 +420,7 @@ export function conversationDto(row: ConversationRow) {
       : null,
     unread: unreadStmt.get(conv.id)!.n,
     archived: !!conv.archived,
+    expireTimer: conv.expire_timer || 0,
   };
 }
 export type ConversationDto = ReturnType<typeof conversationDto>;
@@ -609,12 +649,17 @@ export function insertMessage(m: {
   status?: string | null;
   read: boolean;
   sticker?: StickerRef | null;
+  ranges?: Ranges | null;
+  preview?: LinkPreview | null;
+  expiresIn?: number;
+  expiresAt?: number | null;
 }): MessageRow | undefined {
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-        (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
+         ranges, preview, expires_in, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -631,15 +676,20 @@ export function insertMessage(m: {
       Date.now(),
       m.sticker ? JSON.stringify(m.sticker) : null,
       m.status === 'pending' ? 0 : 1, // our own sends get their real timestamp once signal-cli answers
+      m.ranges ? JSON.stringify(m.ranges) : null,
+      m.preview ? JSON.stringify(m.preview) : null,
+      m.expiresIn ?? 0,
+      m.expiresAt ?? null,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
+  if (m.expiresAt) storeHooks.timersChanged();
   return msgById.get(Number(info.lastInsertRowid));
 }
 
 export function updateMessage(
   id: number,
-  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed'>>,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at'>>,
 ) {
   const keys = Object.keys(fields);
   if (!keys.length) return msgById.get(id);
@@ -659,6 +709,8 @@ export function messageDto(m: MessageRow) {
   const quote: Quote | null = m.quote ? JSON.parse(m.quote) : null;
   const reactions: Reaction[] = m.reactions ? JSON.parse(m.reactions) : [];
   const sticker: StickerRef | null = m.sticker && !m.deleted ? JSON.parse(m.sticker) : null;
+  const rich = m.deleted ? null : renderBody(m.body, m.ranges);
+  const preview: LinkPreview | null = m.preview && !m.deleted ? JSON.parse(m.preview) : null;
   return {
     id: m.id,
     rev: nextRev(),
@@ -669,7 +721,12 @@ export function messageDto(m: MessageRow) {
     authorName: nameForKey(m.author),
     outgoing: !!m.outgoing,
     kind: m.kind,
-    body: m.deleted ? null : renderMentions(m.body),
+    body: rich?.text ?? null,
+    styles: rich?.styles.length ? rich.styles : undefined,
+    mentions: rich?.mentions.length ? rich.mentions : undefined,
+    preview,
+    expiresIn: m.expires_in || undefined,
+    expiresAt: m.expires_at ?? undefined,
     attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]),
     quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '' } : null,
     reactions: reactions.map((r) => ({ emoji: r.emoji, author: r.author, authorName: nameForKey(r.author) })),
@@ -696,5 +753,82 @@ export function unreadMessages(conversationId: number) {
 }
 
 export function markConversationRead(conversationId: number, upToTs = Number.MAX_SAFE_INTEGER) {
-  return db.prepare('UPDATE messages SET read = 1 WHERE conversation_id = ? AND read = 0 AND sent_ts <= ?').run(conversationId, upToTs).changes;
+  const now = Date.now();
+  // Disappearing messages you received start their countdown once you've read them.
+  const started = db
+    .prepare(
+      `UPDATE messages SET expires_at = ? + expires_in * 1000
+       WHERE conversation_id = ? AND read = 0 AND sent_ts <= ? AND expires_in > 0 AND expires_at IS NULL`,
+    )
+    .run(now, conversationId, upToTs).changes;
+  const changes = db.prepare('UPDATE messages SET read = 1 WHERE conversation_id = ? AND read = 0 AND sent_ts <= ?').run(conversationId, upToTs).changes;
+  if (started) storeHooks.timersChanged();
+  return changes;
+}
+
+export function setConversationTimer(conversationId: number, seconds: number) {
+  db.prepare('UPDATE conversations SET expire_timer = ? WHERE id = ?').run(seconds, conversationId);
+}
+
+/** Messages around a moment (for jumping to a search result or a quoted message). */
+export function listMessagesAround(conversationId: number, ts: number, limit: number) {
+  const half = Math.floor(limit / 2);
+  const older = db
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC LIMIT ?')
+    .all(conversationId, ts, half + 1);
+  const newer = db
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts >= ? ORDER BY sent_ts ASC LIMIT ?')
+    .all(conversationId, ts, half + 1);
+  const hasOlder = older.length > half;
+  const hasNewer = newer.length > half;
+  const rows = [...older.slice(0, half).reverse(), ...newer.slice(0, half)];
+  return { messages: rows.map(messageDto), hasOlder, hasNewer };
+}
+
+export function listMessagesAfter(conversationId: number, after: number, limit: number) {
+  return db
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts > ? ORDER BY sent_ts ASC LIMIT ?')
+    .all(conversationId, after, limit)
+    .map(messageDto);
+}
+
+/** Text search over messages, newest first. */
+export function searchMessages(q: string, conversationId: number | undefined, limit = 50) {
+  const like = '%' + q.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+  const rows = db
+    .prepare<[string, number, number, number], MessageRow>(
+      `SELECT * FROM messages
+       WHERE deleted = 0 AND kind = 'message' AND body LIKE ? ESCAPE '\\' AND (? = 0 OR conversation_id = ?)
+       ORDER BY sent_ts DESC LIMIT ?`,
+    )
+    .all(like, conversationId ?? 0, conversationId ?? 0, limit);
+  const needle = q.toLowerCase();
+  return rows.map((m) => {
+    const conv = convById.get(m.conversation_id)!;
+    const text = plainText(renderBody(m.body, m.ranges)!);
+    const at = text.toLowerCase().indexOf(needle);
+    const from = Math.max(0, (at < 0 ? 0 : at) - 40);
+    return {
+      id: m.id,
+      conversationId: m.conversation_id,
+      conversationTitle: conversationTitle(conv),
+      group: conv.kind === 'group',
+      sentAt: m.sent_ts,
+      authorName: nameForKey(m.author),
+      outgoing: !!m.outgoing,
+      snippet: (from > 0 ? '…' : '') + text.slice(from, from + 160),
+    };
+  });
+}
+
+export function expiredMessages(now: number) {
+  return db.prepare<[number], MessageRow>('SELECT * FROM messages WHERE expires_at IS NOT NULL AND expires_at <= ?').all(now);
+}
+
+export function nextExpiry(): number | null {
+  return db.prepare<[], { t: number | null }>('SELECT MIN(expires_at) AS t FROM messages WHERE expires_at IS NOT NULL').get()?.t ?? null;
+}
+
+export function deleteMessageRow(id: number) {
+  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
 }

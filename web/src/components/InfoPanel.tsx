@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
-import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient } from '../types';
-import { formatDay, formatSize, formatTime, squareAvatar } from '../util';
+import { jumpToMessage } from '../jump';
+import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
+import { TIMER_OPTIONS, durationLabel, formatDay, formatListTime, formatSize, formatTime, squareAvatar } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
 
 function closePanel() {
@@ -116,6 +117,8 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
           </section>
         )}
 
+        <DisappearingSection conversation={conversation} />
+
         <section className="panel-section">
           <div className="media-tabs" role="tablist">
             {(
@@ -222,6 +225,123 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
       </div>
     </aside>
   );
+}
+
+function DisappearingSection({ conversation }: { conversation: Conversation }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = conversation.expireTimer;
+  const options = TIMER_OPTIONS.includes(current) || !current ? TIMER_OPTIONS : [...TIMER_OPTIONS, current].sort((a, b) => a - b);
+
+  async function choose(seconds: number) {
+    if (seconds === current) return;
+    setBusy(true);
+    setError(null);
+    try {
+      upsertConversation(await api.setTimer(conversation.id, seconds));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="panel-section">
+      <h4>Disappearing messages</h4>
+      <label className="timer-row">
+        <Icon name="timer" size={20} />
+        <select value={current} disabled={busy} onChange={(e) => void choose(Number(e.target.value))} aria-label="Disappearing messages timer">
+          <option value={0} disabled>
+            Off{current ? ' (switch off on your phone)' : ''}
+          </option>
+          {options.map((s) => (
+            <option key={s} value={s}>
+              {durationLabel(s)}
+            </option>
+          ))}
+        </select>
+        {busy && <span className="spinner small" />}
+      </label>
+      <p className="muted panel-note">
+        {current
+          ? `New messages disappear ${durationLabel(current)} after they've been read.`
+          : 'Off. When on, new messages disappear for everyone after they have been read.'}{' '}
+        Signal's API can't switch the timer off; use your phone for that.
+      </p>
+      {error && <p className="form-error">{error}</p>}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/** Search inside the open chat; picking a result jumps to it. */
+export function SearchPanel({ conversation }: { conversation: Conversation }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<SearchResult[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const id = conversation.id;
+
+  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) return setResults(null);
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api
+        .search(term, id)
+        .then((r) => !cancelled && (setResults(r.results), setError(null)))
+        .catch((e) => !cancelled && setError(e.message));
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [q, id]);
+
+  return (
+    <aside className="panel" aria-label="Search messages">
+      <PanelHead title="Search messages" />
+      <div className="panel-body">
+        <div className="search panel-search">
+          <Icon name="search" size={18} />
+          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search in ${conversation.title}`} aria-label="Search messages" />
+        </div>
+        {error && <p className="form-error pad">{error}</p>}
+        {results && !results.length && <p className="muted panel-empty">No messages found.</p>}
+        {!results && <p className="muted panel-empty">Search the messages Signal Web has for this chat.</p>}
+        <ul className="search-results">
+          {results?.map((r) => (
+            <li key={r.id}>
+              <button onClick={() => void jumpToMessage(r.conversationId, r.sentAt).catch((e) => setError(e.message))}>
+                <span className="search-result-top">
+                  <strong>{r.outgoing ? 'You' : r.authorName}</strong>
+                  <time>{formatListTime(r.sentAt)}</time>
+                </span>
+                <Highlight text={r.snippet} term={q.trim()} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </aside>
+  );
+}
+
+export function Highlight({ text, term }: { text: string; term: string }) {
+  if (!term) return <span className="snippet">{text}</span>;
+  const lower = text.toLowerCase();
+  const t = term.toLowerCase();
+  const parts: ReactNode[] = [];
+  let pos = 0;
+  for (let at = lower.indexOf(t); at >= 0 && t; at = lower.indexOf(t, at + t.length)) {
+    parts.push(text.slice(pos, at), <mark key={at}>{text.slice(at, at + t.length)}</mark>);
+    pos = at + t.length;
+  }
+  parts.push(text.slice(pos));
+  return <span className="snippet">{parts}</span>;
 }
 
 // ---------------------------------------------------------------------------

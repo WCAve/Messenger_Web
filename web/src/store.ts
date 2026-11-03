@@ -14,10 +14,14 @@ export interface State {
   conversations: Record<number, Conversation>;
   messages: Record<number, Message[]>; // by conversation, sorted by sentAt
   hasMore: Record<number, boolean>;
+  /** True while a chat shows an older stretch of history (after jumping to a search result). */
+  hasNewer: Record<number, boolean>;
+  /** Scroll to and highlight this message once it's in the list. */
+  focus: { conversationId: number; sentAt: number; nonce: number } | null;
   typing: Record<number, Typing[]>;
   activeId: number | null;
   /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
-  panel: { kind: 'chat' } | { kind: 'message'; messageId: number } | null;
+  panel: { kind: 'chat' } | { kind: 'search' } | { kind: 'message'; messageId: number } | null;
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
 }
@@ -28,6 +32,8 @@ let state: State = {
   conversations: {},
   messages: {},
   hasMore: {},
+  hasNewer: {},
+  focus: null,
   typing: {},
   activeId: null,
   panel: null,
@@ -68,6 +74,25 @@ export function upsertMessages(conversationId: number, incoming: Message[], opts
   });
 }
 
+/** Replace a chat's loaded messages, e.g. with the stretch around a search result. */
+export function replaceMessages(conversationId: number, list: Message[], opts: { hasMore: boolean; hasNewer: boolean }) {
+  setState((s) => ({
+    messages: { ...s.messages, [conversationId]: sortMessages([...list]) },
+    hasMore: { ...s.hasMore, [conversationId]: opts.hasMore },
+    hasNewer: { ...s.hasNewer, [conversationId]: opts.hasNewer },
+  }));
+}
+
+export function setHasNewer(conversationId: number, v: boolean) {
+  setState((s) => ({ hasNewer: { ...s.hasNewer, [conversationId]: v } }));
+}
+
+function removeMessage(conversationId: number, messageId: number) {
+  const list = state.messages[conversationId];
+  if (!list?.some((m) => m.id === messageId)) return;
+  setState((s) => ({ messages: { ...s.messages, [conversationId]: list.filter((m) => m.id !== messageId) } }));
+}
+
 export function upsertConversation(c: Conversation) {
   setState((s) => ({ conversations: { ...s.conversations, [c.id]: c } }));
 }
@@ -81,10 +106,21 @@ export function applyEvent(e: ServerEvent) {
       upsertConversation(e.conversation);
       break;
     case 'message':
-      // Only keep messages for conversations we've loaded; others are fetched when opened.
-      if (state.messages[e.message.conversationId]) upsertMessages(e.message.conversationId, [e.message]);
+      // Only keep messages for conversations we've loaded; others are fetched when opened. While a chat
+      // shows an older stretch of history, new messages arrive when scrolling down instead.
+      if (state.messages[e.message.conversationId]) {
+        const list = state.messages[e.message.conversationId];
+        const known = list.some((m) => m.id === e.message.id);
+        const last = list[list.length - 1];
+        if (known || !state.hasNewer[e.message.conversationId] || (last && e.message.sentAt < last.sentAt)) {
+          upsertMessages(e.message.conversationId, [e.message]);
+        }
+      }
       if (e.message.outgoing) setState((s) => ({ receiptTick: s.receiptTick + 1 }));
       if (!e.message.outgoing) clearTyping(e.message.conversationId, e.message.author);
+      break;
+    case 'remove':
+      removeMessage(e.conversationId, e.messageId);
       break;
     case 'receipt':
       setState((s) => ({ receiptTick: s.receiptTick + 1 }));
@@ -107,9 +143,15 @@ function clearTyping(conversationId: number, author: string) {
   setState((s) => ({ typing: { ...s.typing, [conversationId]: list.filter((t) => t.author !== author) } }));
 }
 
-// Typing indicators expire if we never get the "stopped" event.
+// Typing indicators expire if we never get the "stopped" event. Disappearing messages are removed by
+// the server; this only catches one whose removal we missed while disconnected.
 setInterval(() => {
   const now = Date.now();
+  for (const [id, list] of Object.entries(state.messages)) {
+    if (list.some((m) => m.expiresAt && m.expiresAt < now - 5000)) {
+      setState((s) => ({ messages: { ...s.messages, [id]: list.filter((m) => !m.expiresAt || m.expiresAt >= now - 5000) } }));
+    }
+  }
   let changed = false;
   const typing: State['typing'] = {};
   for (const [id, list] of Object.entries(state.typing)) {

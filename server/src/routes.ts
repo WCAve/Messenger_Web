@@ -4,7 +4,8 @@ import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachment
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
-import { applyPendingReceipts } from './ingest.js';
+import { applyPendingReceipts, humanDuration } from './ingest.js';
+import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import {
   SESSION_COOKIE,
   clearLoginFailures,
@@ -40,7 +41,12 @@ import {
   listConversations,
   listGroups,
   listMessages,
+  listMessagesAfter,
+  listMessagesAround,
   markConversationRead,
+  renderBody,
+  searchMessages,
+  setConversationTimer,
   messageDto,
   messageReceipts,
   recipientFor,
@@ -97,6 +103,40 @@ function emitMessageRow(id: number, fields: Parameters<typeof updateMessage>[1])
   return updated;
 }
 
+/**
+ * Message text from the browser: plain text (U+FFFC where a mention goes) with style and mention
+ * ranges. Returns what to store and what to hand the Signal API.
+ */
+function richInput(body: Json): { text: string; ranges: Ranges | null } {
+  const raw = String(body?.text ?? '');
+  // Trim, moving the ranges along with the text.
+  const lead = raw.length - raw.trimStart().length;
+  const text = raw.trim();
+  const shift = (list: unknown) =>
+    Array.isArray(list) ? list.map((r) => (r && typeof r === 'object' ? { ...r, start: (r as { start: number }).start - lead } : r)) : undefined;
+  const ranges = cleanRanges(text, { mentions: shift(body?.mentions), styles: shift(body?.styles) });
+  if (ranges?.mentions) {
+    for (const m of ranges.mentions) {
+      if (m.key !== 'self' && !contactByKeyOrId(m.key)) throw new HttpError(400, 'Unknown person in a mention');
+    }
+  }
+  return { text, ranges };
+}
+
+/** Fields of a /v2/send call for this text: styled markup and mention positions. */
+function apiText(text: string, ranges: Ranges | null) {
+  const mentions = ranges?.mentions?.map((m) => ({ start: m.start, length: m.length, author: addressForKey(m.key) }));
+  const styled = ranges?.styles?.length ? toApiMarkup(text, ranges.styles) : null;
+  return {
+    message: styled ? styled.message : text,
+    text_mode: styled ? ('styled' as const) : undefined,
+    mentions: mentions?.length ? mentions : undefined,
+  };
+}
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Json = any;
+
 /** Hand a stored message to signal-cli and record the outcome. */
 async function deliver(
   account: string,
@@ -104,6 +144,7 @@ async function deliver(
   messageId: number,
   payload: {
     text: string;
+    ranges?: Ranges | null;
     base64: string[];
     quote?: { sentTs: number; author: string; text?: string | null } | null;
     sticker?: { packId: string; stickerId: number } | null;
@@ -114,7 +155,7 @@ async function deliver(
     const res = await signalApi.send({
       number: account,
       recipients: [recipientFor(c)],
-      message: payload.text,
+      ...apiText(payload.text, payload.ranges ?? null),
       base64_attachments: payload.base64.length ? payload.base64 : undefined,
       quote_timestamp: payload.quote?.sentTs,
       quote_author: payload.quote ? addressForKey(payload.quote.author) : undefined,
@@ -371,14 +412,54 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const c = conv(ctx);
     const limit = Math.min(Math.max(Number(ctx.query.get('limit')) || 50, 1), 200);
     const before = ctx.query.get('before') ? Number(ctx.query.get('before')) : undefined;
+    const after = ctx.query.get('after');
+    const around = ctx.query.get('around');
+    if (around) return listMessagesAround(c.id, Number(around), limit);
+    if (after) return listMessagesAfter(c.id, Number(after), limit);
     return listMessages(c.id, before, limit);
+  });
+
+  r.get('/api/search', (ctx) => {
+    const q = (ctx.query.get('q') ?? '').trim();
+    if (q.length < 2) return { results: [] };
+    const cid = ctx.query.get('conversationId');
+    return { results: searchMessages(q.slice(0, 100), cid ? Number(cid) : undefined) };
+  });
+
+  // Disappearing messages timer for a chat. The API can't switch it off (a 0 gets dropped).
+  r.post('/api/conversations/:id/timer', async (ctx) => {
+    const account = requireAccount();
+    const c = conv(ctx);
+    const seconds = Number(ctx.body?.seconds);
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 365 * 86400) throw new HttpError(400, 'Choose a timer');
+    try {
+      if (c.kind === 'group') await signalApi.updateGroup(account, groupRecipientId(c.group_id!), { expiration_time: seconds });
+      else await signalApi.updateContact(account, { recipient: recipientFor(c), expiration_in_seconds: seconds });
+    } catch (e) {
+      const msg = (e as Error).message;
+      throw new HttpError(400, /permission|not allowed|admin/i.test(msg) ? 'Only group admins can change the timer in this group.' : msg.replace(/^.*?failed \(\d+\): /, ''));
+    }
+    setConversationTimer(c.id, seconds);
+    const line = insertMessage({
+      conversationId: c.id,
+      sentTs: Date.now(),
+      author: 'self',
+      outgoing: true,
+      kind: 'system',
+      body: `You set disappearing messages to ${humanDuration(seconds)}`,
+      read: true,
+    });
+    if (line) broadcast({ type: 'message', message: messageDto(line) });
+    const updated = getConversation(c.id)!;
+    emitConversation(updated);
+    return conversationDto(updated);
   });
 
   // Send a message. Returns immediately with a "pending" message; delivery status follows over /api/events.
   r.post('/api/conversations/:id/messages', (ctx) => {
     const account = requireAccount();
     const c = conv(ctx);
-    const text = String(ctx.body?.text ?? '').trim();
+    const { text, ranges } = richInput(ctx.body);
     const files: { name?: string; type?: string; data: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
     const rawSticker = ctx.body?.sticker;
     const sticker =
@@ -404,28 +485,33 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
     const quote =
       quoted && quoted.conversation_id === c.id && !quoted.deleted
-        ? { sentTs: quoted.sent_ts, author: quoted.author, text: quoted.body ?? '' }
+        ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' }
         : null;
 
+    const now = Date.now();
     const pending = insertMessage({
       conversationId: c.id,
-      sentTs: Date.now(),
+      sentTs: now,
       author: 'self',
       authorNumber: account,
       outgoing: true,
       kind: sticker ? 'sticker' : 'message',
       body: text || null,
+      ranges,
       attachments,
       quote,
       status: 'pending',
       read: true,
       sticker,
+      // signal-cli applies the chat's disappearing timer to everything it sends.
+      expiresIn: c.expire_timer || 0,
+      expiresAt: c.expire_timer ? now + c.expire_timer * 1000 : null,
     });
     if (!pending) throw new HttpError(409, 'Duplicate message, try again');
     const dto = messageDto(pending);
     broadcast({ type: 'message', message: dto });
     emitConversation(getConversation(c.id)!);
-    void deliver(account, c, pending.id, { text, base64, quote, sticker }, (m) => log('warn', m));
+    void deliver(account, c, pending.id, { text, ranges, base64, quote, sticker }, (m) => log('warn', m));
     return dto;
   });
 
@@ -449,25 +535,26 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/messages/:id/edit', async (ctx) => {
     const account = requireAccount();
     const m = message(ctx);
-    const text = String(ctx.body?.text ?? '').trim();
+    const { text, ranges } = richInput(ctx.body);
     if (!m.outgoing || m.deleted || m.kind !== 'message' || m.attachments) throw new HttpError(400, 'Only your own text messages can be edited');
     if (m.status === 'pending' || m.status === 'failed') throw new HttpError(400, 'This message has not been sent yet');
     if (!m.ts_confirmed) throw new HttpError(400, "This message was sent before editing was supported and can't be edited");
     if (Date.now() - m.sent_ts > EDIT_WINDOW_MS) throw new HttpError(400, 'Messages can only be edited for 24 hours after sending');
     if (!text) throw new HttpError(400, 'A message can’t be empty. Delete it instead.');
-    if (text === m.body) return messageDto(m);
+    const rangesJson = ranges ? JSON.stringify(ranges) : null;
+    if (text === m.body && rangesJson === m.ranges) return messageDto(m);
     const c = getConversation(m.conversation_id)!;
     const quote = m.quote ? (JSON.parse(m.quote) as { sentTs: number; author: string; text?: string | null }) : null;
     await signalApi.send({
       number: account,
       recipients: [recipientFor(c)],
-      message: text,
+      ...apiText(text, ranges),
       edit_timestamp: m.sent_ts, // always the original message's timestamp, also for later edits
       quote_timestamp: quote?.sentTs,
       quote_author: quote ? addressForKey(quote.author) : undefined,
       quote_message: quote ? quote.text ?? '' : undefined,
     });
-    const updated = emitMessageRow(m.id, { body: text, edited: 1 })!;
+    const updated = emitMessageRow(m.id, { body: text, ranges: rangesJson, preview: null, edited: 1 })!;
     emitConversation(c);
     return messageDto(updated);
   });

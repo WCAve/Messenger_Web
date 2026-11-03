@@ -88,7 +88,8 @@ export const signalApi = {
     edit_timestamp?: number;
     text_mode?: 'normal' | 'styled';
     sticker?: string; // "<pack_id>:<sticker_id>"
-
+    /** Positions in the message *after* the API strips the text_mode=styled markup. */
+    mentions?: { start: number; length: number; author: string }[];
   }) => call<SendResponse>('POST', '/v2/send', body, 180_000),
 
   react: (number: string, body: { recipient: string; reaction: string; target_author: string; timestamp: number }) =>
@@ -105,8 +106,14 @@ export const signalApi = {
   /** Note: the API removes your profile picture when base64_avatar is left out. */
   updateProfile: (number: string, body: { name: string; about?: string; base64_avatar?: string }) =>
     call<void>('PUT', `/v1/profiles/${enc(number)}`, body, 120_000),
-  updateGroup: (number: string, groupId: string, body: { base64_avatar?: string; name?: string; description?: string }) =>
+  updateGroup: (number: string, groupId: string, body: { base64_avatar?: string; name?: string; description?: string; expiration_time?: number }) =>
     call<void>('PUT', `/v1/groups/${enc(number)}/${enc(groupId)}`, body, 120_000),
+
+  /** Note: in json-rpc mode a timer of 0 is dropped by the API, so this can't switch the timer off. */
+  updateContact: (number: string, body: { recipient: string; expiration_in_seconds?: number }) =>
+    call<void>('PUT', `/v1/contacts/${enc(number)}`, body, 60_000),
+
+  deleteAttachment: (id: string) => call<void>('DELETE', `/v1/attachments/${enc(id)}`, undefined, 10_000),
 
   receipt: (number: string, body: { recipient: string; receipt_type: 'read' | 'viewed'; timestamp: number }) =>
     call<void>('POST', `/v1/receipts/${enc(number)}`, body),

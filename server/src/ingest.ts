@@ -26,7 +26,9 @@ import {
   upsertContact,
 } from './store.js';
 import { db } from './db.js';
-import type { MessageRow } from './store.js';
+import type { LinkPreview, MessageRow } from './store.js';
+import { setConversationTimer } from './store.js';
+import { type Ranges, cleanRanges } from './richtext.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
@@ -66,6 +68,27 @@ function resolveMentions(text: string | undefined | null, mentions: Json[] | und
     out = out.slice(0, m.start) + '@' + id + out.slice(m.start + (m.length || 1));
   }
   return out;
+}
+
+/**
+ * Signal's own format: the body keeps a U+FFFC where each mention goes, and mentions and styles are
+ * ranges over it. Names are filled in when the message is shown.
+ */
+function richFromSignal(text: string | null | undefined, mentions: Json[] | undefined, textStyles: Json[] | undefined): { body: string | null; ranges: Ranges | null } {
+  if (!text) return { body: text ?? null, ranges: null };
+  const ms = (mentions ?? []).map((m) => {
+    if (m.uuid || m.number) upsertContact({ uuid: m.uuid || null, number: m.number || null });
+    return { start: m.start, length: m.length || 1, key: contactKey(m.uuid || null, m.number || null) };
+  }).filter((m) => m.key !== 'unknown');
+  const styles = (textStyles ?? []).map((t) => ({ start: t.start, length: t.length, style: t.style }));
+  return { body: text, ranges: cleanRanges(text, { mentions: ms, styles }) };
+}
+
+function mapPreview(list: Json[] | undefined): LinkPreview | null {
+  const p = list?.find((x) => typeof x?.url === 'string' && /^https?:\/\//i.test(x.url));
+  if (!p) return null;
+  const [image] = p.image ? mapAttachments([p.image]) : [];
+  return { url: p.url, title: p.title || null, description: p.description || null, image: image ?? null };
 }
 
 function mapAttachments(list: Json[] | undefined): Attachment[] {
@@ -109,7 +132,17 @@ function applyEdit(conv: ConversationRow, edit: Json) {
   const target = findMessage(conv.id, edit.targetSentTimestamp);
   if (!target) return;
   const dm = edit.dataMessage ?? {};
-  emitMessage(updateMessage(target.id, { body: resolveMentions(dm.message, dm.mentions), edited: 1 }));
+  const rich = richFromSignal(dm.message, dm.mentions, dm.textStyles);
+  const preview = mapPreview(dm.previews);
+  emitMessage(
+    updateMessage(target.id, {
+      body: rich.body,
+      ranges: rich.ranges ? JSON.stringify(rich.ranges) : null,
+      preview: preview ? JSON.stringify(preview) : null,
+      edited: 1,
+    }),
+  );
+  if (preview?.image) fetchAttachment(preview.image.id).catch(() => {});
   emitConversation(conv);
 }
 
@@ -126,8 +159,26 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
   if (dm.editMessage) return applyEdit(conv, dm.editMessage);
 
   const attachments = mapAttachments(dm.attachments);
-  let body = resolveMentions(dm.message, dm.mentions);
+  const rich = richFromSignal(dm.message, dm.mentions, dm.textStyles);
+  let body = rich.body;
+  let ranges = rich.ranges;
+  const preview = mapPreview(dm.previews);
   let kind = 'message';
+
+  // Disappearing messages: every message carries the chat's current timer.
+  const expiresIn = Math.max(0, Number(dm.expiresInSeconds) || 0);
+  const timerChanged = expiresIn !== (conv.expire_timer || 0);
+  const who = outgoing ? 'You' : nameForKey(authorKey);
+  if (dm.isExpirationUpdate || (dm.groupInfo?.type === 'UPDATE' && timerChanged)) {
+    setConversationTimer(conv.id, expiresIn);
+    if (!body && !attachments.length && !dm.sticker) {
+      body = expiresIn ? `${who} set disappearing messages to ${humanDuration(expiresIn)}` : `${who} turned off disappearing messages`;
+      ranges = null;
+      kind = 'system';
+    }
+  } else if (timerChanged && (body || attachments.length || dm.sticker)) {
+    setConversationTimer(conv.id, expiresIn);
+  }
   let sticker: { packId: string; stickerId: number } | null = null;
   if (dm.sticker?.packId && Number.isInteger(dm.sticker.stickerId)) {
     kind = 'sticker';
@@ -140,11 +191,7 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     kind = 'system';
   }
   if (!body && !attachments.length && kind === 'message') {
-    if (dm.isExpirationUpdate) {
-      const s = dm.expiresInSeconds ?? 0;
-      body = s ? `Disappearing messages set to ${humanDuration(s)}` : 'Disappearing messages turned off';
-      kind = 'system';
-    } else if (dm.pollCreate) {
+    if (dm.pollCreate) {
       body = `📊 Poll: ${dm.pollCreate.question}`;
     } else {
       return; // profile key updates, group updates, typing-only payloads, etc.
@@ -172,8 +219,14 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     status: outgoing ? 'sent' : null,
     read: outgoing,
     sticker,
+    ranges: kind === 'system' ? null : ranges,
+    preview,
+    expiresIn: kind === 'system' ? 0 : expiresIn,
+    // Your own messages start counting down when sent; received ones once you've read them.
+    expiresAt: kind !== 'system' && expiresIn && outgoing ? dm.timestamp + expiresIn * 1000 : null,
   });
   if (!row) return; // duplicate delivery
+  if (preview?.image) fetchAttachment(preview.image.id).then((ok) => ok && emitMessage(getMessage(row.id)));
   if (sticker && self.number) {
     // Fetch the pack now so the sticker (and its emoji) is ready when someone opens the chat.
     const s = sticker;
@@ -225,7 +278,7 @@ export function markGifVideos(messageId: number) {
   if (changed) emitMessage(updateMessage(m.id, { attachments: JSON.stringify(atts) }));
 }
 
-function humanDuration(s: number) {
+export function humanDuration(s: number) {
   if (s % 604800 === 0) return `${s / 604800} week${s === 604800 ? '' : 's'}`;
   if (s % 86400 === 0) return `${s / 86400} day${s === 86400 ? '' : 's'}`;
   if (s % 3600 === 0) return `${s / 3600} hour${s === 3600 ? '' : 's'}`;

@@ -97,3 +97,32 @@ export async function squareAvatar(file: File, size = 640): Promise<string> {
     URL.revokeObjectURL(url);
   }
 }
+
+/** Disappearing-message timers, as Signal offers them. */
+export const TIMER_OPTIONS = [30, 300, 3600, 8 * 3600, 86400, 7 * 86400, 28 * 86400];
+
+export function durationLabel(s: number, short = false): string {
+  const units: [number, string, string][] = [
+    [7 * 86400, 'w', 'week'],
+    [86400, 'd', 'day'],
+    [3600, 'h', 'hour'],
+    [60, 'm', 'minute'],
+    [1, 's', 'second'],
+  ];
+  for (const [size, abbr, word] of units) {
+    if (s >= size && s % size === 0) {
+      const n = s / size;
+      return short ? `${n}${abbr}` : `${n} ${word}${n === 1 ? '' : 's'}`;
+    }
+  }
+  return short ? `${s}s` : `${s} seconds`;
+}
+
+/** "in 3 hours", for a moment in the future. */
+export function untilLabel(ts: number): string {
+  const s = Math.max(0, Math.round((ts - Date.now()) / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  if (s < 86400) return `${Math.round(s / 3600)} h`;
+  return `${Math.round(s / 86400)} days`;
+}

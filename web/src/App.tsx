@@ -1,7 +1,8 @@
 import { type CSSProperties, useEffect, useState } from 'react';
 import { api, onUnauthorized } from './api';
 import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
-import { ChatInfoPanel, MessageInfoPanel } from './components/InfoPanel';
+import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
+import { hideSpoilers } from './format';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar, SidebarResizer } from './components/Sidebar';
@@ -36,7 +37,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
 
   // Message info belongs to one chat: close it when switching chats.
   useEffect(() => {
-    setState((s) => (s.panel?.kind === 'message' ? { panel: null } : {}));
+    setState((s) => (s.panel?.kind === 'message' || s.panel?.kind === 'search' ? { panel: null } : {}));
   }, [activeId]);
 
   useLiveEvents();
@@ -93,6 +94,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
         <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt) => setLightbox({ att, authorName, sentAt })} />
       )}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
+      {active && panel?.kind === 'search' && <SearchPanel conversation={active} />}
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
@@ -110,6 +112,7 @@ function useLiveEvents() {
         setState((s) => ({ conversations: Object.fromEntries(list.map((c) => [c.id, c])), messages: { ...s.messages } }));
         // Refresh the newest page of every chat we have open in memory.
         for (const id of Object.keys(getState().messages).map(Number)) {
+          if (getState().hasNewer[id]) continue; // looking at older history; newer ones load on scroll
           api.messages(id).then((msgs) => upsertMessages(id, msgs)).catch(() => {});
         }
       } catch {
@@ -164,7 +167,7 @@ function notify(e: Extract<ServerEvent, { type: 'message' }>) {
     ? 'New message'
     : m.kind === 'sticker'
       ? [m.sticker?.emoji, 'Sticker'].filter(Boolean).join(' ')
-      : m.body ?? (m.attachments.length ? 'Sent an attachment' : 'New message');
+      : (m.body ? hideSpoilers(m.body, m.styles) : null) ?? (m.attachments.length ? 'Sent an attachment' : 'New message');
   const n = new Notification(title, { body, tag: `conv-${m.conversationId}`, icon: '/icon.svg' });
   n.onclick = () => {
     window.focus();

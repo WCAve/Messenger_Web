@@ -1,10 +1,12 @@
-import { type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
+import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
+import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs } from '../prefs';
-import { getState, setState, upsertMessages, useStore } from '../store';
-import type { Attachment, Conversation, Message } from '../types';
-import { fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay } from '../util';
+import { getState, setHasNewer, setState, upsertMessages, useStore } from '../store';
+import type { Attachment, Conversation, LinkPreview, Message } from '../types';
+import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { Avatar, Icon, StatusMark } from './ui';
 
@@ -45,6 +47,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const hasMore = useStore((s) => s.hasMore[id] ?? true);
   const typing = useStore((s) => s.typing[id] ?? NO_TYPING);
   const connected = useStore((s) => s.signal.status === 'connected');
+  const panel = useStore((s) => s.panel?.kind ?? null);
+  const hasNewer = useStore((s) => s.hasNewer[id] ?? false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [reactTo, setReactTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
@@ -120,9 +124,25 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         <button className="chat-head-main" onClick={openInfo} title={conversation.kind === 'group' ? 'Group info' : 'Contact info'}>
           <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={conversation.kind === 'group'} size={40} src={conversation.avatar} />
           <span className="chat-head-text">
-            <h2>{conversation.title}</h2>
+            <h2>
+              {conversation.title}
+              {conversation.expireTimer > 0 && (
+                <span className="timer-badge" title={`Disappearing messages: ${durationLabel(conversation.expireTimer)}`}>
+                  <Icon name="timer" size={14} />
+                  {durationLabel(conversation.expireTimer, true)}
+                </span>
+              )}
+            </h2>
             <p className={typing.length ? 'typing-text' : undefined}>{subtitle}</p>
           </span>
+        </button>
+        <button
+          className={`icon-btn${panel === 'search' ? ' on' : ''}`}
+          onClick={() => setState((s) => ({ panel: s.panel?.kind === 'search' ? null : { kind: 'search' } }))}
+          aria-label="Search in this chat"
+          title="Search in this chat"
+        >
+          <Icon name="search" />
         </button>
       </header>
 
@@ -135,6 +155,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           conversation={conversation}
           messages={messages}
           hasMore={hasMore}
+          hasNewer={hasNewer}
           onReply={(m) => (setEditing(null), setReplyTo(m))}
           onEdit={(m) => (setReplyTo(null), setEditing(m))}
           onMoreReactions={setReactTo}
@@ -167,6 +188,7 @@ function MessageList({
   conversation,
   messages,
   hasMore,
+  hasNewer,
   onReply,
   onEdit,
   onMoreReactions,
@@ -175,6 +197,7 @@ function MessageList({
   conversation: Conversation;
   messages: Message[] | undefined;
   hasMore: boolean;
+  hasNewer: boolean;
   onReply: (m: Message) => void;
   onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
@@ -184,25 +207,46 @@ function MessageList({
   const stick = useRef(true); // keep pinned to the bottom while the user is there
   const prevHeight = useRef(0);
   const loadingOlder = useRef(false);
+  const loadingNewer = useRef(false);
+  const prevLastId = useRef<number | undefined>(undefined);
   const [selected, setSelected] = useState<number | null>(null);
+  const [away, setAway] = useState(false); // scrolled up from the newest messages
+  const focus = useStore((s) => s.focus);
   const id = conversation.id;
   const last = messages?.[messages.length - 1];
 
   useLayoutEffect(() => {
     stick.current = true;
+    setAway(false);
   }, [id]);
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const newLast = last?.id !== prevLastId.current;
+    prevLastId.current = last?.id;
     if (loadingOlder.current) {
       el.scrollTop += el.scrollHeight - prevHeight.current; // keep position after prepending
       loadingOlder.current = false;
-    } else if (stick.current || last?.outgoing) {
+    } else if (loadingNewer.current) {
+      loadingNewer.current = false; // appended below: nothing moves
+    } else if (!hasNewer && (stick.current || (newLast && last?.outgoing))) {
       el.scrollTop = el.scrollHeight;
     }
     prevHeight.current = el.scrollHeight;
-  }, [messages, last?.outgoing]);
+  }, [messages, last?.id, last?.outgoing, hasNewer]);
+
+  // Jump to a message (search result, quote): scroll it into view and flash it.
+  useEffect(() => {
+    if (!focus || focus.conversationId !== id || !messages) return;
+    const el = ref.current?.querySelector<HTMLElement>(`[data-ts="${focus.sentAt}"]`);
+    if (!el) return;
+    stick.current = false;
+    el.scrollIntoView({ block: 'center' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1600);
+    setState({ focus: null });
+  }, [focus, id, messages]);
 
   // The list gets shorter when the composer grows (reply/edit bar, pickers): stay pinned to the bottom.
   useEffect(() => {
@@ -234,16 +278,43 @@ function MessageList({
     }
   }, [id, hasMore, messages]);
 
+  const loadNewer = useCallback(async () => {
+    if (loadingNewer.current || !hasNewer || !messages?.length) return;
+    loadingNewer.current = true;
+    try {
+      const newer = await api.messagesAfter(id, messages[messages.length - 1].sentAt, PAGE);
+      if (!newer.length) loadingNewer.current = false;
+      upsertMessages(id, newer);
+      setHasNewer(id, newer.length === PAGE);
+    } catch {
+      loadingNewer.current = false;
+    }
+  }, [id, hasNewer, messages]);
+
   function onScroll() {
     const el = ref.current!;
-    stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stick.current = !hasNewer && fromBottom < 80;
+    setAway(hasNewer || fromBottom > 400);
     if (el.scrollTop < 200) void loadOlder();
+    if (hasNewer && fromBottom < 300) void loadNewer();
+  }
+
+  async function toLatest() {
+    if (hasNewer) await loadLatest(id).catch(() => {});
+    stick.current = true;
+    setAway(false);
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }
 
   const jumpTo = (sentAt: number) => {
     const el = ref.current?.querySelector<HTMLElement>(`[data-ts="${sentAt}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!el) {
+      void jumpToMessage(id, sentAt).catch(() => {}); // not loaded: fetch the messages around it
+      return;
+    }
+    el.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
     el.classList.add('flash');
     setTimeout(() => el.classList.remove('flash'), 1400);
   };
@@ -280,37 +351,98 @@ function MessageList({
   });
 
   return (
-    <div className="messages" ref={ref} onScroll={onScroll} role="log" aria-live="polite">
-      <div className="messages-inner">
-        {!hasMore && (
-          <p className="history-start">
-            {messages.length ? 'Start of the history on Signal Web. Earlier messages are on your phone.' : 'No messages yet. Say hi.'}
-          </p>
-        )}
-        {items}
+    <div className="messages-wrap">
+      <div className="messages" ref={ref} onScroll={onScroll} role="log" aria-live={hasNewer ? 'off' : 'polite'}>
+        <div className="messages-inner">
+          {!hasMore && (
+            <p className="history-start">
+              {messages.length ? 'Start of the history on Signal Web. Earlier messages are on your phone.' : 'No messages yet. Say hi.'}
+            </p>
+          )}
+          {items}
+        </div>
       </div>
+      {(away || hasNewer) && (
+        <button className="to-latest" onClick={() => void toLatest()} aria-label="Jump to the newest messages" title="Jump to the newest messages">
+          <Icon name="down" size={24} />
+          {conversation.unread > 0 && <span className="badge">{conversation.unread > 99 ? '99+' : conversation.unread}</span>}
+        </button>
+      )}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 
-const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,:;"')\]!?])/g;
-
-function Linkified({ text }: { text: string }) {
-  const parts = text.split(URL_RE);
+/** Message text with bold/italic/… styles, highlighted mentions, links and click-to-reveal spoilers. */
+function RichBody({ m }: { m: Message }) {
+  const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
+  const list = pieces(m.body ?? '', m.styles, m.mentions);
   return (
     <>
-      {parts.map((p, i) =>
-        i % 2 === 1 ? (
-          <a key={i} href={p} target="_blank" rel="noopener noreferrer">
-            {p}
-          </a>
-        ) : (
-          p
-        ),
-      )}
+      {list.map((p, i) => {
+        let node: ReactNode = p.text;
+        if (p.styles.has('MONOSPACE')) node = <code>{node}</code>;
+        if (p.styles.has('BOLD')) node = <strong>{node}</strong>;
+        if (p.styles.has('ITALIC')) node = <em>{node}</em>;
+        if (p.styles.has('STRIKETHROUGH')) node = <s>{node}</s>;
+        if (p.mention) {
+          node = (
+            <span className={`mention${p.mention.key === 'self' ? ' mention-me' : ''}`} style={{ ['--hue' as string]: hueFor(p.mention.key) }}>
+              {node}
+            </span>
+          );
+        }
+        if (p.link) {
+          node = (
+            <a href={p.link} target="_blank" rel="noopener noreferrer">
+              {node}
+            </a>
+          );
+        }
+        if (p.spoilerId !== undefined && !revealed.has(p.spoilerId)) {
+          const sid = p.spoilerId;
+          const reveal = (e: { preventDefault(): void; stopPropagation(): void }) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setRevealed((r) => new Set(r).add(sid));
+          };
+          node = (
+            <span
+              className="spoiler"
+              role="button"
+              tabIndex={0}
+              aria-label="Spoiler, click to reveal"
+              title="Click to reveal"
+              onClick={reveal}
+              onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && reveal(e)}
+            >
+              {node}
+            </span>
+          );
+        }
+        return <Fragment key={i}>{node}</Fragment>;
+      })}
     </>
+  );
+}
+
+function LinkPreviewCard({ p, onLoad }: { p: LinkPreview; onLoad: () => void }) {
+  let host = p.url;
+  try {
+    host = new URL(p.url).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep the raw url */
+  }
+  return (
+    <a className={`link-preview${p.image ? ' with-image' : ''}`} href={p.url} target="_blank" rel="noopener noreferrer">
+      {p.image && <img src={attachmentUrl(p.image.id)} alt="" loading="lazy" onLoad={onLoad} onError={(e) => (e.currentTarget.style.display = 'none')} />}
+      <span className="link-preview-text">
+        <strong>{p.title || host}</strong>
+        {p.description && <span className="link-preview-desc">{p.description}</span>}
+        <small>{host}</small>
+      </span>
+    </a>
   );
 }
 
@@ -442,6 +574,7 @@ const MessageItem = memo(function MessageItem({
         {others.map((a) => (
           <AttachmentView key={a.id} a={a} />
         ))}
+        {!m.deleted && m.preview && <LinkPreviewCard p={m.preview} onLoad={onMediaLoad} />}
         {m.deleted ? (
           <p className="body">
             <em>{m.outgoing ? 'You deleted this message' : 'This message was deleted'}</em>
@@ -455,11 +588,16 @@ const MessageItem = memo(function MessageItem({
         ) : (
           m.body && (
             <p className="body">
-              <Linkified text={m.body} />
+              <RichBody m={m} />
             </p>
           )
         )}
         <span className="meta">
+          {!!m.expiresIn && (
+            <span className="expiry" title={m.expiresAt ? `Disappears in ${untilLabel(m.expiresAt)}` : `Disappears ${durationLabel(m.expiresIn)} after you read it`}>
+              <Icon name="timer" size={12} />
+            </span>
+          )}
           {m.edited && <span>edited</span>}
           <time dateTime={new Date(m.sentAt).toISOString()}>{formatTime(m.sentAt)}</time>
           {m.outgoing && <StatusMark status={m.status} />}
@@ -626,6 +764,28 @@ interface Pending {
   preview?: string;
 }
 
+/** The "@name" being typed right before the caret, if any (group chats). */
+function mentionAtCaret(text: string, caret: number): { start: number; term: string } | null {
+  const m = /(^|[\s(])@([^\s@]{0,30})$/u.exec(text.slice(0, caret));
+  if (!m) return null;
+  return { start: caret - m[2].length - 1, term: m[2] };
+}
+
+/** Wrap the selection in a formatting marker (Ctrl+B and friends). */
+function wrapSelection(el: HTMLTextAreaElement, text: string, mark: string): { value: string; caret: number; end: number } {
+  const start = el.selectionStart ?? text.length;
+  const end = el.selectionEnd ?? start;
+  const sel = text.slice(start, end);
+  if (sel.startsWith(mark) && sel.endsWith(mark) && sel.length >= mark.length * 2) {
+    const inner = sel.slice(mark.length, sel.length - mark.length); // toggle off
+    return { value: text.slice(0, start) + inner + text.slice(end), caret: start, end: start + inner.length };
+  }
+  const value = text.slice(0, start) + mark + sel + mark + text.slice(end);
+  return sel ? { value, caret: start, end: end + mark.length * 2 } : { value, caret: start + mark.length, end: start + mark.length };
+}
+
+const SHORTCUTS: Record<string, string> = { b: '*', i: '_', x: '~', m: '`' }; // x and m with Shift
+
 /** The ":shortcode" being typed right before the caret, if any. */
 function shortcodeAtCaret(text: string, caret: number): { start: number; term: string } | null {
   const m = /(^|[\s(])(:[a-z0-9_+-]{2,40})$/i.exec(text.slice(0, caret));
@@ -662,6 +822,10 @@ function Composer({
   const [sending, setSending] = useState(false);
   const [panel, setPanel] = useState<PickerTab | null>(null);
   const [suggest, setSuggest] = useState<{ start: number; term: string; items: ReturnType<typeof searchEmoji>; index: number } | null>(null);
+  const [mentionSuggest, setMentionSuggest] = useState<{ start: number; items: { key: string; name: string }[]; index: number } | null>(null);
+  const mentions = useRef<ComposerMention[]>([]); // people picked from the @ suggestions
+  const pendingSelection = useRef<number | null>(null);
+  const editOriginal = useRef('');
   const area = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const typingSent = useRef(0);
@@ -678,8 +842,9 @@ function Composer({
     const el = area.current;
     if (el && pendingCaret.current !== null) {
       el.focus();
-      el.setSelectionRange(pendingCaret.current, pendingCaret.current);
+      el.setSelectionRange(pendingCaret.current, pendingSelection.current ?? pendingCaret.current);
       pendingCaret.current = null;
+      pendingSelection.current = null;
     }
   }, [text]);
 
@@ -693,7 +858,10 @@ function Composer({
     if (editing) {
       draftBeforeEdit.current = text;
       setPanel(null);
-      setTextAndCaret(editing.body ?? '', (editing.body ?? '').length);
+      const c = messageToComposer(editing);
+      mentions.current = c.mentions;
+      editOriginal.current = c.text;
+      setTextAndCaret(c.text, c.text.length);
     }
   }, [editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -733,6 +901,17 @@ function Composer({
   }
 
   function updateSuggest(value: string, caret: number) {
+    const mc = conversation.kind === 'group' ? mentionAtCaret(value, caret) : null;
+    if (mc) {
+      const term = mc.term.toLowerCase();
+      const items = (conversation.members ?? [])
+        .filter((m) => m.key !== 'self' && m.name !== 'Unknown')
+        .filter((m) => !term || m.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(term)) || m.name.toLowerCase().startsWith(term))
+        .slice(0, 8);
+      setMentionSuggest(items.length ? { start: mc.start, items, index: 0 } : null);
+      return setSuggest(null);
+    }
+    setMentionSuggest(null);
     const sc = shortcodeAtCaret(value, caret);
     if (!sc) return setSuggest(null);
     const items = searchEmoji(sc.term, 8);
@@ -778,6 +957,17 @@ function Composer({
     setSuggest(null);
   }
 
+  function chooseMention(i: number) {
+    if (!mentionSuggest) return;
+    const caret = area.current?.selectionStart ?? text.length;
+    const person = mentionSuggest.items[i];
+    const after = text.slice(caret);
+    const insert = '@' + person.name + (after.startsWith(' ') ? '' : ' ');
+    mentions.current = [...mentions.current.filter((m) => m.key !== person.key), { name: person.name, key: person.key }];
+    setTextAndCaret(text.slice(0, mentionSuggest.start) + insert + after, mentionSuggest.start + insert.length);
+    setMentionSuggest(null);
+  }
+
   function insertAtCaret(s: string) {
     const el = area.current;
     const start = el?.selectionStart ?? text.length;
@@ -787,17 +977,19 @@ function Composer({
 
   async function send() {
     const body = replaceShortcodes(text.trim());
+    const rich = composerToRich(body, mentions.current);
     if (editing) {
       if (!body || sending) return;
       setSending(true);
       setError(null);
       setSuggest(null);
       try {
-        const updated = await api.edit(editing.id, body);
+        const updated = await api.edit(editing.id, rich);
         upsertMessages(id, [updated]);
         setEditing(null);
         setText(draftBeforeEdit.current);
         draftBeforeEdit.current = '';
+        mentions.current = [];
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -815,9 +1007,11 @@ function Composer({
       const attachments = await Promise.all(
         files.map(async (p) => ({ name: p.file.name || 'file', type: p.file.type || 'application/octet-stream', data: await fileToBase64(p.file) })),
       );
-      const msg = await api.send(id, { text: body, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined });
+      const msg = await api.send(id, { ...rich, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined });
+      if (getState().hasNewer[id]) await loadLatest(id).catch(() => {}); // back to the bottom to see it
       upsertMessages(id, [msg]);
       files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
+      mentions.current = [];
       setText('');
       setFiles([]);
       clearReply();
@@ -877,6 +1071,33 @@ function Composer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionSuggest) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = mentionSuggest.items.length;
+        setMentionSuggest({ ...mentionSuggest, index: (mentionSuggest.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n });
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        chooseMention(mentionSuggest.index);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setMentionSuggest(null);
+        return;
+      }
+    }
+    const mod = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    if (mod && !e.altKey && SHORTCUTS[key] && (key === 'b' || key === 'i' ? !e.shiftKey : e.shiftKey)) {
+      e.preventDefault();
+      const r = wrapSelection(e.currentTarget, text, SHORTCUTS[key]);
+      pendingSelection.current = r.end;
+      setTextAndCaret(r.value, r.caret);
+      return;
+    }
     if (suggest) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -989,6 +1210,26 @@ function Composer({
         </p>
       )}
       <div className="composer-row">
+        {mentionSuggest && (
+          <ul className="emoji-suggest mention-suggest" role="listbox" aria-label="Mention someone">
+            {mentionSuggest.items.map((p, i) => (
+              <li
+                key={p.key}
+                role="option"
+                aria-selected={i === mentionSuggest.index}
+                className={i === mentionSuggest.index ? 'on' : undefined}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  chooseMention(i);
+                }}
+                onMouseEnter={() => setMentionSuggest({ ...mentionSuggest, index: i })}
+              >
+                <Avatar name={p.name} seed={p.key} size={28} src={null} />
+                <span className="code">{p.name}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         {suggest && (
           <ul className="emoji-suggest" role="listbox" aria-label="Emoji suggestions">
             {suggest.items.map((s, i) => (
@@ -1046,6 +1287,8 @@ function Composer({
           rows={1}
           value={text}
           placeholder={disabled ? 'Waiting for Signal…' : 'Message'}
+          title="*bold*  _italic_  ~strike~  `code`  ||spoiler||"
+          spellCheck
           onChange={(e) => onChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={onKeyDown}
           onKeyUp={(e) => {
@@ -1057,7 +1300,7 @@ function Composer({
           onPaste={onPaste}
           onBlur={() => {
             stopTyping();
-            setTimeout(() => setSuggest(null), 150);
+            setTimeout(() => (setSuggest(null), setMentionSuggest(null)), 150);
           }}
           aria-label={`Message ${conversation.title}`}
           aria-autocomplete="list"
@@ -1065,7 +1308,7 @@ function Composer({
         <button
           className="send-btn"
           onClick={send}
-          disabled={disabled || sending || (!text.trim() && !files.length) || (!!editing && text.trim() === editing.body)}
+          disabled={disabled || sending || (!text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
           aria-label={editing ? 'Save edit' : 'Send'}
           title={editing ? 'Save edit' : undefined}
         >

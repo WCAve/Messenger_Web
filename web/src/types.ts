@@ -19,6 +19,7 @@ export interface Conversation {
   lastMessage: { text: string; outgoing: boolean; status: string | null; authorName: string | null } | null;
   unread: number;
   archived: boolean;
+  expireTimer: number; // disappearing messages, seconds; 0 = off
 }
 
 export interface Attachment {
@@ -103,6 +104,37 @@ export interface Message {
   read: boolean;
   edited: boolean;
   deleted: boolean;
+  /** Ranges in UTF-16 offsets over body (which already has "@Name" for each mention). */
+  styles?: StyleRange[];
+  mentions?: { start: number; length: number; key: string; name: string }[];
+  preview: LinkPreview | null;
+  expiresIn?: number; // seconds
+  expiresAt?: number; // ms; unset until the countdown starts (received messages: once read)
+}
+
+export type TextStyle = 'BOLD' | 'ITALIC' | 'STRIKETHROUGH' | 'MONOSPACE' | 'SPOILER';
+export interface StyleRange {
+  start: number;
+  length: number;
+  style: TextStyle;
+}
+
+export interface LinkPreview {
+  url: string;
+  title?: string | null;
+  description?: string | null;
+  image?: Attachment | null;
+}
+
+export interface SearchResult {
+  id: number;
+  conversationId: number;
+  conversationTitle: string;
+  group: boolean;
+  sentAt: number;
+  authorName: string;
+  outgoing: boolean;
+  snippet: string;
 }
 
 export interface DirectoryContact {
@@ -118,4 +150,5 @@ export type ServerEvent =
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'message'; message: Message }
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }
-  | { type: 'receipt'; messageId: number };
+  | { type: 'receipt'; messageId: number }
+  | { type: 'remove'; conversationId: number; messageId: number };

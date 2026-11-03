@@ -11,6 +11,7 @@
  *   POST /mock/incoming {"from":"bob","text":"hi","group":true} incoming group message
  *   GET  /mock/sent                                             everything Signal Web sent
  *   POST /mock/receipt {"from":"alice","ts":<sent ts>,"kind":"read"}  a delivery/read receipt
+ *   POST /mock/incoming {..., "extra": {dataMessage fields}}    e.g. textStyles, mentions, previews, expiresInSeconds
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -191,20 +192,23 @@ function push(envelope) {
 
 // ---------- envelope builders ----------
 const from = (p) => ({ source: p.number || p.uuid, sourceNumber: p.number || null, sourceUuid: p.uuid, sourceName: p.profile, sourceDevice: 1 });
+const timers = {}; // disappearing-message timer per chat ('group' or a number), set via PUT
 function incoming(p, text, opts = {}) {
   const ts = opts.ts ?? Date.now();
+  const timer = timers[opts.group ? 'group' : p.number] ?? 0;
   push({
     ...from(p),
     timestamp: ts,
     dataMessage: {
       timestamp: ts,
       message: text,
-      expiresInSeconds: 0,
+      expiresInSeconds: timer,
       viewOnce: false,
       ...(opts.group ? { groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' } } : {}),
       ...(opts.attachments ? { attachments: opts.attachments } : {}),
       ...(opts.quote ? { quote: opts.quote } : {}),
       ...(opts.reaction ? { reaction: opts.reaction, message: undefined } : {}),
+      ...(opts.extra ?? {}),
     },
   });
   return ts;
@@ -252,6 +256,14 @@ function seed() {
   push({ source: DAVE.uuid, sourceUuid: DAVE.uuid, sourceName: DAVE.profile, sourceDevice: 1, timestamp: now - 28 * 60_000,
     dataMessage: { timestamp: now - 28 * 60_000, message: 'Haha 😂 and here is the video from last time', groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' },
       attachments: [{ contentType: 'video/mp4', filename: 'clip.mp4', id: 'mockclip1.mp4', size: CLIP_MP4.length, width: 160, height: 120 }] } });
+  incoming(PEOPLE.alice, 'This is bold, this is italic and this is a secret', {
+    ts: now - 80 * 60_000,
+    extra: { textStyles: [{ style: 'BOLD', start: 8, length: 4 }, { style: 'ITALIC', start: 22, length: 6 }, { style: 'SPOILER', start: 43, length: 6 }] },
+  });
+  incoming(PEOPLE.carol, 'Look at this https://example.org/trail-guide', {
+    ts: now - 35 * 60_000,
+    extra: { previews: [{ url: 'https://example.org/trail-guide', title: 'The best trails near the market', description: 'Ten walks of under two hours, with maps and where to get coffee after.', image: { contentType: 'image/png', filename: null, id: 'mockpreview1.png', size: PHOTO.length, width: 640, height: 420 } }] },
+  });
   void t1;
 }
 
@@ -316,6 +328,16 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'application/octet-stream' });
       return res.end(stickerEncrypt(plain, pack.key));
     }
+    if (p.startsWith('/v1/contacts/') && m === 'PUT') {
+      const b = await body(req);
+      if (b.expiration_in_seconds) timers[b.recipient] = b.expiration_in_seconds;
+      sent.push({ path: p, method: m, ...b });
+      return json(res, 204);
+    }
+    if (p.startsWith('/v1/attachments/') && m === 'DELETE') {
+      sent.push({ path: p, method: m });
+      return json(res, 204);
+    }
     if (p.startsWith('/v1/contacts/')) {
       const all = url.searchParams.get('all_recipients') === 'true';
       const list = Object.values(PEOPLE).map((x) => ({ number: x.number, uuid: x.uuid, name: x.name, profile_name: x.profile, username: '', blocked: false, given_name: '',
@@ -336,7 +358,8 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/v1/groups/') && m === 'PUT') {
       const b = await body(req);
       if (b.base64_avatar) groupAvatar = Buffer.from(b.base64_avatar, 'base64');
-      sent.push({ path: p, method: m, avatarBytes: b.base64_avatar ? groupAvatar.length : 0 });
+      if (b.expiration_time) timers.group = b.expiration_time;
+      sent.push({ path: p, method: m, avatarBytes: b.base64_avatar ? groupAvatar.length : 0, expiration_time: b.expiration_time });
       return json(res, 204);
     }
     if (p.startsWith('/v1/groups/'))
@@ -398,8 +421,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/mock/incoming' && m === 'POST') {
       const b = await body(req);
-      const person = PEOPLE[b.from ?? 'alice'];
-      return json(res, 200, { timestamp: incoming(person, b.text ?? 'Hello!', { group: !!b.group }) });
+      const person = b.from === 'dave' ? DAVE : PEOPLE[b.from ?? 'alice'];
+      return json(res, 200, { timestamp: incoming(person, b.text ?? 'Hello!', { group: !!b.group, extra: b.extra, ts: b.ts }) });
     }
     json(res, 404, { error: 'mock: not implemented ' + m + ' ' + p });
   } catch (e) {

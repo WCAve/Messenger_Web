@@ -145,6 +145,16 @@ const MIGRATIONS: string[] = [
   ALTER TABLE messages ADD COLUMN ts_confirmed INTEGER NOT NULL DEFAULT 1;
   UPDATE messages SET ts_confirmed = 0 WHERE outgoing = 1;
   `,
+  `
+  -- Mentions and text styles: {"mentions":[{start,length,key}],"styles":[{start,length,style}]}
+  -- over a body that has U+FFFC where each mention goes. NULL for older rows (mentions inline).
+  ALTER TABLE messages ADD COLUMN ranges TEXT;
+  ALTER TABLE messages ADD COLUMN preview TEXT;  -- JSON {url, title, description, image}
+  ALTER TABLE messages ADD COLUMN expires_in INTEGER NOT NULL DEFAULT 0;  -- disappearing timer, seconds
+  ALTER TABLE messages ADD COLUMN expires_at INTEGER;  -- ms; set once the timer starts
+  CREATE INDEX messages_expires_at ON messages(expires_at) WHERE expires_at IS NOT NULL;
+  ALTER TABLE conversations ADD COLUMN expire_timer INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function migrate() {

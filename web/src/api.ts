@@ -1,4 +1,11 @@
-import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SignalState, StickerPack } from './types';
+import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
+
+/** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
+export interface RichText {
+  text: string;
+  styles?: StyleRange[];
+  mentions?: { start: number; length: number; key: string }[];
+}
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -39,6 +46,12 @@ export const api = {
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>
     call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
+  messagesAfter: (id: number, after: number, limit = 50) => call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}&after=${after}`),
+  messagesAround: (id: number, ts: number, limit = 60) =>
+    call<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean }>('GET', `/api/conversations/${id}/messages?limit=${limit}&around=${ts}`),
+  search: (q: string, conversationId?: number) =>
+    call<{ results: SearchResult[] }>('GET', `/api/search?q=${encodeURIComponent(q)}${conversationId ? `&conversationId=${conversationId}` : ''}`),
+  setTimer: (id: number, seconds: number) => call<Conversation>('POST', `/api/conversations/${id}/timer`, { seconds }),
   profile: () => call<Profile>('GET', '/api/profile'),
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
   setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
@@ -50,10 +63,10 @@ export const api = {
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,
-    b: { text: string; quoteId?: number; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
+    b: RichText & { quoteId?: number; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
-  edit: (id: number, text: string) => call<Message>('POST', `/api/messages/${id}/edit`, { text }),
+  edit: (id: number, b: RichText) => call<Message>('POST', `/api/messages/${id}/edit`, b),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
