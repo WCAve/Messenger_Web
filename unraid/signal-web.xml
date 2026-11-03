@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>signal-web</Name>
+  <Repository>ghcr.io/wcave/signal_web:latest</Repository>
+  <Registry>https://github.com/WCAve/Signal_Web/pkgs/container/signal_web</Registry>
+  <Network>signal</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/WCAve/Signal_Web/issues</Support>
+  <Project>https://github.com/WCAve/Signal_Web</Project>
+  <Overview>WhatsApp-Web-style browser client for Signal. Links to your phone as a Signal device (like Signal Desktop) through the signal-api container, stores your chat history locally, and serves a password-protected web UI.&#xD;
+&#xD;
+Requires the signal-api container (bbernhard/signal-cli-rest-api) on the same custom Docker network ("signal"), running with MODE=json-rpc-native. See the project README for setup.</Overview>
+  <Category>Network:Messenger Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-web.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>The signal-api container (template unraid/signal-api.xml in the project repo) on the custom Docker network "signal".</Requires>
+  <Config Name="Web UI port" Target="3000" Default="3000" Mode="tcp" Description="Port for the web interface." Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Password" Target="APP_PASSWORD" Default="" Mode="" Description="Password for the web interface. At least 8 characters; use a long one." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/signal-web" Mode="rw" Description="Chat history database and attachments." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/signal-web</Config>
+  <Config Name="Signal API URL" Target="SIGNAL_API_URL" Default="http://signal-api:8080" Mode="" Description="Address of the signal-api container. The default works when both containers are on the 'signal' network." Type="Variable" Display="always" Required="true" Mask="false">http://signal-api:8080</Config>
+  <Config Name="Send read receipts" Target="SEND_READ_RECEIPTS" Default="true|false" Mode="" Description="Tell senders when you've read their messages in Signal Web." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Send typing indicators" Target="SEND_TYPING_INDICATORS" Default="true|false" Mode="" Description="Show others when you're typing." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Secure cookies (HTTPS)" Target="SECURE_COOKIES" Default="false|true" Mode="" Description="Set to true when you reach Signal Web over HTTPS (e.g. via a reverse proxy)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Signal number" Target="SIGNAL_NUMBER" Default="" Mode="" Description="Only needed if the signal-api container holds more than one account." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Max upload (MB)" Target="MAX_UPLOAD_MB" Default="100" Mode="" Description="Largest attachment you can send." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Session length (days)" Target="SESSION_DAYS" Default="30" Mode="" Description="How long a browser stays signed in." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID that owns the files in /data." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID that owns the files in /data." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/Amsterdam" Mode="" Description="Timezone for log timestamps." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Amsterdam</Config>
+</Container>

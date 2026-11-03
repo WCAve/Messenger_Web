@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>signal-api</Name>
+  <Repository>bbernhard/signal-cli-rest-api:latest</Repository>
+  <Registry>https://hub.docker.com/r/bbernhard/signal-cli-rest-api</Registry>
+  <Network>signal</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/bbernhard/signal-cli-rest-api/issues</Support>
+  <Project>https://github.com/bbernhard/signal-cli-rest-api</Project>
+  <Overview>signal-cli-rest-api, preconfigured as the backend for Signal Web: json-rpc-native mode with manual receive, so messages stay queued on Signal's servers while Signal Web is restarting. No port is published; only containers on the "signal" network can reach it.</Overview>
+  <Category>Network:Messenger Tools:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-api.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>Custom Docker network "signal" (docker network create signal).</Requires>
+  <Config Name="Signal data" Target="/home/.local/share/signal-cli" Default="/mnt/user/appdata/signal-api" Mode="rw" Description="Signal account keys and state. Back this up; losing it means re-linking." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/signal-api</Config>
+  <Config Name="Mode" Target="MODE" Default="json-rpc-native" Mode="" Description="Must be json-rpc-native (or json-rpc) for Signal Web." Type="Variable" Display="always" Required="true" Mask="false">json-rpc-native</Config>
+  <Config Name="Receive mode" Target="JSON_RPC_RECEIVE_MODE" Default="manual" Mode="" Description="manual = only fetch messages while Signal Web is connected, so none are lost during restarts." Type="Variable" Display="always" Required="true" Mask="false">manual</Config>
+  <Config Name="Trust new identities" Target="JSON_RPC_TRUST_NEW_IDENTITIES" Default="on-first-use|always|never" Mode="" Description="What to do when a contact's safety number changes." Type="Variable" Display="advanced" Required="false" Mask="false">on-first-use</Config>
+  <Config Name="Log level" Target="LOG_LEVEL" Default="info|debug|warn|error" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+</Container>

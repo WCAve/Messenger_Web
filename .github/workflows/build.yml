@@ -1,0 +1,69 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Smoke test against the mock Signal API
+        run: |
+          MOCK_LINKED=1 node mock/mock-signal-api.mjs &
+          sleep 1
+          DATA_DIR=$RUNNER_TEMP/data APP_PASSWORD=ci-password SIGNAL_API_URL=http://127.0.0.1:8080 \
+            node --no-warnings=ExperimentalWarning server/dist/index.js &
+          for i in $(seq 1 20); do curl -fs localhost:3000/healthz && break; sleep 0.5; done
+          curl -fs -c jar -H 'content-type: application/json' -d '{"password":"ci-password"}' localhost:3000/api/login
+          for i in $(seq 1 20); do
+            n=$(curl -fs -b jar localhost:3000/api/conversations | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).length))')
+            [ "$n" -ge 3 ] && echo "ok: $n conversations" && exit 0
+            sleep 0.5
+          done
+          echo "expected 3 conversations from the mock" && exit 1
+
+  docker:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=short
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

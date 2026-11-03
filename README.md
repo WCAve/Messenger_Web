@@ -1,0 +1,151 @@
+# Signal Web
+
+A WhatsApp-Web-style browser client for [Signal](https://signal.org), self-hosted on Unraid (or any Docker host).
+It links to your phone as a Signal device, just like Signal Desktop, and gives you your chats in any browser.
+
+![Chat view](docs/chat.png)
+
+Under the hood it talks to [bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api), which wraps [signal-cli](https://github.com/AsamK/signal-cli).
+
+```
+Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  signal-api  ──▶  Signal servers
+                         (UI, auth, history DB)              (signal-cli, keys)
+```
+
+## What works
+
+- Linking via QR code, right in the web UI
+- Chat list with unread counts, search, typing and delivery state
+- 1:1 and group chats, with history stored in SQLite
+- Text, emoji, links, replies (quotes), reactions, mentions
+- Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
+- Delivery and read ticks, read receipts, typing indicators
+- Delete for everyone (your own messages), retry failed sends
+- Edits and deletes made by others are shown
+- Browser notifications, dark mode, phone-sized layout
+
+**Not supported**: voice/video calls, stories, message history from before linking (Signal only syncs new messages to a newly linked device), editing your own messages, stickers (shown as "Sticker"), polls (shown as text), view-once media.
+
+## Install on Unraid
+
+### 1. Create the Docker network
+
+Both containers talk over a private network, so the Signal API is never exposed to your LAN.
+
+1. **Settings → Docker**: stop Docker, switch to *Advanced view*, set **Preserve user defined networks** to *Yes*, start Docker.
+2. Open the Unraid terminal and run:
+
+   ```sh
+   docker network create signal
+   ```
+
+### 2. Add the templates
+
+In the Unraid terminal:
+
+```sh
+cd /boot/config/plugins/dockerMan/templates-user
+wget -O my-signal-api.xml https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-api.xml
+wget -O my-signal-web.xml https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-web.xml
+```
+
+If the repository is private, download the two files from GitHub and copy them into that folder instead.
+
+### 3. Create the containers
+
+**Docker → Add Container**, pick the template, review, **Apply**. Do them in this order:
+
+1. **signal-api**: the defaults are right (`MODE=json-rpc-native`, `JSON_RPC_RECEIVE_MODE=manual`, network `signal`).
+2. **signal-web**: set a **Password** (8+ characters, longer is better). Leave the Signal API URL at `http://signal-api:8080`.
+
+If the GitHub repository is private, its container image is private too, and Unraid can't pull it.
+Either make the package public (GitHub → your profile → Packages → signal_web → Package settings → Change visibility), or log in once from the Unraid terminal with a personal access token that has `read:packages`:
+
+```sh
+docker login ghcr.io -u WCAve
+```
+
+### 4. Link your phone
+
+Open `http://<unraid-ip>:3000`, sign in, and scan the QR code from your phone: **Signal → Settings → Linked devices → Link new device**.
+Contacts and groups sync from your phone over the next few minutes.
+
+### Updating
+
+Unraid shows "update ready" for both containers as new images are published. Keep **signal-api** reasonably current: Signal stops accepting old signal-cli versions after a few months.
+
+### Backups
+
+Back up both appdata folders:
+
+- `/mnt/user/appdata/signal-api` holds your Signal keys. Losing it means re-linking.
+- `/mnt/user/appdata/signal-web` holds chat history and attachments.
+
+## Security notes
+
+- Your Signal keys and message history live on the server. Anyone with the password, or with access to the appdata folders, can read and send as you. Treat it like a logged-in Signal Desktop.
+- Keep it on your LAN or behind a VPN (Tailscale, WireGuard). If you put it behind a reverse proxy with HTTPS, set `SECURE_COOKIES=true`.
+- Login is rate-limited (10 failed attempts per IP per 15 minutes) and sessions are http-only, same-site cookies.
+- When a contact's safety number changes, signal-api follows `JSON_RPC_TRUST_NEW_IDENTITIES` (default `on-first-use`). Verify safety numbers on your phone.
+
+## Settings
+
+| Variable | Default | |
+|---|---|---|
+| `APP_PASSWORD` | (required) | Web UI password, 8+ characters |
+| `SIGNAL_API_URL` | `http://signal-api:8080` | Where the signal-api container is |
+| `SIGNAL_NUMBER` | first linked account | Only if signal-api holds several accounts |
+| `SEND_READ_RECEIPTS` | `true` | Send read receipts when you open a chat |
+| `SEND_TYPING_INDICATORS` | `true` | Send typing indicators |
+| `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS |
+| `SESSION_DAYS` | `30` | How long a browser stays signed in |
+| `MAX_UPLOAD_MB` | `100` | Largest attachment you can send |
+| `PUID` / `PGID` | `99` / `100` | Owner of files in `/data` |
+| `DATA_DIR` | `/data` | Database and attachments |
+| `PORT` | `3000` | HTTP port |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+
+## Other Docker hosts
+
+```sh
+APP_PASSWORD='a long password' docker compose up -d
+```
+
+See [docker-compose.yml](docker-compose.yml).
+
+## Development
+
+Requires Node 22.13 or newer. The server has no runtime dependencies: it uses Node's built-in `node:sqlite`, `fetch`, `WebSocket` and `http`.
+
+```sh
+npm install
+npm run mock            # fake Signal API on :8080 with sample chats (no phone needed)
+npm run dev:web         # rebuilds the UI into web/dist on change
+npm run build -w server && \
+  DATA_DIR=.data APP_PASSWORD=devpassword SIGNAL_API_URL=http://localhost:8080 npm start -w server
+```
+
+Open http://localhost:3000. The mock starts unlinked: its QR code "links" four seconds after it is shown (`MOCK_LINKED=1` skips that).
+It auto-replies to anything you send, and messages containing "fail" are rejected so you can test retries.
+`POST /mock/incoming {"from":"bob","text":"hi","group":true}` on the mock injects incoming messages.
+
+### Layout
+
+```
+server/src
+  index.ts        HTTP server, static files, security headers
+  routes.ts       REST API used by the UI
+  signal.ts       connection to signal-api: status, receive WebSocket, contact/group refresh
+  ingest.ts       turns signal-cli envelopes into stored messages and live events
+  store.ts        SQLite access and the JSON shapes sent to the browser
+  signal-api.ts   signal-cli-rest-api client
+web/src
+  App.tsx         session, live event stream, notifications
+  components/     Sidebar, Chat (messages + composer), Login, Setup (QR/status)
+mock/             fake signal-cli-rest-api for development and CI
+unraid/           Unraid templates
+```
+
+Images are built by GitHub Actions and published to `ghcr.io/wcave/signal_web`.
+
+<p align="center"><img src="docs/mobile-dark.png" width="300" alt="Phone layout, dark mode"></p>

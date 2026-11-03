@@ -1,0 +1,20 @@
+{
+  "name": "signal-web-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Signal Web backend. No runtime dependencies: uses Node 22's built-in node:sqlite, WebSocket and http.",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --no-warnings=ExperimentalWarning dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "signal-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WhatsApp-Web-style browser client for Signal, built on bbernhard/signal-cli-rest-api",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build -w web && npm run build -w server",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "mock": "node mock/mock-signal-api.mjs",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  }
+}

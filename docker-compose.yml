@@ -1,0 +1,30 @@
+# Plain Docker / Compose setup (on Unraid, use the templates in unraid/ instead).
+#   APP_PASSWORD=choose-a-long-password docker compose up -d
+# then open http://<host>:3000 and scan the QR code with your phone.
+services:
+  signal-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    container_name: signal-api
+    restart: unless-stopped
+    environment:
+      - MODE=json-rpc-native
+      - JSON_RPC_RECEIVE_MODE=manual # keep messages queued on Signal's servers while Signal Web is down
+    volumes:
+      - ./data/signal-api:/home/.local/share/signal-cli
+    # No ports published: only Signal Web talks to it.
+
+  signal-web:
+    image: ghcr.io/wcave/signal_web:latest
+    container_name: signal-web
+    restart: unless-stopped
+    depends_on: [signal-api]
+    environment:
+      - APP_PASSWORD=${APP_PASSWORD:?set APP_PASSWORD}
+      - SIGNAL_API_URL=http://signal-api:8080
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Amsterdam
+    volumes:
+      - ./data/signal-web:/data
+    ports:
+      - "3000:3000"

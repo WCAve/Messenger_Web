@@ -1,0 +1,50 @@
+import type { Conversation, DirectoryContact, Message, SignalState } from './types';
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+/** Fired when the server says our session is gone. */
+export const onUnauthorized = new EventTarget();
+
+async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    credentials: 'same-origin',
+    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (res.status === 401 && url !== '/api/login') onUnauthorized.dispatchEvent(new Event('unauthorized'));
+    throw new ApiError(data.error ?? `Request failed (${res.status})`, res.status);
+  }
+  return data as T;
+}
+
+export const api = {
+  session: () => call<{ authenticated: boolean }>('GET', '/api/session'),
+  login: (password: string) => call<{ ok: true }>('POST', '/api/login', { password }),
+  logout: () => call<{ ok: true }>('POST', '/api/logout'),
+  state: () => call<SignalState>('GET', '/api/state'),
+  conversations: () => call<Conversation[]>('GET', '/api/conversations'),
+  conversation: (id: number) => call<Conversation>('GET', `/api/conversations/${id}`),
+  startChat: (b: { number?: string; uuid?: string }) => call<Conversation>('POST', '/api/conversations', b),
+  directory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('GET', '/api/directory'),
+  refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
+  messages: (id: number, before?: number, limit = 50) =>
+    call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
+  send: (id: number, b: { text: string; quoteId?: number; attachments?: { name: string; type: string; data: string }[] }) =>
+    call<Message>('POST', `/api/conversations/${id}/messages`, b),
+  retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
+  react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
+  remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
+  markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
+  typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
+};
+
+export function attachmentUrl(id: string, download?: string) {
+  return `/api/attachments/${encodeURIComponent(id)}${download ? `?download=1&name=${encodeURIComponent(download)}` : ''}`;
+}
