@@ -285,7 +285,7 @@ const MUTE_OPTIONS: [string, number][] = [
 ];
 const FOREVER = 8.64e15; // the largest date JS can show
 
-function ChatRowMenu({ c, onClose }: { c: Conversation; onClose: () => void }) {
+export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Conversation; onClose: () => void; className?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [muteOpen, setMuteOpen] = useState(false);
   const muted = c.mutedUntil > Date.now();
@@ -298,7 +298,7 @@ function ChatRowMenu({ c, onClose }: { c: Conversation; onClose: () => void }) {
     }
   }
   return (
-    <div className="menu row-menu" role="menu" onMouseLeave={onClose}>
+    <div className={`menu ${className}`} role="menu" onMouseLeave={onClose}>
       {!c.archived && (
         <button role="menuitem" onClick={() => void set({ pinned: !c.pinnedAt })}>
           <Icon name="pin" size={18} /> {c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
@@ -332,13 +332,7 @@ function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolea
   const [menu, setMenu] = useState(false);
   const muted = c.mutedUntil > Date.now();
   return (
-    <div
-      className={`chat-row-wrap${menu ? ' menu-open' : ''}`}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        setMenu(true);
-      }}
-    >
+    <div className={`chat-row-wrap${menu ? ' menu-open' : ''}${active ? ' active' : ''}`}>
     <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
       <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} />
       <span className="chat-row-main">

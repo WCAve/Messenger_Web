@@ -9,6 +9,7 @@ import type { Attachment, Conversation, LinkPreview, Message } from '../types';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { PollDialog, PollView } from './Extras';
+import { ChatRowMenu } from './Sidebar';
 import { Avatar, Icon, StatusMark } from './ui';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
@@ -49,6 +50,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const typing = useStore((s) => s.typing[id] ?? NO_TYPING);
   const connected = useStore((s) => s.signal.status === 'connected');
   const panel = useStore((s) => s.panel?.kind ?? null);
+  const [chatMenu, setChatMenu] = useState(false);
   const hasNewer = useStore((s) => s.hasNewer[id] ?? false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [reactTo, setReactTo] = useState<Message | null>(null);
@@ -145,6 +147,12 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         >
           <Icon name="search" />
         </button>
+        <div className="menu-wrap">
+          <button className={`icon-btn${chatMenu ? ' on' : ''}`} onClick={() => setChatMenu((v) => !v)} aria-label="Chat options" aria-expanded={chatMenu} title="Pin, mute or archive">
+            <Icon name="more" />
+          </button>
+          {chatMenu && <ChatRowMenu c={conversation} onClose={() => setChatMenu(false)} className="head-menu" />}
+        </div>
       </header>
 
       {loadError ? (

@@ -2360,16 +2360,30 @@ body.resizing * {
 }
 .row-menu-btn {
   position: absolute;
-  right: 12px;
-  bottom: 9px;
+  right: 10px;
+  bottom: 8px;
   opacity: 0;
-  background: var(--haze);
-  color: var(--ink-3);
+  background: var(--paper);
+  color: var(--ink-2);
+  border: 1px solid var(--mist);
+  box-shadow: var(--shadow);
+}
+.row-menu-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
 }
 .chat-row-wrap:hover .row-menu-btn,
+.chat-row-wrap.active .row-menu-btn,
 .chat-row-wrap.menu-open .row-menu-btn,
 .row-menu-btn:focus-visible {
   opacity: 1;
+}
+.chat-row-wrap.active .badge {
+  visibility: hidden;
+}
+.head-menu {
+  top: 44px;
+  right: 0;
 }
 .chat-row-wrap:hover .badge,
 .chat-row-wrap.menu-open .badge {

@@ -26,7 +26,7 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Link previews, both ways: when you type an https link, Signal Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
 - Polls: vote, create (📊 button next to the paperclip) and end your own polls
 - Forward messages (text, files, stickers) to up to 5 chats
-- Pin (up to 4), mute and archive chats from the ⌄ button on a chat, or right-click. These stay in Signal Web; your phone keeps its own
+- Pin (up to 4), mute and archive chats from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. These stay in Signal Web; your phone keeps its own
 - Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat
 - Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Signal Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
