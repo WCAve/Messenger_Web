@@ -37,6 +37,8 @@ Both containers talk over a private network, so the Signal API is never exposed 
 
    ```sh
    docker network create signal
+   # signal-api runs as uid 1000 and can't fix folder ownership itself
+   mkdir -p /mnt/user/appdata/signal-api && chown -R 1000:1000 /mnt/user/appdata/signal-api
    ```
 
 ### 2. Add the templates
@@ -55,7 +57,8 @@ If the repository is private, download the two files from GitHub and copy them i
 
 **Docker → Add Container**, pick the template, review, **Apply**. Do them in this order:
 
-1. **signal-api**: the defaults are right (`MODE=json-rpc-native`, `JSON_RPC_RECEIVE_MODE=manual`, network `signal`).
+1. **signal-api**: the defaults are right (`MODE=json-rpc-native`, `JSON_RPC_RECEIVE_MODE=manual`, network `signal`). Use `MODE=json-rpc` instead if you prefer stability over memory use: it runs signal-cli on a regular Java runtime instead of the GraalVM-compiled binary. Both use the same data, so you can switch any time.
+
 2. **signal-web**: set a **Password** (8+ characters, longer is better). Leave the Signal API URL at `http://signal-api:8080`.
 
 If the GitHub repository is private, its container image is private too, and Unraid can't pull it.
@@ -64,6 +67,24 @@ Either make the package public (GitHub → your profile → Packages → signal_
 ```sh
 docker login ghcr.io -u WCAve
 ```
+
+### Alternative: the Community Applications "Signal-API" template, in bridge mode
+
+You can use the existing **Signal-API** app from Community Applications instead of `unraid/signal-api.xml`, with both containers on the default bridge network. Its defaults don't work with Signal Web, so change them before the first start:
+
+1. **Mode**: set to `json-rpc` (or `json-rpc-native`). `normal` and `native` don't work with Signal Web.
+2. **Receive Schedule**: click **Remove**. Clearing the value isn't enough: in json-rpc mode signal-api refuses to start while the `AUTO_RECEIVE_SCHEDULE` variable exists, even when it's empty. It would also pull messages behind Signal Web's back.
+3. **Add another Path, Port, Variable…** → Config Type *Variable*, Key `JSON_RPC_RECEIVE_MODE`, Value `manual`.
+4. **Apply**, then fix the folder ownership in the Unraid terminal (use the path shown under *AppData*) and start the container again:
+
+   ```sh
+   chown -R 1000:1000 /mnt/cache/appdata/signal-api
+   ```
+
+   Without this, the log repeats `Couldn't persist jsonrpc2.yaml: … permission denied`.
+5. In **signal-web**, set the network to *bridge* and the Signal API URL to the host IP and the template's port, which defaults to **8739**: `http://<unraid-ip>:8739`.
+
+In bridge mode the Signal API's port is reachable by anything that can reach your server, and it has no login of its own. Use this only on a network you trust; the private `signal` network above avoids it.
 
 ### 4. Link your phone
 
@@ -108,6 +129,7 @@ Back up both appdata folders:
 ## Other Docker hosts
 
 ```sh
+mkdir -p data/signal-api && sudo chown 1000:1000 data/signal-api   # signal-api runs as uid 1000
 APP_PASSWORD='a long password' docker compose up -d
 ```
 
