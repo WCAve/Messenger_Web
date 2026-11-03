@@ -1,3 +1,5 @@
+# Caution: 100% Vibe Code. No Guarantees. Do not expose to the internet. Internal use only
+
 # Signal Web
 
 A WhatsApp-Web-style browser client for [Signal](https://signal.org), self-hosted on Unraid (or any Docker host).
