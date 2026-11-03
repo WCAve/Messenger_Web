@@ -20,8 +20,11 @@ export const config = {
   dbPath: path.join(dataDir, 'signal-web.db'),
   attachmentsDir: path.join(dataDir, 'attachments'),
   deviceName: process.env.DEVICE_NAME ?? 'Signal Web',
+  /** Serve HTTPS directly: paths to a PEM certificate (chain) and private key. */
+  tlsCertFile: process.env.TLS_CERT_FILE?.trim() || null,
+  tlsKeyFile: process.env.TLS_KEY_FILE?.trim() || null,
   /** Set to true when served over HTTPS (e.g. behind a reverse proxy) so the session cookie gets the Secure flag. */
-  secureCookies: bool(process.env.SECURE_COOKIES, false),
+  secureCookies: bool(process.env.SECURE_COOKIES, !!(process.env.TLS_CERT_FILE && process.env.TLS_KEY_FILE)),
   sessionDays: Number(process.env.SESSION_DAYS ?? 30),
   /** Send read receipts to senders when you open a chat. */
   sendReadReceipts: bool(process.env.SEND_READ_RECEIPTS, true),

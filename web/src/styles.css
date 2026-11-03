@@ -2050,3 +2050,50 @@ body.resizing * {
   border-color: rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
 }
+
+/* ---------- notifications ---------- */
+.notify-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 10px 6px 10px 14px;
+  border-radius: 12px;
+  background: var(--ultra-soft);
+  color: var(--ultra);
+}
+.notify-banner span {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.notify-banner .link-btn {
+  justify-self: start;
+  font-size: 13px;
+  text-align: left;
+}
+.insecure-help {
+  display: grid;
+  gap: 8px;
+  padding: 6px 0 12px;
+  color: var(--ink-2);
+}
+.insecure-help strong {
+  color: var(--ink);
+}
+.insecure-help ul {
+  margin: 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 6px;
+}
+.insecure-help code {
+  font-size: 12px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--haze);
+  overflow-wrap: anywhere;
+}

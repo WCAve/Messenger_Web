@@ -105,6 +105,17 @@ In bridge mode the Signal API's port is reachable by anything that can reach you
 Open `http://<unraid-ip>:3000`, sign in, and scan the QR code from your phone: **Signal → Settings → Linked devices → Link new device**.
 Contacts and groups sync from your phone over the next few minutes.
 
+### HTTPS (needed for notifications)
+
+Browsers only allow desktop notifications on HTTPS pages (or `localhost`). Over plain `http://<unraid-ip>:3000` everything else works, but notifications stay off and Signal Web explains why. Options:
+
+- **Tailscale (Unraid 7):** edit signal-web, turn on **Use Tailscale**, give it a hostname, enable **Serve**, and apply. Approve it with the link in the container log, then open the `https://…ts.net` address from any device on your tailnet.
+- **Reverse proxy** with a certificate: Nginx Proxy Manager, SWAG or Caddy in front of port 3000. Set `SECURE_COOKIES=true`.
+- **Certificate in signal-web itself:** mount a PEM certificate and key and set `TLS_CERT_FILE` and `TLS_KEY_FILE`. Signal Web then serves HTTPS on its port.
+- **Only for one browser on your LAN:** Firefox `about:config` → add the server's IP to `dom.securecontext.allowlist`; Chrome/Edge `chrome://flags/#unsafely-treat-insecure-origin-as-secure` → add `http://<unraid-ip>:3000`. Restart the browser.
+
+Notifications appear while a Signal Web tab is open (it may be in the background); there are no push notifications when the browser is closed.
+
 ### Updating
 
 Unraid shows "update ready" for both containers as new images are published. Keep **signal-api** reasonably current: Signal stops accepting old signal-cli versions after a few months.
@@ -134,7 +145,8 @@ Back up both appdata folders:
 | `GIPHY_RATING` | `pg-13` | Content rating for GIF results: `g`, `pg`, `pg-13`, `r` |
 | `SEND_READ_RECEIPTS` | `true` | Send read receipts when you open a chat. Default only: the switch in Settings overrides it |
 | `SEND_TYPING_INDICATORS` | `true` | Send typing indicators. Default only: the switch in Settings overrides it |
-| `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS |
+| `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS through a proxy (automatic with `TLS_CERT_FILE`) |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | (none) | PEM certificate and key: serve HTTPS directly |
 | `SESSION_DAYS` | `30` | How long a browser stays signed in |
 | `MAX_UPLOAD_MB` | `100` | Largest attachment you can send |
 | `PUID` / `PGID` | `99` / `100` | Owner of files in `/data` |

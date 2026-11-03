@@ -1,8 +1,38 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Profile, type ServerSettings, api } from '../api';
+import { type NotifyState, notifyState, requestNotifications, testNotification } from '../notifications';
 import { squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
 import { Avatar, Icon } from './ui';
+
+/** Why notifications can't work on plain http://, and how to fix it. */
+export function InsecureHelp() {
+  const host = location.hostname;
+  return (
+    <div className="setting-note insecure-help">
+      <p>
+        <strong>Browsers only allow notifications on HTTPS pages.</strong> You opened Signal Web over plain http ({location.origin}), so the browser
+        blocks them without asking.
+      </p>
+      <p>Ways to fix it:</p>
+      <ul>
+        <li>
+          <strong>Unraid 7 with Tailscale:</strong> edit the signal-web container, turn on <em>Use Tailscale</em>, enable <em>Serve</em>, and open
+          the https://….ts.net address it gives you.
+        </li>
+        <li>
+          <strong>Reverse proxy</strong> (Nginx Proxy Manager, SWAG, Caddy) with a certificate, or give signal-web a certificate directly with{' '}
+          <code>TLS_CERT_FILE</code> and <code>TLS_KEY_FILE</code>.
+        </li>
+        <li>
+          <strong>Just this browser:</strong> in Firefox, open <code>about:config</code> and add <code>{host}</code> to{' '}
+          <code>dom.securecontext.allowlist</code>. In Chrome or Edge, open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> and
+          add <code>{location.origin}</code>. Restart the browser afterwards.
+        </li>
+      </ul>
+    </div>
+  );
+}
 
 function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: ReactNode; disabled?: boolean }) {
   return (
@@ -137,7 +167,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   const [server, setServer] = useState<ServerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [permission, setPermission] = useState(() => ('Notification' in window ? Notification.permission : 'unsupported'));
+  const [permission, setPermission] = useState<NotifyState>(notifyState);
 
   useEffect(() => {
     api.settings().then(setServer, (e) => setError(e.message));
@@ -156,8 +186,8 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   }
 
   async function enableNotifications(on: boolean) {
-    if (on && 'Notification' in window && Notification.permission === 'default') {
-      const p = await Notification.requestPermission();
+    if (on && permission === 'default') {
+      const p = await requestNotifications();
       setPermission(p);
       if (p !== 'granted') return;
     }
@@ -223,11 +253,17 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
         <Section title="Notifications">
           {permission === 'unsupported' ? (
             <p className="muted setting-note">This browser doesn't support notifications.</p>
+          ) : permission === 'insecure' ? (
+            <InsecureHelp />
           ) : (
             <>
               <Toggle
                 label="Desktop notifications"
-                hint={blocked ? 'Blocked in your browser’s site settings for this page. Allow notifications there first.' : 'For new messages while this tab is in the background.'}
+                hint={
+                  blocked
+                    ? 'Blocked for this site. Click the lock or site-settings icon left of the address, allow notifications, and reload.'
+                    : 'For new messages while a Signal Web tab is open in the background.'
+                }
                 checked={prefs.notifications && permission === 'granted'}
                 disabled={blocked}
                 onChange={(v) => void enableNotifications(v)}
@@ -239,6 +275,13 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
                 disabled={!prefs.notifications || permission !== 'granted'}
                 onChange={(v) => setPrefs({ notificationPreview: v })}
               />
+              {permission === 'granted' && prefs.notifications && (
+                <div className="setting-actions">
+                  <button className="btn" onClick={testNotification}>
+                    Send a test notification
+                  </button>
+                </div>
+              )}
             </>
           )}
         </Section>

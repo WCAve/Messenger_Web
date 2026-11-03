@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
@@ -65,7 +66,7 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   );
 }
 
-const server = http.createServer(async (req, res) => {
+const handler: http.RequestListener = async (req, res) => {
   res.setHeader('x-frame-options', 'DENY');
   res.setHeader('referrer-policy', 'no-referrer');
   res.setHeader(
@@ -78,7 +79,18 @@ const server = http.createServer(async (req, res) => {
     log('error', `unhandled: ${(e as Error).stack}`);
     if (!res.headersSent) sendJson(res, 500, { error: 'Internal error' });
   }
-});
+};
+
+let tls: { cert: Buffer; key: Buffer } | null = null;
+if (config.tlsCertFile || config.tlsKeyFile) {
+  try {
+    tls = { cert: fs.readFileSync(config.tlsCertFile ?? ''), key: fs.readFileSync(config.tlsKeyFile ?? '') };
+  } catch (e) {
+    log('error', `TLS_CERT_FILE and TLS_KEY_FILE must both point to readable PEM files: ${(e as Error).message}`);
+    process.exit(1);
+  }
+}
+const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
 server.requestTimeout = 10 * 60_000; // large uploads
 server.keepAliveTimeout = 65_000;
 
@@ -106,7 +118,9 @@ startSignal({
   debug: (m) => log('debug', m),
 });
 
-server.listen(config.port, config.host, () => log('info', `Signal Web listening on http://${config.host}:${config.port}`));
+server.listen(config.port, config.host, () =>
+  log('info', `Signal Web listening on ${tls ? 'https' : 'http'}://${config.host}:${config.port}`),
+);
 
 const shutdown = () => {
   log('info', 'shutting down');

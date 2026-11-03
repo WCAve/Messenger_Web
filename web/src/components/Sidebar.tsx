@@ -3,6 +3,7 @@ import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import type { Conversation, DirectoryContact } from '../types';
 import { formatListTime } from '../util';
+import { type NotifyState, notifyState, requestNotifications } from '../notifications';
 import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
 import { Avatar, Icon, StatusMark } from './ui';
@@ -59,6 +60,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           )}
         </div>
       </header>
+      <NotifyBanner onOpenSettings={() => setMode('settings')} />
       <div className="search">
         <Icon name="search" size={18} />
         <input placeholder="Search chats" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search chats" />
@@ -90,6 +92,37 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
  * The divider between the chat list and the chat: drag it, use ←/→ when focused, or double-click to
  * reset. The width is remembered per browser.
  */
+/** Like WhatsApp Web: a nudge to turn on notifications, which browsers only allow after a click. */
+function NotifyBanner({ onOpenSettings }: { onOpenSettings: () => void }) {
+  const prefs = usePrefs();
+  const [state, setState] = useState<NotifyState>(notifyState);
+  if (prefs.notifyBannerDismissed || !prefs.notifications || state === 'granted' || state === 'denied' || state === 'unsupported') return null;
+  const dismiss = () => setPrefs({ notifyBannerDismissed: true });
+  return (
+    <div className="notify-banner" role="status">
+      <Icon name="bell" size={22} />
+      {state === 'insecure' ? (
+        <span>
+          <strong>Notifications need HTTPS</strong>
+          <button className="link-btn" onClick={onOpenSettings}>
+            How to turn them on
+          </button>
+        </span>
+      ) : (
+        <span>
+          <strong>Get notified of new messages</strong>
+          <button className="link-btn" onClick={async () => setState(await requestNotifications())}>
+            Turn on desktop notifications
+          </button>
+        </span>
+      )}
+      <button className="icon-btn sm" onClick={dismiss} aria-label="Dismiss" title="Dismiss">
+        <Icon name="close" size={16} />
+      </button>
+    </div>
+  );
+}
+
 export function SidebarResizer() {
   const width = usePrefs().sidebarWidth;
   const MIN = 260;

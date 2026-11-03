@@ -8,9 +8,11 @@ export interface Prefs {
   notificationPreview: boolean;
   /** Chat list width in px; null = automatic. */
   sidebarWidth: number | null;
+  /** The "turn on notifications" banner was closed. */
+  notifyBannerDismissed: boolean;
 }
 
-const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null };
+const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null, notifyBannerDismissed: false };
 const KEY = 'sw-prefs';
 
 function load(): Prefs {
