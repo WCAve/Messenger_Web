@@ -159,7 +159,8 @@ function ProfileSection() {
 const THEMES: { value: Prefs['theme']; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
+  { value: 'dark', label: 'Dark blue' },
+  { value: 'dark-green', label: 'Dark green' },
 ];
 
 export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLogout: () => void }) {

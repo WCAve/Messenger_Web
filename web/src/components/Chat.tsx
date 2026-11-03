@@ -411,7 +411,7 @@ const MessageItem = memo(function MessageItem({
           </div>
         )}
         {m.quote && (
-          <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 221 : hueFor(m.quote.author) }}>
+          <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
             <strong>{m.quote.author === 'self' ? 'You' : m.quote.authorName}</strong>
             <span>{m.quote.text || 'Attachment'}</span>
           </button>
@@ -948,7 +948,7 @@ function Composer({
         />
       )}
       {editing && (
-        <div className="reply-preview editing" style={{ ['--hue' as string]: 221 }}>
+        <div className="reply-preview editing" style={{ ['--hue' as string]: 'var(--self-hue)' }}>
           <Icon name="pencil" size={18} />
           <div>
             <strong>Editing message</strong>
@@ -960,7 +960,7 @@ function Composer({
         </div>
       )}
       {replyTo && !editing && (
-        <div className="reply-preview" style={{ ['--hue' as string]: replyTo.author === 'self' ? 221 : hueFor(replyTo.author) }}>
+        <div className="reply-preview" style={{ ['--hue' as string]: replyTo.author === 'self' ? 'var(--self-hue)' : hueFor(replyTo.author) }}>
           <div>
             <strong>Replying to {replyTo.author === 'self' ? 'yourself' : replyTo.authorName}</strong>
             <span>{replyTo.body || (replyTo.attachments.length ? 'Attachment' : '')}</span>

@@ -2,7 +2,7 @@
 import { useSyncExternalStore } from 'react';
 
 export interface Prefs {
-  theme: 'system' | 'light' | 'dark';
+  theme: 'system' | 'light' | 'dark' | 'dark-green'; // 'dark' = Dark blue
   enterToSend: boolean;
   notifications: boolean;
   notificationPreview: boolean;
@@ -19,7 +19,7 @@ function load(): Prefs {
   try {
     const stored = JSON.parse(localStorage.getItem(KEY) ?? '{}');
     const theme = localStorage.getItem('sw-theme');
-    return { ...DEFAULTS, ...stored, theme: theme === 'light' || theme === 'dark' ? theme : 'system' };
+    return { ...DEFAULTS, ...stored, theme: theme === 'light' || theme === 'dark' || theme === 'dark-green' ? theme : 'system' };
   } catch {
     return { ...DEFAULTS };
   }

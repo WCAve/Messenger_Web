@@ -18,6 +18,14 @@
   --shadow: 0 1px 1px rgba(27, 31, 59, 0.08);
   --name-l: 42%;
   --name-s: 62%;
+  /* Theme-specific roles; by default they follow the blue accent. */
+  --bubble-out: var(--ultra);
+  --on-accent: #fff; /* text/icons on accent-coloured buttons and badges */
+  --tick-read: #fff; /* read ticks on your own bubbles */
+  --tick-read-alt: var(--ultra); /* read ticks elsewhere (chat list, stickers) */
+  --row-active: var(--ultra-soft);
+  --header: var(--sidebar);
+  --self-hue: 221; /* colour of "You" in quotes and reply bars */
   --font: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   color-scheme: light;
 }
@@ -61,6 +69,36 @@
     --name-s: 70%;
     color-scheme: dark;
   }
+}
+
+/* Dark green: WhatsApp-like colours. Same layout and icons, only the palette differs. */
+:root[data-theme='dark-green'] {
+  --ink: #e9edef;
+  --ink-2: #aebac1;
+  --ink-3: #8696a0;
+  --porcelain: #0b141a;
+  --paper: #202c33;
+  --mist: #222d34;
+  --haze: #202c33;
+  --ultra: #00a884;
+  --ultra-deep: #06cf9c;
+  --ultra-soft: #103a33;
+  --alarm: #f15c6d;
+  --bubble-in: #202c33;
+  --bubble-out: #005c4b;
+  --sidebar: #111b21;
+  --header: #202c33;
+  --row-active: #2a3942;
+  --out-text: #e9edef;
+  --out-meta: rgba(233, 237, 239, 0.6);
+  --on-accent: #111b21;
+  --tick-read: #53bdeb;
+  --tick-read-alt: #53bdeb;
+  --self-hue: 165;
+  --shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
+  --name-l: 66%;
+  --name-s: 62%;
+  color-scheme: dark;
 }
 
 * {
@@ -119,7 +157,7 @@ p {
 .btn.primary {
   background: var(--ultra);
   border-color: var(--ultra);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.primary:hover {
   background: var(--ultra-deep);
@@ -424,7 +462,7 @@ p {
   background: var(--haze);
 }
 .chat-row.active {
-  background: var(--ultra-soft);
+  background: var(--row-active);
 }
 .chat-row-main {
   flex: 1;
@@ -478,7 +516,7 @@ p {
   color: var(--ink-3);
 }
 .preview .status.read {
-  color: var(--ultra);
+  color: var(--tick-read-alt);
 }
 .preview-author {
   color: var(--ink);
@@ -489,7 +527,7 @@ p {
   padding: 0 6px;
   border-radius: 999px;
   background: var(--ultra);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 700;
   display: grid;
@@ -518,7 +556,8 @@ p {
   color: hsl(var(--hue) 55% 30%);
   background: hsl(var(--hue) 70% 88%);
 }
-:root[data-theme='dark'] .avatar {
+:root[data-theme='dark'] .avatar,
+:root[data-theme='dark-green'] .avatar {
   color: hsl(var(--hue) 70% 86%);
   background: hsl(var(--hue) 35% 30%);
 }
@@ -562,7 +601,7 @@ p {
   gap: 12px;
   padding: 8px 16px;
   min-height: 60px;
-  background: var(--sidebar);
+  background: var(--header);
   border-bottom: 1px solid var(--mist);
 }
 .chat-head-main {
@@ -675,7 +714,7 @@ p {
   min-width: 64px;
 }
 .msg.out .bubble {
-  background: var(--ultra);
+  background: var(--bubble-out);
   color: var(--out-text);
 }
 /* The tail: first bubble of a run gets a squared-off corner on the speaker's side. */
@@ -723,7 +762,7 @@ p {
   color: var(--out-meta);
 }
 .msg.out .status.read {
-  color: #fff;
+  color: var(--tick-read);
 }
 .msg.out .status.failed {
   color: #ffd2cf;
@@ -1051,7 +1090,7 @@ p {
   border: 0;
   border-radius: 50%;
   background: var(--ultra);
-  color: #fff;
+  color: var(--on-accent);
   display: grid;
   place-items: center;
 }
@@ -1660,8 +1699,8 @@ button.member:disabled {
   gap: 8px;
 }
 .out-preview {
-  background: var(--ultra);
-  color: #fff;
+  background: var(--bubble-out);
+  color: var(--out-text);
   max-width: 90%;
   white-space: pre-wrap;
 }
@@ -1811,7 +1850,7 @@ button.member:disabled {
 }
 .msg.out .bubble.sticker .status.read,
 .msg.out .bubble.jumbo .status.read {
-  color: var(--ultra);
+  color: var(--tick-read-alt);
 }
 
 /* ---------- settings ---------- */
@@ -2096,4 +2135,11 @@ body.resizing * {
   border-radius: 4px;
   background: var(--haze);
   overflow-wrap: anywhere;
+}
+/* Theme picker: four choices wrap under the label in a narrow sidebar. */
+.setting-row:has(.segmented) {
+  flex-wrap: wrap;
+}
+.segmented {
+  flex-wrap: wrap;
 }

@@ -23,7 +23,7 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link
-- Settings: your profile (picture, first name, about), light/dark/system theme, Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
+- Settings: your profile (picture, first name, about), theme (System, Light, Dark blue, or Dark green with WhatsApp-like colours), Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
 - Change a group's picture from Group info (if the group lets you)
 - Resizable chat list: drag the divider, or double-click it to reset
 - Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
