@@ -21,6 +21,28 @@ export function localPath(id: string) {
   return path.join(config.attachmentsDir, id);
 }
 
+/**
+ * True when a downloaded MP4/MOV has a video track but no sound track (how Signal sends GIFs).
+ * Null when the file isn't available locally. Only looks at files up to 25 MB.
+ */
+export function isSilentVideo(id: string): boolean | null {
+  if (!isSafeId(id)) return null;
+  const file = localPath(id);
+  if (!fs.existsSync(file)) return null;
+  const size = fs.statSync(file).size;
+  if (size > 25 * 1024 * 1024) return false;
+  const buf = fs.readFileSync(file);
+  let video = false;
+  let sound = false;
+  // Each track's 'hdlr' box: type(4) version/flags(4) pre_defined(4) handler_type(4)
+  for (let i = buf.indexOf('hdlr'); i >= 0 && i + 16 <= buf.length; i = buf.indexOf('hdlr', i + 4)) {
+    const handler = buf.toString('latin1', i + 12, i + 16);
+    if (handler === 'soun') sound = true;
+    if (handler === 'vide') video = true;
+  }
+  return video && !sound;
+}
+
 const inflight = new Map<string, Promise<boolean>>();
 
 /** Copy an attachment from the Signal API into local storage. Resolves true when it's available locally. */

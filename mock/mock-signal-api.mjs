@@ -12,8 +12,15 @@
  *   GET  /mock/sent                                             everything Signal Web sent
  */
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
+
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+const GIF_MP4 = fs.readFileSync(path.join(FIXTURES, 'gif.mp4')); // no sound track → shown as a GIF
+const CLIP_MP4 = fs.readFileSync(path.join(FIXTURES, 'clip.mp4')); // has sound → normal video
 
 const PORT = Number(process.env.MOCK_PORT ?? 8080);
 const SELF = { number: '+31600000001', uuid: '00000000-0000-4000-8000-000000000001' };
@@ -22,7 +29,15 @@ const PEOPLE = {
   bob: { number: '+31622222222', uuid: 'bbbbbbbb-0000-4000-8000-00000000000b', name: 'Bob Jansen', profile: 'Bobby' },
   carol: { number: '+31633333333', uuid: 'cccccccc-0000-4000-8000-00000000000c', name: '', profile: 'Carol' },
 };
-const GROUP = { internal_id: 'bW9ja2dyb3VwaWQxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=', name: 'Weekend plans' };
+// Group members who aren't in your address book: one with a profile name, one Signal knows nothing about.
+const DAVE = { number: '', uuid: 'dddddddd-0000-4000-8000-00000000000d', profile: 'Dave Bakker' };
+const STRANGER_UUID = 'eeeeeeee-0000-4000-8000-00000000000e';
+const GROUP = {
+  internal_id: 'bW9ja2dyb3VwaWQxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
+  name: 'Weekend plans',
+  description: 'Planning for Saturday at the market.\n\nBirthdays:\n3 jan Alice\n12 feb Bob\n24 mar Carol\n9 apr Dave\n17 jun You',
+};
+const SEND_DELAY_MS = 1200; // like a real group send: receipts start arriving before it returns
 const GROUP_REST_ID = 'group.' + Buffer.from(GROUP.internal_id).toString('base64');
 
 let linked = process.env.MOCK_LINKED === '1';
@@ -76,6 +91,8 @@ const QR = png(232, 232, (x, y) => {
   if ([[0, 0], [19, 0], [0, 19]].some(([a, b]) => cx >= a && cx < a + 7 && cy >= b && cy < b + 7)) return finder(0, 0) || finder(19, 0) || finder(0, 19) ? [0, 0, 0] : [255, 255, 255];
   return (qrSeed[(cx * 26 + cy) % 64] >> (cx % 8)) & 1 ? [0, 0, 0] : [255, 255, 255];
 });
+const AVATAR_ALICE = png(96, 96, (x, y) => (Math.hypot(x - 48, y - 40) < 22 ? [250, 210, 180] : y > 70 ? [60, 90, 160] : [230, 120, 90]));
+const AVATAR_GROUP = png(96, 96, (x, y) => ((Math.floor(x / 24) + Math.floor(y / 24)) % 2 ? [255, 190, 60] : [70, 160, 120]));
 const PHOTO = png(640, 420, (x, y) => {
   const sky = y < 260;
   if (Math.hypot(x - 470, y - 110) < 50) return [255, 214, 120];
@@ -119,7 +136,7 @@ function push(envelope) {
 }
 
 // ---------- envelope builders ----------
-const from = (p) => ({ source: p.number, sourceNumber: p.number, sourceUuid: p.uuid, sourceName: p.profile, sourceDevice: 1 });
+const from = (p) => ({ source: p.number || p.uuid, sourceNumber: p.number || null, sourceUuid: p.uuid, sourceName: p.profile, sourceDevice: 1 });
 function incoming(p, text, opts = {}) {
   const ts = opts.ts ?? Date.now();
   push({
@@ -165,6 +182,21 @@ function seed() {
   incoming(PEOPLE.carol, 'I can do snacks', { ts: now - 4.5 * H, group: true });
   incoming(PEOPLE.bob, '', { ts: now - 4.4 * H, group: true, reaction: { emoji: '🙏', targetAuthor: PEOPLE.carol.number, targetAuthorNumber: PEOPLE.carol.number, targetAuthorUuid: PEOPLE.carol.uuid, targetSentTimestamp: now - 4.5 * H, isRemove: false } });
   incoming(PEOPLE.carol, 'Did you get my email about the invoice?', { ts: now - 40 * 60_000 });
+  // signal-cli puts the phone number in the mention's "name" field
+  push({
+    ...from(PEOPLE.carol),
+    timestamp: now - 30 * 60_000,
+    dataMessage: {
+      timestamp: now - 30 * 60_000,
+      message: 'De overstap naar signal nadert \uFFFC 🤩',
+      mentions: [{ name: PEOPLE.bob.number, number: PEOPLE.bob.number, uuid: PEOPLE.bob.uuid, start: 31, length: 1 }],
+      groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' },
+    },
+  });
+  incoming(PEOPLE.bob, '', { ts: now - 29 * 60_000, group: true, attachments: [{ contentType: 'video/mp4', filename: null, id: 'mockgif1.mp4', size: GIF_MP4.length, width: 240, height: 180 }] });
+  push({ source: DAVE.uuid, sourceUuid: DAVE.uuid, sourceName: DAVE.profile, sourceDevice: 1, timestamp: now - 28 * 60_000,
+    dataMessage: { timestamp: now - 28 * 60_000, message: 'Haha 😂 and here is the video from last time', groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' },
+      attachments: [{ contentType: 'video/mp4', filename: 'clip.mp4', id: 'mockclip1.mp4', size: CLIP_MP4.length, width: 160, height: 120 }] } });
   void t1;
 }
 
@@ -195,13 +227,29 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(QR);
     }
-    if (p.startsWith('/v1/contacts/'))
-      return json(res, 200, Object.values(PEOPLE).map((x) => ({ number: x.number, uuid: x.uuid, name: x.name, profile_name: x.profile, username: '', blocked: false, given_name: '', profile: { given_name: x.profile, lastname: '' }, nickname: { name: '', given_name: '', family_name: '' } })));
-    if (p.startsWith('/v1/groups/'))
-      return json(res, 200, [{ name: GROUP.name, description: '', id: GROUP_REST_ID, internal_id: GROUP.internal_id, members: [SELF.number, PEOPLE.alice.number, PEOPLE.bob.number, PEOPLE.carol.number], blocked: false, member: true, admins: [] }]);
-    if (p.startsWith('/v1/attachments/')) {
+    const avatarMatch = p.match(/^\/v1\/(contacts|groups)\/[^/]+\/([^/]+)\/avatar$/);
+    if (avatarMatch) {
+      const id = decodeURIComponent(avatarMatch[2]);
+      const img = avatarMatch[1] === 'groups' ? (id === GROUP_REST_ID ? AVATAR_GROUP : null) : id === PEOPLE.alice.uuid ? AVATAR_ALICE : null;
+      if (!img) return json(res, 404, { error: 'No avatar found.' });
       res.writeHead(200, { 'content-type': 'image/png' });
-      return res.end(PHOTO);
+      return res.end(img);
+    }
+    if (p.startsWith('/v1/contacts/')) {
+      const all = url.searchParams.get('all_recipients') === 'true';
+      const list = Object.values(PEOPLE).map((x) => ({ number: x.number, uuid: x.uuid, name: x.name, profile_name: x.profile, username: '', blocked: false, given_name: '',
+        profile: { given_name: x.profile, lastname: '', about: x === PEOPLE.alice ? 'Hiking whenever I can 🥾' : '', has_avatar: x === PEOPLE.alice }, nickname: { name: '', given_name: '', family_name: '' } }));
+      if (all) list.push({ number: '', uuid: DAVE.uuid, name: '', profile_name: DAVE.profile, username: '', blocked: false, given_name: '', profile: { given_name: 'Dave', lastname: 'Bakker', about: '', has_avatar: false }, nickname: {} });
+      return json(res, 200, list);
+    }
+    if (p.startsWith('/v1/groups/'))
+      return json(res, 200, [{ name: GROUP.name, description: GROUP.description, id: GROUP_REST_ID, internal_id: GROUP.internal_id,
+        members: [SELF.number, PEOPLE.alice.number, PEOPLE.bob.number, PEOPLE.carol.number, DAVE.uuid, STRANGER_UUID], blocked: false, member: true, admins: [SELF.number, PEOPLE.bob.number] }]);
+    if (p.startsWith('/v1/attachments/')) {
+      const id = decodeURIComponent(p.split('/').pop());
+      const [type, body] = id === 'mockgif1.mp4' ? ['video/mp4', GIF_MP4] : id === 'mockclip1.mp4' ? ['video/mp4', CLIP_MP4] : ['image/png', PHOTO];
+      res.writeHead(200, { 'content-type': type });
+      return res.end(body);
     }
     if (p === '/v2/send' && m === 'POST') {
       const b = await body(req);
@@ -211,8 +259,15 @@ const server = http.createServer(async (req, res) => {
       const recipient = b.recipients?.[0];
       const person = personFor(recipient);
       const isGroup = recipient === GROUP_REST_ID;
-      setTimeout(() => (person ? receipt(person, ts, 'delivery') : isGroup && receipt(PEOPLE.bob, ts, 'delivery')), 700);
-      setTimeout(() => (person ? receipt(person, ts, 'read') : isGroup && receipt(PEOPLE.carol, ts, 'read')), 2500);
+      if (person) {
+        setTimeout(() => receipt(person, ts, 'delivery'), 700);
+        setTimeout(() => receipt(person, ts, 'read'), 2500);
+      } else if (isGroup) {
+        // Delivery receipts from everyone, the first ones *before* the send call returns.
+        [PEOPLE.alice, PEOPLE.bob, PEOPLE.carol, DAVE].forEach((x, i) => setTimeout(() => receipt(x, ts, 'delivery'), 300 + i * 500));
+        setTimeout(() => receipt(PEOPLE.carol, ts, 'read'), 2800);
+        setTimeout(() => receipt(PEOPLE.alice, ts, 'read'), 3600);
+      }
       const replier = person ?? (isGroup ? PEOPLE.bob : null);
       if (replier) {
         setTimeout(() => typing(replier, true, isGroup), 3000);
@@ -221,6 +276,7 @@ const server = http.createServer(async (req, res) => {
           incoming(replier, `Got it: “${String(b.message || 'your attachment').slice(0, 40)}”`, { group: isGroup });
         }, 5500);
       }
+      if (isGroup) await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
       return json(res, 201, { timestamp: String(ts) });
     }
     if (p.startsWith('/v1/reactions/') || p.startsWith('/v1/receipts/') || p.startsWith('/v1/typing-indicator/')) {

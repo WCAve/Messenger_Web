@@ -14,6 +14,8 @@ export interface ContactRow {
   username: string | null;
   blocked: number;
   updated_at: number | null;
+  about: string | null;
+  has_avatar: number;
 }
 
 export interface ConversationRow {
@@ -24,6 +26,8 @@ export interface ConversationRow {
   group_id: string | null;
   group_name: string | null;
   group_members: string | null;
+  group_description: string | null;
+  group_admins: string | null;
   last_message_at: number | null;
   archived: number;
   created_at: number;
@@ -38,6 +42,7 @@ export interface Attachment {
   height?: number | null;
   voiceNote?: boolean;
   caption?: string | null;
+  gif?: boolean; // silent looping video (Signal's GIFs)
 }
 
 export interface Quote {
@@ -114,6 +119,8 @@ export function upsertContact(c: {
   envelope_name?: string | null;
   username?: string | null;
   blocked?: boolean;
+  about?: string | null;
+  has_avatar?: boolean;
 }) {
   if (!c.uuid && !c.number) return;
   if (self.is(c.uuid, c.number)) return;
@@ -137,21 +144,38 @@ export function upsertContact(c: {
       envelope_name: c.envelope_name || existing?.envelope_name || null,
       username: c.username !== undefined ? c.username || null : existing?.username ?? null,
       blocked: c.blocked !== undefined ? (c.blocked ? 1 : 0) : existing?.blocked ?? 0,
+      about: c.about !== undefined ? c.about || null : existing?.about ?? null,
+      has_avatar: c.has_avatar !== undefined ? (c.has_avatar ? 1 : 0) : existing?.has_avatar ?? 0,
       updated_at: Date.now(),
     };
     db.prepare(
-      `INSERT INTO contacts (key, uuid, number, name, profile_name, envelope_name, username, blocked, updated_at)
-       VALUES (@key, @uuid, @number, @name, @profile_name, @envelope_name, @username, @blocked, @updated_at)
+      `INSERT INTO contacts (key, uuid, number, name, profile_name, envelope_name, username, blocked, about, has_avatar, updated_at)
+       VALUES (@key, @uuid, @number, @name, @profile_name, @envelope_name, @username, @blocked, @about, @has_avatar, @updated_at)
        ON CONFLICT(key) DO UPDATE SET uuid=@uuid, number=@number, name=@name, profile_name=@profile_name,
-         envelope_name=@envelope_name, username=@username, blocked=@blocked, updated_at=@updated_at`,
+         envelope_name=@envelope_name, username=@username, blocked=@blocked, about=@about, has_avatar=@has_avatar,
+         updated_at=@updated_at`,
     ).run(merged);
   });
   tx();
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Best display name. Never shows a raw Signal UUID: people we know nothing about are "Unknown". */
 export function contactName(c: ContactRow | undefined, fallback?: string | null): string {
-  if (!c) return fallback || 'Unknown';
-  return c.name || c.profile_name || c.envelope_name || c.number || (c.username ? '@' + c.username : null) || fallback || 'Unknown';
+  const name = c && (c.name || c.profile_name || c.envelope_name || c.number || (c.username ? '@' + c.username : null));
+  if (name) return name;
+  if (fallback && !UUID_RE.test(fallback)) return fallback;
+  return 'Unknown';
+}
+
+export function contactByKeyOrId(key: string): ContactRow | undefined {
+  return contactByKey.get(key) ?? findContact(key, key);
+}
+
+export function avatarUrlForKey(key: string): string | null {
+  const c = contactByKeyOrId(key);
+  return c?.has_avatar && (c.uuid || c.number) ? `/api/avatars/contact/${encodeURIComponent(c.key)}` : null;
 }
 
 export function nameForKey(key: string): string {
@@ -211,13 +235,25 @@ export function getOrCreateDirect(uuid?: string | null, number?: string | null):
   return convById.get(Number(info.lastInsertRowid))!;
 }
 
-export function getOrCreateGroup(groupId: string, name?: string | null, members?: string[]): ConversationRow {
+export function getOrCreateGroup(
+  groupId: string,
+  name?: string | null,
+  members?: string[],
+  details?: { description?: string | null; admins?: string[] },
+): ConversationRow {
   const conv = convByGroup.get(groupId);
   if (conv) {
-    if ((name && name !== conv.group_name) || members) {
-      db.prepare('UPDATE conversations SET group_name = COALESCE(?, group_name), group_members = COALESCE(?, group_members) WHERE id = ?').run(
+    if ((name && name !== conv.group_name) || members || details) {
+      db.prepare(
+        `UPDATE conversations SET group_name = COALESCE(?, group_name), group_members = COALESCE(?, group_members),
+           group_description = CASE WHEN ? THEN ? ELSE group_description END, group_admins = COALESCE(?, group_admins)
+         WHERE id = ?`,
+      ).run(
         name || null,
         members ? JSON.stringify(members) : null,
+        details && details.description !== undefined ? 1 : 0,
+        details?.description || null,
+        details?.admins ? JSON.stringify(details.admins) : null,
         conv.id,
       );
       return convById.get(conv.id)!;
@@ -225,8 +261,17 @@ export function getOrCreateGroup(groupId: string, name?: string | null, members?
     return conv;
   }
   const info = db
-    .prepare("INSERT INTO conversations (kind, group_id, group_name, group_members, created_at) VALUES ('group', ?, ?, ?, ?)")
-    .run(groupId, name || null, members ? JSON.stringify(members) : null, Date.now());
+    .prepare(
+      "INSERT INTO conversations (kind, group_id, group_name, group_members, group_description, group_admins, created_at) VALUES ('group', ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      groupId,
+      name || null,
+      members ? JSON.stringify(members) : null,
+      details?.description || null,
+      details?.admins ? JSON.stringify(details.admins) : null,
+      Date.now(),
+    );
   return convById.get(Number(info.lastInsertRowid))!;
 }
 
@@ -250,14 +295,28 @@ const lastMessageStmt = db.prepare<[number], MessageRow>(
 );
 const unreadStmt = db.prepare<[number], { n: number }>('SELECT count(*) AS n FROM messages WHERE conversation_id = ? AND read = 0');
 
+const MENTION_RE = /@(\+[1-9]\d{6,14}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+
+/** Show "@Kevin Nijmeijer" for mentions stored as "@<uuid>" or "@<phone number>". */
+export function renderMentions(text: string | null | undefined): string | null {
+  if (!text) return text ?? null;
+  return text.replace(MENTION_RE, (match, id: string) => {
+    if (self.is(id, id)) return '@You';
+    const c = findContact(id, id);
+    const name = contactName(c, id.startsWith('+') ? id : null);
+    return name === 'Unknown' ? match : '@' + name;
+  });
+}
+
 export function previewText(m: MessageRow): string {
   if (m.deleted) return 'This message was deleted';
   if (m.kind === 'sticker') return 'Sticker';
-  if (m.body) return m.body;
+  if (m.body) return renderMentions(m.body)!;
   const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
   if (atts.length) {
     const a = atts[0];
     if (a.voiceNote) return '🎤 Voice message';
+    if (a.gif || a.contentType === 'image/gif') return 'GIF';
     if (a.contentType.startsWith('image/')) return atts.length > 1 ? `📷 ${atts.length} photos` : '📷 Photo';
     if (a.contentType.startsWith('video/')) return '🎥 Video';
     if (a.contentType.startsWith('audio/')) return '🎵 Audio';
@@ -269,15 +328,7 @@ export function previewText(m: MessageRow): string {
 export function conversationDto(row: ConversationRow) {
   const conv = convById.get(row.id) ?? row; // always use the current row, callers may hold a stale one
   const last = lastMessageStmt.get(conv.id);
-  let members: { key: string; name: string }[] | undefined;
-  if (conv.kind === 'group' && conv.group_members) {
-    const ids: string[] = JSON.parse(conv.group_members);
-    members = ids.map((id) => {
-      const c = findContact(id, id);
-      const key = self.is(id, id) ? 'self' : c?.key ?? id;
-      return { key, name: key === 'self' ? 'You' : contactName(c, id) };
-    });
-  }
+  const members = conv.kind === 'group' ? groupMembers(conv).map((m) => ({ key: m.key, name: m.name })) : undefined;
   const peer = conv.kind === 'direct' ? findContact(conv.peer_uuid, conv.peer_number) : undefined;
   return {
     id: conv.id,
@@ -285,6 +336,7 @@ export function conversationDto(row: ConversationRow) {
     title: conversationTitle(conv),
     number: conv.kind === 'direct' ? conv.peer_number : null,
     username: peer?.username ?? null,
+    avatar: conversationAvatarUrl(conv, peer),
     members,
     lastMessageAt: conv.last_message_at,
     lastMessage: last
@@ -301,11 +353,143 @@ export function conversationDto(row: ConversationRow) {
 }
 export type ConversationDto = ReturnType<typeof conversationDto>;
 
-export function listConversations() {
+function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string | null {
+  if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}`; // 404s (and is cached) when the group has none
+  return peer?.has_avatar ? `/api/avatars/conversation/${conv.id}` : null;
+}
+
+export interface GroupMember {
+  key: string;
+  name: string;
+  number: string | null;
+  username: string | null;
+  about: string | null;
+  admin: boolean;
+  avatar: string | null;
+}
+
+/** Group members: "You" first, then admins, then everyone else alphabetically; unknown people last. */
+export function groupMembers(conv: ConversationRow): GroupMember[] {
+  if (!conv.group_members) return [];
+  const ids: string[] = JSON.parse(conv.group_members);
+  const admins = new Set<string>(conv.group_admins ? JSON.parse(conv.group_admins) : []);
+  const seen = new Set<string>();
+  const list: GroupMember[] = [];
+  for (const id of ids) {
+    const isSelf = self.is(id, id);
+    const c = isSelf ? undefined : findContact(id, id);
+    const key = isSelf ? 'self' : c?.key ?? id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const adminIds = [id, c?.uuid, c?.number].filter(Boolean) as string[];
+    list.push({
+      key,
+      name: isSelf ? 'You' : contactName(c, id),
+      number: isSelf ? self.number ?? null : c?.number ?? (id.startsWith('+') ? id : null),
+      username: c?.username ?? null,
+      about: c?.about ?? null,
+      admin: adminIds.some((x) => admins.has(x)) || (isSelf && [self.number, self.uuid].some((x) => x && admins.has(x))),
+      avatar: isSelf ? null : avatarUrlForKey(key),
+    });
+  }
+  const rank = (m: GroupMember) => (m.key === 'self' ? 0 : m.name === 'Unknown' ? 3 : m.admin ? 1 : 2);
+  return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+/** Everything the info panel shows about a chat. */
+export function conversationInfo(conv: ConversationRow) {
+  const base = conversationDto(conv);
+  const peer = conv.kind === 'direct' ? findContact(conv.peer_uuid, conv.peer_number) : undefined;
   const rows = db
+    .prepare<[number], MessageRow>(
+      `SELECT * FROM messages WHERE conversation_id = ? AND deleted = 0 AND (attachments IS NOT NULL OR body LIKE '%http%')
+       ORDER BY sent_ts DESC LIMIT 500`,
+    )
+    .all(conv.id);
+  const media: { messageId: number; sentAt: number; authorName: string; attachment: Attachment }[] = [];
+  const files: typeof media = [];
+  const links: { messageId: number; sentAt: number; authorName: string; url: string }[] = [];
+  for (const m of rows) {
+    const authorName = nameForKey(m.author);
+    for (const a of (m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]) {
+      const entry = { messageId: m.id, sentAt: m.sent_ts, authorName, attachment: a };
+      if (a.contentType.startsWith('image/') || a.contentType.startsWith('video/')) media.push(entry);
+      else if (!a.voiceNote) files.push(entry);
+    }
+    for (const url of m.body?.match(/https?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g) ?? []) {
+      links.push({ messageId: m.id, sentAt: m.sent_ts, authorName, url });
+    }
+  }
+  const members = conv.kind === 'group' ? groupMembers(conv) : undefined;
+  return {
+    ...base,
+    description: conv.kind === 'group' ? conv.group_description : null,
+    about: peer?.about ?? null,
+    members,
+    memberCount: members?.length ?? 0,
+    media: media.slice(0, 60),
+    files: files.slice(0, 50),
+    links: links.slice(0, 50),
+  };
+}
+
+// ---------- receipts ----------
+
+const STATUS_RANK: Record<string, number> = { failed: -1, pending: 0, sent: 1, delivered: 2, read: 3 };
+
+export function statusRank(s: string | null) {
+  return STATUS_RANK[s ?? 'sent'] ?? 1;
+}
+
+/** Record a delivery or read receipt from one recipient; returns the message's new overall status. */
+export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered' | 'read', when: number): string {
+  db.prepare(
+    `INSERT INTO message_receipts (message_id, recipient, delivered_at, read_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(message_id, recipient) DO UPDATE SET
+       delivered_at = COALESCE(delivered_at, excluded.delivered_at),
+       read_at = COALESCE(read_at, excluded.read_at)`,
+  ).run(m.id, recipient, when, kind === 'read' ? when : null);
+  const conv = convById.get(m.conversation_id)!;
+  const counts = db
+    .prepare<[number], { delivered: number; read: number }>(
+      `SELECT count(*) AS delivered, count(read_at) AS read FROM message_receipts WHERE message_id = ?`,
+    )
+    .get(m.id)!;
+  // Like WhatsApp: in a group, two ticks once everyone got it, filled once everyone read it.
+  let expected = 1;
+  if (conv.kind === 'group') expected = Math.max(1, groupMembers(conv).filter((x) => x.key !== 'self').length);
+  const status = counts.read >= expected ? 'read' : counts.delivered >= expected ? 'delivered' : 'sent';
+  return statusRank(status) > statusRank(m.status) ? status : m.status ?? 'sent';
+}
+
+/** Per-recipient delivery state of an outgoing message, for the "message info" view. */
+export function messageReceipts(m: MessageRow) {
+  const conv = convById.get(m.conversation_id)!;
+  const rows = db
+    .prepare<[number], { recipient: string; delivered_at: number | null; read_at: number | null }>(
+      'SELECT recipient, delivered_at, read_at FROM message_receipts WHERE message_id = ?',
+    )
+    .all(m.id);
+  const byKey = new Map(rows.map((r) => [r.recipient, r]));
+  const people: { key: string; name: string }[] =
+    conv.kind === 'group'
+      ? groupMembers(conv).filter((x) => x.key !== 'self')
+      : [{ key: contactKey(conv.peer_uuid, conv.peer_number), name: conversationTitle(conv) }];
+  for (const r of rows) if (!people.some((p) => p.key === r.recipient)) people.push({ key: r.recipient, name: nameForKey(r.recipient) });
+  return people.map((p) => {
+    const r = byKey.get(p.key);
+    return { key: p.key, name: p.name, avatar: avatarUrlForKey(p.key), deliveredAt: r?.delivered_at ?? null, readAt: r?.read_at ?? null };
+  });
+}
+
+export function listConversationRows() {
+  return db
     .prepare<[], ConversationRow>('SELECT * FROM conversations WHERE last_message_at IS NOT NULL ORDER BY last_message_at DESC')
     .all();
-  return rows.map(conversationDto);
+}
+
+export function listConversations() {
+  return listConversationRows().map(conversationDto);
 }
 
 /** Groups we're a member of, for the "new chat" picker. */
@@ -393,11 +577,11 @@ export function messageDto(m: MessageRow) {
     authorName: nameForKey(m.author),
     outgoing: !!m.outgoing,
     kind: m.kind,
-    body: m.deleted ? null : m.body,
+    body: m.deleted ? null : renderMentions(m.body),
     attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]),
-    quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: quote.text ?? '' } : null,
+    quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '' } : null,
     reactions: reactions.map((r) => ({ emoji: r.emoji, author: r.author, authorName: nameForKey(r.author) })),
-    status: m.status,
+    status: m.status === 'viewed' ? 'read' : m.status,
     error: m.error,
     read: !!m.read,
     edited: !!m.edited,

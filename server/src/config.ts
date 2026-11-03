@@ -30,4 +30,8 @@ export const config = {
   /** Max upload size for outgoing attachments, in MB. */
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 100),
   logLevel: process.env.LOG_LEVEL ?? 'info',
+  /** Giphy API key for the GIF picker (free at developers.giphy.com). Without it the GIF tab explains how to add one. */
+  giphyApiKey: process.env.GIPHY_API_KEY?.trim() || null,
+  /** Giphy content rating: g, pg, pg-13 or r. */
+  giphyRating: process.env.GIPHY_RATING?.trim() || 'pg-13',
 };

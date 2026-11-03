@@ -1,4 +1,4 @@
-import type { Conversation, DirectoryContact, Message, SignalState } from './types';
+import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SignalState } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -31,6 +31,9 @@ export const api = {
   state: () => call<SignalState>('GET', '/api/state'),
   conversations: () => call<Conversation[]>('GET', '/api/conversations'),
   conversation: (id: number) => call<Conversation>('GET', `/api/conversations/${id}`),
+  info: (id: number) => call<ConversationInfo>('GET', `/api/conversations/${id}/info`),
+  messageInfo: (id: number) => call<{ message: Message; recipients: Recipient[] }>('GET', `/api/messages/${id}/info`),
+  config: () => call<{ giphyApiKey: string | null; giphyRating: string }>('GET', '/api/config'),
   startChat: (b: { number?: string; uuid?: string }) => call<Conversation>('POST', '/api/conversations', b),
   directory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('GET', '/api/directory'),
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),

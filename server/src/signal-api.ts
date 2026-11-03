@@ -72,7 +72,9 @@ export const signalApi = {
   about: () => call<About>('GET', '/v1/about', undefined, 10_000),
   accounts: () => call<string[]>('GET', '/v1/accounts', undefined, 10_000),
 
-  contacts: (number: string) => call<ApiContact[]>('GET', `/v1/contacts/${enc(number)}`),
+  /** allRecipients also returns people who aren't in your address book (e.g. group members), with their profile names. */
+  contacts: (number: string, allRecipients = false) =>
+    call<ApiContact[]>('GET', `/v1/contacts/${enc(number)}${allRecipients ? '?all_recipients=true' : ''}`),
   groups: (number: string) => call<ApiGroup[]>('GET', `/v1/groups/${enc(number)}`),
 
   send: (body: {
@@ -117,6 +119,17 @@ export const signalApi = {
     });
     if (!res.ok) throw new SignalApiError(`Attachment ${id} not available (${res.status})`, res.status);
     return res;
+  },
+
+  /** Profile picture of a person, or a group's avatar. Resolves null when there is none. */
+  async avatar(number: string, kind: 'profile' | 'group', id: string): Promise<{ data: Buffer; type: string } | null> {
+    const path = kind === 'group' ? `/v1/groups/${enc(number)}/${enc(id)}/avatar` : `/v1/contacts/${enc(number)}/${enc(id)}/avatar`;
+    const res = await fetch(config.signalApiUrl + path, { signal: AbortSignal.timeout(30_000) });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new SignalApiError(`avatar ${res.status}`, res.status);
+    const data = Buffer.from(await res.arrayBuffer());
+    if (!data.length) return null;
+    return { data, type: res.headers.get('content-type') ?? 'application/octet-stream' };
   },
 
   receiveUrl(number: string): string {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, onUnauthorized } from './api';
-import { ChatView } from './components/Chat';
+import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
+import { ChatInfoPanel, MessageInfoPanel } from './components/InfoPanel';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar } from './components/Sidebar';
@@ -28,6 +29,13 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const activeId = useStore((s) => s.activeId);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
   const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + c.unread, 0));
+  const panel = useStore((s) => s.panel);
+  const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
+
+  // Message info belongs to one chat: close it when switching chats.
+  useEffect(() => {
+    setState((s) => (s.panel?.kind === 'message' ? { panel: null } : {}));
+  }, [activeId]);
 
   useLiveEvents();
 
@@ -57,7 +65,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className={`app${activeId ? ' chat-open' : ''}`}>
+    <div className={`app${activeId ? ' chat-open' : ''}${active && panel ? ' panel-open' : ''}`}>
       {(!live || signal.status === 'connecting') && (
         <div className="banner" role="status">
           {!live ? 'Reconnecting to Signal Web…' : signal.error ?? 'Connecting to Signal…'}
@@ -65,7 +73,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       )}
       <Sidebar onLogout={onLogout} />
       {active ? (
-        <ChatView conversation={active} />
+        <ChatView conversation={active} onOpenMedia={setLightbox} />
       ) : (
         <section className="chat chat-placeholder">
           <div>
@@ -75,6 +83,11 @@ function Main({ onLogout }: { onLogout: () => void }) {
           </div>
         </section>
       )}
+      {active && panel?.kind === 'chat' && (
+        <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt) => setLightbox({ att, authorName, sentAt })} />
+      )}
+      {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
+      {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }

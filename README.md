@@ -19,12 +19,18 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Linking via QR code, right in the web UI
 - Chat list with unread counts, search, typing and delivery state
 - 1:1 and group chats, with history stored in SQLite
-- Text, emoji, links, replies (quotes), reactions, mentions
+- Text, links, replies (quotes), reactions (quick bar plus every emoji), @mentions shown by name
+- Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
+- GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
-- Delivery and read ticks, read receipts, typing indicators
+- Group and contact info: description, members and admins, profile pictures, shared media, docs and links
+- Delivery and read ticks, plus per-person "Read by / Delivered to" in Message info
+- Read receipts and typing indicators, both ways
 - Delete for everyone (your own messages), retry failed sends
 - Edits and deletes made by others are shown
-- Browser notifications, dark mode, phone-sized layout
+- Browser notifications, dark mode, layout for wide screens and phones
+
+In groups, two ticks mean everyone has received the message, and filled ticks mean everyone has read it (like WhatsApp). People who switched off read receipts never count as read; Message info shows who has.
 
 **Not supported**: voice/video calls, stories, message history from before linking (Signal only syncs new messages to a newly linked device), editing your own messages, stickers (shown as "Sticker"), polls (shown as text), view-once media.
 
@@ -118,6 +124,8 @@ Back up both appdata folders:
 | `APP_PASSWORD` | (required) | Web UI password, 8+ characters |
 | `SIGNAL_API_URL` | `http://signal-api:8080` | Where the signal-api container is |
 | `SIGNAL_NUMBER` | first linked account | Only if signal-api holds several accounts |
+| `GIPHY_API_KEY` | (none) | Enables the GIF picker. Free: [developers.giphy.com](https://developers.giphy.com/dashboard/) → Create an App → API. The browser talks to Giphy directly, as Giphy's terms require |
+| `GIPHY_RATING` | `pg-13` | Content rating for GIF results: `g`, `pg`, `pg-13`, `r` |
 | `SEND_READ_RECEIPTS` | `true` | Send read receipts when you open a chat |
 | `SEND_TYPING_INDICATORS` | `true` | Send typing indicators |
 | `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS |
@@ -126,7 +134,7 @@ Back up both appdata folders:
 | `PUID` / `PGID` | `99` / `100` | Owner of files in `/data` |
 | `DATA_DIR` | `/data` | Database and attachments |
 | `PORT` | `3000` | HTTP port |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`. `debug` logs every delivery/read receipt |
 
 ## Other Docker hosts
 
@@ -151,6 +159,7 @@ npm run build -w server && \
 
 Open http://localhost:3000. The mock starts unlinked: its QR code "links" four seconds after it is shown (`MOCK_LINKED=1` skips that).
 It auto-replies to anything you send, and messages containing "fail" are rejected so you can test retries.
+The sample group has a description, admins, an avatar, a member with only a profile name and one Signal knows nothing about, a GIF (silent MP4) and a normal video, and a mention stored as a phone number. Group sends take a second, with delivery receipts arriving before the send returns, like on real Signal.
 `POST /mock/incoming {"from":"bob","text":"hi","group":true}` on the mock injects incoming messages.
 
 ### Layout
@@ -160,12 +169,14 @@ server/src
   index.ts        HTTP server, static files, security headers
   routes.ts       REST API used by the UI
   signal.ts       connection to signal-api: status, receive WebSocket, contact/group refresh
-  ingest.ts       turns signal-cli envelopes into stored messages and live events
+  ingest.ts       turns signal-cli envelopes into stored messages, receipts and live events
+  avatars.ts      profile pictures and group avatars, cached on disk
   store.ts        SQLite access and the JSON shapes sent to the browser
   signal-api.ts   signal-cli-rest-api client
 web/src
   App.tsx         session, live event stream, notifications
-  components/     Sidebar, Chat (messages + composer), Login, Setup (QR/status)
+  components/     Sidebar, Chat (messages + composer), InfoPanel, Picker (emoji/GIF), Login, Setup
+  emoji/          emoji data: curated.ts (shortcodes, keywords) + extra.ts (generated, see web/scripts)
 mock/             fake signal-cli-rest-api for development and CI
 unraid/           Unraid templates
 ```

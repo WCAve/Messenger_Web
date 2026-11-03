@@ -5,7 +5,8 @@ export type ServerEvent =
   | { type: 'state'; state: unknown }
   | { type: 'conversation'; conversation: unknown }
   | { type: 'message'; message: unknown }
-  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean };
+  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }
+  | { type: 'receipt'; messageId: number }; // per-recipient receipt changed (overall status didn't)
 
 const clients = new Set<ServerResponse>();
 

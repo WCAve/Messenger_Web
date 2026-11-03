@@ -121,6 +121,21 @@ const MIGRATIONS: string[] = [
   CREATE INDEX messages_sent_ts ON messages(sent_ts);
   CREATE INDEX messages_unread ON messages(conversation_id) WHERE read = 0;
   `,
+  `
+  ALTER TABLE conversations ADD COLUMN group_description TEXT;
+  ALTER TABLE conversations ADD COLUMN group_admins TEXT;      -- JSON array of numbers/uuids
+  ALTER TABLE contacts ADD COLUMN about TEXT;
+  ALTER TABLE contacts ADD COLUMN has_avatar INTEGER NOT NULL DEFAULT 0;
+
+  -- Delivery/read receipts per recipient, for outgoing messages.
+  CREATE TABLE message_receipts (
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    recipient TEXT NOT NULL,   -- contact key
+    delivered_at INTEGER,
+    read_at INTEGER,
+    PRIMARY KEY (message_id, recipient)
+  );
+  `,
 ];
 
 function migrate() {

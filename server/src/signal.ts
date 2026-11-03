@@ -6,7 +6,12 @@ import { config } from './config.js';
 import { broadcast } from './events.js';
 import { handleEnvelope, ingestHooks } from './ingest.js';
 import { signalApi } from './signal-api.js';
-import { getOrCreateGroup, self, upsertContact } from './store.js';
+import { conversationDto, getOrCreateGroup, listConversationRows, self, upsertContact } from './store.js';
+
+/** Names and group details may have changed: push fresh chat-list rows to open browsers. */
+function broadcastAllConversations() {
+  for (const row of listConversationRows()) broadcast({ type: 'conversation', conversation: conversationDto(row) });
+}
 
 export type SignalStatus =
   | 'starting'
@@ -23,7 +28,7 @@ export interface SignalState {
   error?: string;
 }
 
-type Logger = { info: (m: string) => void; warn: (m: string) => void; error: (m: string) => void };
+type Logger = { info: (m: string) => void; warn: (m: string) => void; error: (m: string) => void; debug?: (m: string) => void };
 
 let state: SignalState = { status: 'starting' };
 let log: Logger = console;
@@ -133,7 +138,11 @@ function connect(account: string) {
 export async function refreshDirectory() {
   const account = self.number;
   if (!account) return;
-  const [contacts, groups] = await Promise.all([signalApi.contacts(account), signalApi.groups(account)]);
+  const [contacts, groups] = await Promise.all([
+    // all_recipients needs a recent signal-cli-rest-api; fall back to address-book contacts only.
+    signalApi.contacts(account, true).catch(() => signalApi.contacts(account)),
+    signalApi.groups(account),
+  ]);
   for (const c of contacts) {
     const nick = c.nickname?.name || [c.nickname?.given_name, c.nickname?.family_name].filter(Boolean).join(' ');
     const profile = c.profile_name || [c.profile?.given_name, c.profile?.lastname].filter(Boolean).join(' ');
@@ -144,18 +153,22 @@ export async function refreshDirectory() {
       profile_name: profile || null,
       username: c.username || null,
       blocked: c.blocked,
+      about: c.profile?.about || null,
+      has_avatar: !!c.profile?.has_avatar,
     });
   }
   for (const g of groups) {
     if (g.blocked || g.member === false) continue;
-    getOrCreateGroup(g.internal_id, g.name, g.members);
+    getOrCreateGroup(g.internal_id, g.name, g.members, { description: g.description || null, admins: g.admins ?? [] });
   }
+  broadcastAllConversations();
   log.info(`signal: directory refreshed (${contacts.length} contacts, ${groups.length} groups)`);
 }
 
 export function startSignal(logger: Logger) {
   log = logger;
   ingestHooks.log = (m, err) => log.warn(`ingest: ${m}${err ? ': ' + (err as Error).message : ''}`);
+  ingestHooks.debug = (m) => log.debug?.(`ingest: ${m}`);
   ingestHooks.onGroupChanged = () => {
     clearTimeout(groupRefreshDebounce);
     groupRefreshDebounce = setTimeout(() => refreshDirectory().catch(() => {}), 3000);

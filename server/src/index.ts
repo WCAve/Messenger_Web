@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { db } from './db.js';
 import { sendJson } from './http.js';
+import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
 import { startSignal, stopSignal } from './signal.js';
 
@@ -65,7 +66,7 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('referrer-policy', 'no-referrer');
   res.setHeader(
     'content-security-policy',
-    "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; img-src 'self' blob: data: https://*.giphy.com; media-src 'self' blob: https://*.giphy.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://api.giphy.com https://*.giphy.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   );
   try {
     if (!(await router.handle(req, res))) serveStatic(req, res);
@@ -77,10 +78,19 @@ const server = http.createServer(async (req, res) => {
 server.requestTimeout = 10 * 60_000; // large uploads
 server.keepAliveTimeout = 65_000;
 
+setTimeout(() => {
+  try {
+    backfillGifFlags();
+  } catch (e) {
+    log('warn', `GIF backfill failed: ${(e as Error).message}`);
+  }
+}, 2000);
+
 startSignal({
   info: (m) => log('info', m),
   warn: (m) => log('warn', m),
   error: (m) => log('error', m),
+  debug: (m) => log('debug', m),
 });
 
 server.listen(config.port, config.host, () => log('info', `Signal Web listening on http://${config.host}:${config.port}`));

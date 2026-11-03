@@ -13,6 +13,7 @@ export interface Conversation {
   title: string;
   number: string | null;
   username: string | null;
+  avatar: string | null;
   members?: { key: string; name: string }[];
   lastMessageAt: number | null;
   lastMessage: { text: string; outgoing: boolean; status: string | null; authorName: string | null } | null;
@@ -29,6 +30,42 @@ export interface Attachment {
   height?: number | null;
   voiceNote?: boolean;
   caption?: string | null;
+  gif?: boolean;
+}
+
+export interface Member {
+  key: string;
+  name: string;
+  number: string | null;
+  username: string | null;
+  about: string | null;
+  admin: boolean;
+  avatar: string | null;
+}
+
+export interface MediaItem {
+  messageId: number;
+  sentAt: number;
+  authorName: string;
+  attachment: Attachment;
+}
+
+export interface ConversationInfo extends Conversation {
+  description: string | null;
+  about: string | null;
+  members?: Member[];
+  memberCount: number;
+  media: MediaItem[];
+  files: MediaItem[];
+  links: { messageId: number; sentAt: number; authorName: string; url: string }[];
+}
+
+export interface Recipient {
+  key: string;
+  name: string;
+  avatar: string | null;
+  deliveredAt: number | null;
+  readAt: number | null;
 }
 
 export interface Message {
@@ -64,4 +101,5 @@ export type ServerEvent =
   | { type: 'state'; state: SignalState }
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'message'; message: Message }
-  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean };
+  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }
+  | { type: 'receipt'; messageId: number };

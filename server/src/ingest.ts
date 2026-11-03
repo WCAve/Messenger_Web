@@ -2,7 +2,7 @@
  * Turns signal-cli receive envelopes into stored messages and live events.
  * Envelope schema: see the "receive.*" definitions in signal-cli-rest-api's swagger.json.
  */
-import { fetchAttachment } from './attachments.js';
+import { fetchAttachment, isSilentVideo } from './attachments.js';
 import { broadcast } from './events.js';
 import {
   type Attachment,
@@ -11,12 +11,14 @@ import {
   contactKey,
   conversationDto,
   findMessage,
+  getMessage,
   getOrCreateDirect,
   getOrCreateGroup,
   insertMessage,
   markConversationRead,
   messageDto,
   nameForKey,
+  recordReceipt,
   self,
   updateMessage,
   upsertContact,
@@ -31,14 +33,13 @@ export const ingestHooks = {
   /** Called when a group changed (name, members) so the caller can refresh group info. */
   onGroupChanged: () => {},
   log: (_msg: string, _err?: unknown) => {},
+  debug: (_msg: string) => {},
 };
 
 interface Address {
   uuid?: string | null;
   number?: string | null;
 }
-
-const STATUS_RANK: Record<string, number> = { pending: 0, sent: 1, delivered: 2, read: 3, viewed: 3 };
 
 function emitMessage(m: MessageRow | undefined) {
   if (m) broadcast({ type: 'message', message: messageDto(m) });
@@ -47,16 +48,20 @@ function emitConversation(conv: ConversationRow) {
   broadcast({ type: 'conversation', conversation: conversationDto(conv) });
 }
 
-/** Replace the U+FFFC placeholders signal uses for @mentions with readable names. */
+/**
+ * Replace the U+FFFC placeholders Signal uses for @mentions with "@<uuid or number>". The name is
+ * filled in when the message is shown (renderMentions), so it is right even for people whose name
+ * we only learn later. (signal-cli's mention "name" field holds the phone number, not a name.)
+ */
 function resolveMentions(text: string | undefined | null, mentions: Json[] | undefined): string | null {
   if (!text) return text ?? null;
   if (!mentions?.length) return text;
   const sorted = [...mentions].sort((a, b) => (b.start ?? 0) - (a.start ?? 0));
   let out = text;
   for (const m of sorted) {
-    const key = contactKey(m.uuid, m.number);
-    const name = key === 'self' ? 'You' : m.name || nameForKey(key);
-    out = out.slice(0, m.start) + '@' + name + out.slice(m.start + (m.length || 1));
+    const id = m.uuid || m.number || m.name || 'unknown';
+    if (m.uuid || m.number) upsertContact({ uuid: m.uuid || null, number: m.number || null });
+    out = out.slice(0, m.start) + '@' + id + out.slice(m.start + (m.length || 1));
   }
   return out;
 }
@@ -166,9 +171,38 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
 
   for (const a of attachments) {
     fetchAttachment(a.id).then((ok) => {
-      if (!ok) ingestHooks.log(`could not fetch attachment ${a.id}`);
+      if (!ok) return ingestHooks.log(`could not fetch attachment ${a.id}`);
+      if (a.contentType.startsWith('video/')) markGifVideos(row.id);
     });
   }
+}
+
+/**
+ * signal-cli doesn't pass on Signal's "this is a GIF" flag. GIFs arrive as short MP4s without a
+ * sound track, while recorded videos always have one, so that's what we check.
+ */
+/** Once at startup: flag GIF videos that arrived before this check existed. */
+export function backfillGifFlags() {
+  const rows = db
+    .prepare<[], { id: number }>(`SELECT id FROM messages WHERE attachments LIKE '%"video/%' AND attachments NOT LIKE '%"gif":%'`)
+    .all();
+  for (const r of rows) markGifVideos(r.id);
+}
+
+export function markGifVideos(messageId: number) {
+  const m = getMessage(messageId);
+  if (!m?.attachments) return;
+  const atts: Attachment[] = JSON.parse(m.attachments);
+  let changed = false;
+  for (const a of atts) {
+    if (a.contentType.startsWith('video/') && a.gif === undefined) {
+      const gif = isSilentVideo(a.id);
+      if (gif === null) continue; // not downloaded yet
+      a.gif = gif;
+      changed = true;
+    }
+  }
+  if (changed) emitMessage(updateMessage(m.id, { attachments: JSON.stringify(atts) }));
 }
 
 function humanDuration(s: number) {
@@ -179,18 +213,67 @@ function humanDuration(s: number) {
   return `${s} seconds`;
 }
 
-function handleReceipt(rm: Json) {
-  const status = rm.isRead ? 'read' : rm.isViewed ? 'viewed' : rm.isDelivery ? 'delivered' : null;
-  if (!status) return;
+interface PendingReceipt {
+  recipient: string;
+  kind: 'delivered' | 'read';
+  when: number;
+  expires: number;
+}
+
+/**
+ * Receipts for messages we can't match yet. When we send, the message is stored with a provisional
+ * timestamp and only gets its real Signal timestamp once signal-cli's send call returns. For a big
+ * group that call takes seconds, and the first recipients' delivery receipts arrive before it ends.
+ * Those are parked here and applied by applyPendingReceipts() once the real timestamp is known.
+ */
+const pendingReceipts = new Map<number, PendingReceipt[]>();
+
+function applyReceipt(m: MessageRow, recipient: string, kind: 'delivered' | 'read', when: number) {
+  const status = recordReceipt(m, recipient, kind, when);
+  if (status !== m.status) emitMessage(updateMessage(m.id, { status }));
+  else broadcast({ type: 'receipt', messageId: m.id });
+}
+
+function handleReceipt(rm: Json, src: Address) {
+  const kind = rm.isRead || rm.isViewed ? 'read' : rm.isDelivery ? 'delivered' : null;
+  if (!kind) return;
+  const recipient = contactKey(src.uuid, src.number);
+  if (recipient === 'self') return;
+  const when = Number(rm.when) || Date.now();
   for (const ts of rm.timestamps ?? []) {
     const rows = db.prepare<[number], MessageRow>('SELECT * FROM messages WHERE outgoing = 1 AND sent_ts = ?').all(ts);
-    for (const m of rows) {
-      if ((STATUS_RANK[m.status ?? 'sent'] ?? 1) < STATUS_RANK[status]) {
-        emitMessage(updateMessage(m.id, { status: status === 'viewed' ? 'read' : status }));
-      }
+    if (!rows.length) {
+      const list = pendingReceipts.get(ts) ?? [];
+      list.push({ recipient, kind, when, expires: Date.now() + 10 * 60_000 });
+      pendingReceipts.set(ts, list);
+      continue;
     }
+    for (const m of rows) applyReceipt(m, recipient, kind, when);
+  }
+  ingestHooks.debug(`receipt ${kind} from ${recipient} for ${(rm.timestamps ?? []).join(',')}`);
+}
+
+/** Call after an outgoing message got its final Signal timestamp. */
+export function applyPendingReceipts(messageId: number) {
+  const m = getMessage(messageId);
+  if (!m) return;
+  const list = pendingReceipts.get(m.sent_ts);
+  if (!list) return;
+  pendingReceipts.delete(m.sent_ts);
+  for (const r of list) {
+    const current = getMessage(messageId)!;
+    applyReceipt(current, r.recipient, r.kind, r.when);
   }
 }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [ts, list] of pendingReceipts) {
+    const kept = list.filter((r) => r.expires > now);
+    if (kept.length) pendingReceipts.set(ts, kept);
+    else pendingReceipts.delete(ts);
+  }
+}, 60_000).unref();
 
 /** You read messages on another device → mark them read here too. */
 function handleReadSync(list: Json[]) {
@@ -256,7 +339,7 @@ export function handleEnvelope(payload: Json) {
         ingestHooks.onGroupChanged();
       }
     }
-    if (e.receiptMessage) handleReceipt(e.receiptMessage);
+    if (e.receiptMessage) handleReceipt(e.receiptMessage, src);
     if (e.typingMessage && !fromSelf) handleTyping(e.typingMessage, src);
   } catch (err) {
     ingestHooks.log('failed to process envelope', err);

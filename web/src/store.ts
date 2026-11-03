@@ -16,6 +16,10 @@ export interface State {
   hasMore: Record<number, boolean>;
   typing: Record<number, Typing[]>;
   activeId: number | null;
+  /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
+  panel: { kind: 'chat' } | { kind: 'message'; messageId: number } | null;
+  /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
+  receiptTick: number;
 }
 
 let state: State = {
@@ -26,6 +30,8 @@ let state: State = {
   hasMore: {},
   typing: {},
   activeId: null,
+  panel: null,
+  receiptTick: 0,
 };
 
 const listeners = new Set<() => void>();
@@ -77,7 +83,11 @@ export function applyEvent(e: ServerEvent) {
     case 'message':
       // Only keep messages for conversations we've loaded; others are fetched when opened.
       if (state.messages[e.message.conversationId]) upsertMessages(e.message.conversationId, [e.message]);
+      if (e.message.outgoing) setState((s) => ({ receiptTick: s.receiptTick + 1 }));
       if (!e.message.outgoing) clearTyping(e.message.conversationId, e.message.author);
+      break;
+    case 'receipt':
+      setState((s) => ({ receiptTick: s.receiptTick + 1 }));
       break;
     case 'typing': {
       if (!e.started) return clearTyping(e.conversationId, e.author);

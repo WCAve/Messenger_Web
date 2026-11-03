@@ -21,6 +21,7 @@ services:
     environment:
       - APP_PASSWORD=${APP_PASSWORD:?set APP_PASSWORD}
       - SIGNAL_API_URL=http://signal-api:8080
+      - GIPHY_API_KEY=${GIPHY_API_KEY:-} # optional, enables the GIF picker
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Amsterdam

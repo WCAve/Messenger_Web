@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { hueFor, initials } from '../util';
 
 const PATHS: Record<string, ReactNode> = {
@@ -27,6 +27,9 @@ const PATHS: Record<string, ReactNode> = {
   group: (
     <path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 2 2 3.4V19h6v-2.5c0-2.3-4.7-3.5-7-3.5z" />
   ),
+  info: <path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z" />,
+  gif: <path d="M11.5 9H13v6h-1.5zM9 9H6c-.6 0-1 .5-1 1v4c0 .5.4 1 1 1h3c.6 0 1-.5 1-1v-2H8.5v1.5h-2v-3H10V10c0-.5-.4-1-1-1zm10 1.5V9h-4.5v6H16v-2h2v-1.5h-2v-1z" />,
+  link: <path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z" />,
   bell: <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11c0-3.1-1.6-5.6-4.5-6.3V4a1.5 1.5 0 0 0-3 0v.7C7.6 5.4 6 7.9 6 11v5l-2 2v1h16v-1z" />,
 };
 
@@ -39,11 +42,29 @@ export function Icon({ name, size = 22, title }: { name: keyof typeof PATHS | st
   );
 }
 
-export function Avatar({ name, seed, group, size = 44 }: { name: string; seed: string; group?: boolean; size?: number }) {
+const failedAvatars = new Set<string>(); // URLs that 404'd this session: don't retry on every render
+
+export function Avatar({ name, seed, group, size = 44, src }: { name: string; seed: string; group?: boolean; size?: number; src?: string | null }) {
   const hue = hueFor(seed);
+  const [failed, setFailed] = useState(() => !src || failedAvatars.has(src));
+  useEffect(() => setFailed(!src || failedAvatars.has(src)), [src]);
   return (
     <span className="avatar" style={{ width: size, height: size, ['--hue' as string]: hue, fontSize: size * 0.38 }} aria-hidden>
-      {group ? <Icon name="group" size={size * 0.5} /> : initials(name)}
+      {!failed && src ? (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          onError={() => {
+            failedAvatars.add(src);
+            setFailed(true);
+          }}
+        />
+      ) : group ? (
+        <Icon name="group" size={size * 0.5} />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }

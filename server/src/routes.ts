@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';
+import { getAvatar } from './avatars.js';
+import { applyPendingReceipts } from './ingest.js';
 import {
   SESSION_COOKIE,
   clearLoginFailures,
@@ -15,13 +17,15 @@ import { config } from './config.js';
 import { addClient, broadcast } from './events.js';
 import { type Ctx, HttpError, Router, setCookie } from './http.js';
 import { getState, recheckSoon, refreshDirectory } from './signal.js';
-import { signalApi } from './signal-api.js';
+import { groupRecipientId, signalApi } from './signal-api.js';
 import {
   type Attachment,
   type ConversationRow,
   type Reaction,
   addressForKey,
+  contactByKeyOrId,
   conversationDto,
+  conversationInfo,
   getConversation,
   getMessage,
   getOrCreateDirect,
@@ -32,6 +36,7 @@ import {
   listMessages,
   markConversationRead,
   messageDto,
+  messageReceipts,
   recipientFor,
   self,
   unreadMessages,
@@ -104,6 +109,7 @@ async function deliver(
     });
     const ts = Number(res?.timestamp);
     emitMessageRow(messageId, { status: 'sent', error: null, ...(ts ? { sent_ts: ts } : {}) });
+    applyPendingReceipts(messageId); // receipts that arrived while the send was still running
   } catch (e) {
     log(`send failed: ${(e as Error).message}`);
     emitMessageRow(messageId, { status: 'failed', error: (e as Error).message });
@@ -162,6 +168,9 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   r.get('/api/state', () => getState());
 
+  // Settings the UI needs. The Giphy key is meant to be used from the browser (Giphy's terms).
+  r.get('/api/config', () => ({ giphyApiKey: config.giphyApiKey, giphyRating: config.giphyRating }));
+
   r.get('/api/link/qr', async (ctx) => {
     if (getState().status !== 'unlinked') throw new HttpError(409, 'Already linked');
     const png = await signalApi.linkQr(config.deviceName);
@@ -174,6 +183,35 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.get('/api/conversations', () => listConversations());
 
   r.get('/api/conversations/:id', (ctx) => conversationDto(conv(ctx)));
+
+  r.get('/api/conversations/:id/info', (ctx) => conversationInfo(conv(ctx)));
+
+  r.get('/api/messages/:id/info', (ctx) => {
+    const m = message(ctx);
+    if (!m.outgoing) throw new HttpError(400, 'Only your own messages have delivery info');
+    return { message: messageDto(m), recipients: messageReceipts(m) };
+  });
+
+  // Avatars (proxied from the Signal API and cached on disk)
+  const sendAvatar = async (ctx: Ctx, kind: 'profile' | 'group', id: string | null | undefined) => {
+    const account = self.number;
+    const found = account && id ? await getAvatar(account, kind, id) : null;
+    if (!found) {
+      ctx.res.writeHead(404, { 'cache-control': 'private, max-age=3600', 'content-type': 'text/plain' });
+      return ctx.res.end('No avatar');
+    }
+    ctx.res.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' });
+    fs.createReadStream(found.file).pipe(ctx.res);
+  };
+  r.get('/api/avatars/conversation/:id', (ctx) => {
+    const c = conv(ctx);
+    if (c.kind === 'group') return sendAvatar(ctx, 'group', groupRecipientId(c.group_id!));
+    return sendAvatar(ctx, 'profile', c.peer_uuid || c.peer_number);
+  });
+  r.get('/api/avatars/contact/:key', (ctx) => {
+    const c = contactByKeyOrId(ctx.params.key);
+    return sendAvatar(ctx, 'profile', c?.uuid || c?.number);
+  });
 
   r.post('/api/conversations', (ctx) => {
     const number = typeof ctx.body?.number === 'string' ? ctx.body.number.replace(/[\s()-]/g, '') : undefined;

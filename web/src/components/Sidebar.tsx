@@ -89,7 +89,7 @@ function ChatRow({ c, active, typing }: { c: Conversation; active: boolean; typi
   const lm = c.lastMessage;
   return (
     <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
-      <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} />
+      <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} />
       <span className="chat-row-main">
         <span className="chat-row-top">
           <span className="chat-title">{c.title}</span>
