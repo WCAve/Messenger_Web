@@ -8,6 +8,7 @@ import { kvGet, kvSet } from './db.js';
 const DEFAULTS = {
   sendReadReceipts: config.sendReadReceipts,
   sendTypingIndicators: config.sendTypingIndicators,
+  sendLinkPreviews: config.sendLinkPreviews,
 };
 export type ServerSettings = typeof DEFAULTS;
 

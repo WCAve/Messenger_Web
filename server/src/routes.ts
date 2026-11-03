@@ -6,6 +6,7 @@ import { getSettings, updateSettings } from './settings.js';
 import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
 import { applyPendingReceipts, humanDuration } from './ingest.js';
 import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
+import { linkPreview } from './linkpreview.js';
 import {
   SESSION_COOKIE,
   clearLoginFailures,
@@ -26,6 +27,10 @@ import { groupRecipientId, sentTimestamp, signalApi } from './signal-api.js';
 import {
   type Attachment,
   type ConversationRow,
+  type LinkPreview,
+  type Poll,
+  pinnedCount,
+  setConversationFlags,
   type Reaction,
   addressForKey,
   contactByKeyOrId,
@@ -137,6 +142,79 @@ function apiText(text: string, ranges: Ranges | null) {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
 
+/** The API wants an https URL that appears in the message, and a title. */
+function apiPreview(p: LinkPreview | null | undefined, message: string) {
+  if (!p || !p.url.startsWith('https://') || !message.includes(p.url)) return undefined;
+  let thumb = '';
+  if (p.image && isSafeId(p.image.id)) {
+    try {
+      thumb = `data:${p.image.contentType};base64,${fs.readFileSync(localPath(p.image.id)).toString('base64')}`;
+    } catch {
+      /* send without a picture */
+    }
+  }
+  return { url: p.url, title: p.title || new URL(p.url).hostname, description: p.description ?? '', ...(thumb ? { base64_thumbnail: thumb } : {}) };
+}
+
+interface Outgoing {
+  text: string;
+  ranges: Ranges | null;
+  attachments: Attachment[];
+  base64: string[];
+  quote: { sentTs: number; author: string; text?: string | null } | null;
+  sticker: { packId: string; stickerId: number } | null;
+  preview: LinkPreview | null;
+}
+
+/** Store a message as pending, show it everywhere, and send it in the background. */
+function queueOutgoing(account: string, c: ConversationRow, o: Outgoing, log: (m: string) => void) {
+  const now = Date.now();
+  const pending = insertMessage({
+    conversationId: c.id,
+    sentTs: now,
+    author: 'self',
+    authorNumber: account,
+    outgoing: true,
+    kind: o.sticker ? 'sticker' : 'message',
+    body: o.text || null,
+    ranges: o.ranges,
+    attachments: o.attachments,
+    quote: o.quote,
+    status: 'pending',
+    read: true,
+    sticker: o.sticker,
+    preview: o.preview,
+    // signal-cli applies the chat's disappearing timer to everything it sends.
+    expiresIn: c.expire_timer || 0,
+    expiresAt: c.expire_timer ? now + c.expire_timer * 1000 : null,
+  });
+  if (!pending) throw new HttpError(409, 'Duplicate message, try again');
+  const dto = messageDto(pending);
+  broadcast({ type: 'message', message: dto });
+  emitConversation(getConversation(c.id)!);
+  void deliver(account, c, pending.id, o, log);
+  return dto;
+}
+
+/** Fetch (or reuse) the preview for a link in the message, and keep its picture as a local file. */
+async function previewFor(url: unknown, text: string): Promise<LinkPreview | null> {
+  if (typeof url !== 'string' || !url.startsWith('https://') || !text.includes(url) || !getSettings().sendLinkPreviews) return null;
+  const p = await linkPreview(url);
+  if (!p) return null;
+  let image: Attachment | null = null;
+  if (p.image) {
+    const buf = Buffer.from(p.image.data, 'base64');
+    image = { id: saveOutgoing(buf, p.image.type, 'preview' + (MIME_EXT[p.image.type] ?? '')), contentType: p.image.type, size: buf.length };
+  }
+  return { url: p.url, title: p.title, description: p.description, image };
+}
+
+const MIME_EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
+
+function readBase64(a: Attachment) {
+  return `data:${a.contentType};filename=${(a.filename ?? 'file').replace(/[;,\r\n/\\]/g, '_')};base64,${fs.readFileSync(localPath(a.id)).toString('base64')}`;
+}
+
 /** Hand a stored message to signal-cli and record the outcome. */
 async function deliver(
   account: string,
@@ -148,14 +226,17 @@ async function deliver(
     base64: string[];
     quote?: { sentTs: number; author: string; text?: string | null } | null;
     sticker?: { packId: string; stickerId: number } | null;
+    preview?: LinkPreview | null;
   },
   log: (m: string) => void,
 ) {
   try {
+    const text = apiText(payload.text, payload.ranges ?? null);
     const res = await signalApi.send({
       number: account,
       recipients: [recipientFor(c)],
-      ...apiText(payload.text, payload.ranges ?? null),
+      ...text,
+      link_preview: apiPreview(payload.preview, text.message),
       base64_attachments: payload.base64.length ? payload.base64 : undefined,
       quote_timestamp: payload.quote?.sentTs,
       quote_author: payload.quote ? addressForKey(payload.quote.author) : undefined,
@@ -456,7 +537,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Send a message. Returns immediately with a "pending" message; delivery status follows over /api/events.
-  r.post('/api/conversations/:id/messages', (ctx) => {
+  r.post('/api/conversations/:id/messages', async (ctx) => {
     const account = requireAccount();
     const c = conv(ctx);
     const { text, ranges } = richInput(ctx.body);
@@ -488,31 +569,129 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' }
         : null;
 
-    const now = Date.now();
-    const pending = insertMessage({
+    const preview = !sticker && !files.length ? await previewFor(ctx.body?.previewUrl, text) : null;
+    return queueOutgoing(account, c, { text, ranges, attachments, base64, quote, sticker, preview }, (m) => log('warn', m));
+  });
+
+  r.get('/api/link-preview', async (ctx) => {
+    if (!getSettings().sendLinkPreviews) return { preview: null };
+    const p = await linkPreview(String(ctx.query.get('url') ?? ''));
+    return { preview: p ? { url: p.url, title: p.title, description: p.description, image: p.image ? `data:${p.image.type};base64,${p.image.data}` : null } : null };
+  });
+
+  // Forward a message (text, files, sticker) to other chats. Quotes are left behind, like Signal.
+  r.post('/api/messages/:id/forward', (ctx) => {
+    const account = requireAccount();
+    const m = message(ctx);
+    if (m.deleted || m.kind === 'system' || m.kind === 'poll') throw new HttpError(400, "This message can't be forwarded");
+    const ids: number[] = Array.isArray(ctx.body?.conversationIds) ? ctx.body.conversationIds.map(Number) : [];
+    if (!ids.length || ids.length > 5) throw new HttpError(400, 'Pick up to 5 chats');
+    const targets = ids.map((id) => getConversation(id));
+    if (targets.some((t) => !t)) throw new HttpError(404, 'Conversation not found');
+    const attachments: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
+    let base64: string[];
+    try {
+      base64 = attachments.map(readBase64);
+    } catch {
+      throw new HttpError(409, "An attachment of this message isn't available on the server");
+    }
+    const ranges: Ranges | null = m.ranges ? JSON.parse(m.ranges) : null;
+    const sticker = m.sticker ? JSON.parse(m.sticker) : null;
+    const preview: LinkPreview | null = m.preview ? JSON.parse(m.preview) : null;
+    const sent = targets.map((t) =>
+      queueOutgoing(account, t!, { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview }, (msg) => log('warn', msg)),
+    );
+    return { messages: sent };
+  });
+
+  // ---------- polls ----------
+
+  r.post('/api/conversations/:id/polls', async (ctx) => {
+    const account = requireAccount();
+    const c = conv(ctx);
+    const question = String(ctx.body?.question ?? '').trim();
+    const options: string[] = (Array.isArray(ctx.body?.options) ? ctx.body.options : []).map((o: unknown) => String(o ?? '').trim()).filter(Boolean);
+    const multiple = !!ctx.body?.multiple;
+    if (!question || question.length > 200) throw new HttpError(400, 'Ask a question (up to 200 characters)');
+    if (options.length < 2 || options.length > 10) throw new HttpError(400, 'A poll needs 2 to 10 options');
+    if (new Set(options).size !== options.length) throw new HttpError(400, 'Options must be different');
+    let res: { timestamp?: string | number };
+    try {
+      res = await signalApi.createPoll(account, { recipient: recipientFor(c), question, answers: options, allow_multiple_selections: multiple });
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message.replace(/^.*?failed \(\d+\): /, ''));
+    }
+    const ts = sentTimestamp(res) ?? Date.now();
+    const row = insertMessage({
       conversationId: c.id,
-      sentTs: now,
+      sentTs: ts,
       author: 'self',
       authorNumber: account,
       outgoing: true,
-      kind: sticker ? 'sticker' : 'message',
-      body: text || null,
-      ranges,
-      attachments,
-      quote,
-      status: 'pending',
+      kind: 'poll',
+      body: question,
+      status: 'sent',
       read: true,
-      sticker,
-      // signal-cli applies the chat's disappearing timer to everything it sends.
+      poll: { question, options, multiple, votes: {} },
       expiresIn: c.expire_timer || 0,
-      expiresAt: c.expire_timer ? now + c.expire_timer * 1000 : null,
+      expiresAt: c.expire_timer ? ts + c.expire_timer * 1000 : null,
     });
-    if (!pending) throw new HttpError(409, 'Duplicate message, try again');
-    const dto = messageDto(pending);
+    if (!row) throw new HttpError(409, 'Duplicate poll');
+    const dto = messageDto(row);
     broadcast({ type: 'message', message: dto });
     emitConversation(getConversation(c.id)!);
-    void deliver(account, c, pending.id, { text, ranges, base64, quote, sticker }, (m) => log('warn', m));
     return dto;
+  });
+
+  r.post('/api/messages/:id/vote', async (ctx) => {
+    const account = requireAccount();
+    const m = message(ctx);
+    if (!m.poll || m.deleted) throw new HttpError(400, 'Not a poll');
+    const poll: Poll = JSON.parse(m.poll);
+    if (poll.closed) throw new HttpError(400, 'This poll has ended');
+    const picked = [...new Set<number>((Array.isArray(ctx.body?.options) ? ctx.body.options : []).map(Number))].filter(
+      (i) => Number.isInteger(i) && i >= 0 && i < poll.options.length,
+    );
+    if (!picked.length) throw new HttpError(400, 'Pick an option');
+    if (!poll.multiple && picked.length > 1) throw new HttpError(400, 'This poll allows one answer');
+    const c = getConversation(m.conversation_id)!;
+    await signalApi.votePoll(account, {
+      recipient: recipientFor(c),
+      poll_author: addressForKey(m.author),
+      poll_timestamp: String(m.sent_ts),
+      selected_answers: picked.map((i) => i + 1), // the REST API counts from 1
+    });
+    poll.votes.self = { options: picked.sort((a, b) => a - b), count: (poll.votes.self?.count ?? 0) + 1 };
+    return messageDto(emitMessageRow(m.id, { poll: JSON.stringify(poll) })!);
+  });
+
+  r.delete('/api/messages/:id/poll', async (ctx) => {
+    const account = requireAccount();
+    const m = message(ctx);
+    if (!m.poll || !m.outgoing) throw new HttpError(400, 'Only the person who made a poll can end it');
+    const poll: Poll = JSON.parse(m.poll);
+    if (!poll.closed) {
+      const c = getConversation(m.conversation_id)!;
+      await signalApi.closePoll(account, { recipient: recipientFor(c), poll_timestamp: String(m.sent_ts) });
+      poll.closed = true;
+    }
+    return messageDto(emitMessageRow(m.id, { poll: JSON.stringify(poll) })!);
+  });
+
+  // ---------- chat list: pin, archive, mute (Signal Web only; your phone keeps its own) ----------
+
+  r.post('/api/conversations/:id/flags', (ctx) => {
+    const c = conv(ctx);
+    const b = ctx.body ?? {};
+    if (b.pinned === true && !c.pinned_at && pinnedCount() >= 4) throw new HttpError(400, 'You can pin up to 4 chats');
+    setConversationFlags(c.id, {
+      pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
+      archived: typeof b.archived === 'boolean' ? b.archived : undefined,
+      mutedUntil: typeof b.mutedUntil === 'number' ? b.mutedUntil : undefined,
+    });
+    const updated = getConversation(c.id)!;
+    emitConversation(updated);
+    return conversationDto(updated);
   });
 
   r.post('/api/messages/:id/retry', (ctx) => {
@@ -521,13 +700,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!m.outgoing || m.status !== 'failed') throw new HttpError(400, 'Nothing to retry');
     const c = getConversation(m.conversation_id)!;
     const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
-    const base64 = atts.map(
-      (a) => `data:${a.contentType};filename=${a.filename ?? 'file'};base64,${fs.readFileSync(localPath(a.id)).toString('base64')}`,
-    );
+    const base64 = atts.map(readBase64);
     const quote = m.quote ? JSON.parse(m.quote) : null;
     const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const updated = emitMessageRow(m.id, { status: 'pending', error: null })!;
-    void deliver(account, c, m.id, { text: m.body ?? '', base64, quote, sticker }, (msg) => log('warn', msg));
+    const payload = { text: m.body ?? '', ranges: m.ranges ? JSON.parse(m.ranges) : null, base64, quote, sticker, preview: m.preview ? JSON.parse(m.preview) : null };
+    void deliver(account, c, m.id, payload, (msg) => log('warn', msg));
     return messageDto(updated);
   });
 

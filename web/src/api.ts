@@ -51,19 +51,26 @@ export const api = {
     call<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean }>('GET', `/api/conversations/${id}/messages?limit=${limit}&around=${ts}`),
   search: (q: string, conversationId?: number) =>
     call<{ results: SearchResult[] }>('GET', `/api/search?q=${encodeURIComponent(q)}${conversationId ? `&conversationId=${conversationId}` : ''}`),
+  linkPreview: (url: string) =>
+    call<{ preview: { url: string; title: string; description: string | null; image: string | null } | null }>('GET', `/api/link-preview?url=${encodeURIComponent(url)}`),
+  forward: (id: number, conversationIds: number[]) => call<{ messages: Message[] }>('POST', `/api/messages/${id}/forward`, { conversationIds }),
+  createPoll: (id: number, b: { question: string; options: string[]; multiple: boolean }) => call<Message>('POST', `/api/conversations/${id}/polls`, b),
+  vote: (id: number, options: number[]) => call<Message>('POST', `/api/messages/${id}/vote`, { options }),
+  closePoll: (id: number) => call<Message>('DELETE', `/api/messages/${id}/poll`),
+  setFlags: (id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) => call<Conversation>('POST', `/api/conversations/${id}/flags`, f),
   setTimer: (id: number, seconds: number) => call<Conversation>('POST', `/api/conversations/${id}/timer`, { seconds }),
   profile: () => call<Profile>('GET', '/api/profile'),
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
   setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
-  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators'>>) =>
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,
-    b: RichText & { quoteId?: number; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
+    b: RichText & { quoteId?: number; previewUrl?: string; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
   edit: (id: number, b: RichText) => call<Message>('POST', `/api/messages/${id}/edit`, b),
@@ -85,6 +92,7 @@ export interface Profile {
 export interface ServerSettings {
   sendReadReceipts: boolean;
   sendTypingIndicators: boolean;
+  sendLinkPreviews: boolean;
   account: string | null;
   status: string;
   apiVersion: string | null;

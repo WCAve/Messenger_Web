@@ -264,6 +264,9 @@ function seed() {
     ts: now - 35 * 60_000,
     extra: { previews: [{ url: 'https://example.org/trail-guide', title: 'The best trails near the market', description: 'Ten walks of under two hours, with maps and where to get coffee after.', image: { contentType: 'image/png', filename: null, id: 'mockpreview1.png', size: PHOTO.length, width: 640, height: 420 } }] },
   });
+  const pollTs = now - 20 * 60_000;
+  incoming(PEOPLE.bob, '', { ts: pollTs, group: true, extra: { message: null, pollCreate: { question: 'Where do we meet?', allowMultiple: false, options: ['Market', 'Station', 'Café Noord'] } } });
+  incoming(PEOPLE.carol, '', { ts: pollTs + 60_000, group: true, extra: { message: null, pollVote: { authorNumber: PEOPLE.bob.number, authorUuid: PEOPLE.bob.uuid, targetSentTimestamp: pollTs, optionIndexes: [2], voteCount: 1 } } });
   void t1;
 }
 
@@ -401,6 +404,18 @@ const server = http.createServer(async (req, res) => {
       if (isGroup) await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
       // signal-cli-rest-api answers with a list since Oct 2026 (one entry per send); MOCK_OLD_SEND=1 for the old shape.
       return json(res, 201, process.env.MOCK_OLD_SEND === '1' ? { timestamp: String(ts) } : [{ timestamp: String(ts) }]);
+    }
+    if (p.startsWith('/v1/polls/')) {
+      const b = await body(req);
+      const ts = Date.now();
+      sent.push({ path: p, method: m, ...b, ts });
+      if (m === 'POST' && !p.endsWith('/vote')) {
+        const isGroup = b.recipient === GROUP_REST_ID;
+        const voter = isGroup ? PEOPLE.carol : personFor(b.recipient);
+        if (voter) setTimeout(() => incoming(voter, '', { group: isGroup, extra: { message: null, pollVote: { authorNumber: SELF.number, authorUuid: SELF.uuid, targetSentTimestamp: ts, optionIndexes: [1], voteCount: 1 } } }), 1500);
+        return json(res, 201, { timestamp: String(ts) });
+      }
+      return json(res, 204);
     }
     if (p.startsWith('/v1/reactions/') || p.startsWith('/v1/receipts/') || p.startsWith('/v1/typing-indicator/')) {
       const b = m === 'GET' ? {} : await body(req);

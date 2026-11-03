@@ -473,7 +473,8 @@ p {
   margin-bottom: -10px;
   border-bottom: 1px solid var(--mist);
 }
-.chat-row:last-child .chat-row-main,
+.chat-list > .chat-row:last-child .chat-row-main,
+.chat-row-wrap:last-child .chat-row-main,
 .chat-row.active .chat-row-main {
   border-bottom-color: transparent;
 }
@@ -2351,4 +2352,321 @@ body.resizing * {
 .search-result-top time {
   font-size: 12px;
   color: var(--ink-3);
+}
+
+/* ---------- chat list: pin, mute, archive, drafts ---------- */
+.chat-row-wrap {
+  position: relative;
+}
+.row-menu-btn {
+  position: absolute;
+  right: 12px;
+  bottom: 9px;
+  opacity: 0;
+  background: var(--haze);
+  color: var(--ink-3);
+}
+.chat-row-wrap:hover .row-menu-btn,
+.chat-row-wrap.menu-open .row-menu-btn,
+.row-menu-btn:focus-visible {
+  opacity: 1;
+}
+.chat-row-wrap:hover .badge,
+.chat-row-wrap.menu-open .badge {
+  visibility: hidden;
+}
+.row-menu {
+  top: calc(100% - 10px);
+  right: 12px;
+}
+.row-menu button.sub {
+  padding-left: 40px;
+}
+.row-icons {
+  display: inline-flex;
+  gap: 4px;
+  color: var(--ink-3);
+}
+.chat-row.muted .badge {
+  background: var(--ink-3);
+}
+.draft-label {
+  color: var(--ultra);
+  font-weight: 600;
+}
+.archived-row .chat-row-main {
+  padding: 8px 0 18px;
+}
+.archived-icon {
+  width: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--ultra);
+}
+.archived-count {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ultra);
+}
+.archived-note {
+  font-size: 13px;
+  padding: 10px 16px;
+}
+
+/* ---------- unread divider ---------- */
+.unread-divider {
+  align-self: stretch;
+  text-align: center;
+  margin: 10px -100px;
+  padding: 5px 0;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.unread-divider span {
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--paper);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- composer link preview ---------- */
+.compose-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 8px 8px 8px 8px;
+  border-radius: 12px;
+  background: var(--haze);
+  border-left: 3px solid var(--ultra);
+}
+.compose-preview img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex: none;
+}
+.compose-preview div {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+}
+.compose-preview strong,
+.compose-preview span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.compose-preview span,
+.compose-preview small {
+  color: var(--ink-3);
+}
+
+/* ---------- dialogs ---------- */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(10, 12, 30, 0.45);
+}
+.dialog {
+  width: min(440px, 100%);
+  max-height: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(10, 12, 30, 0.35);
+  overflow: hidden;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 6px 20px;
+}
+.dialog-head h2 {
+  font-size: 18px;
+}
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 20px 18px;
+  min-height: 0;
+  overflow: auto;
+}
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.dialog-actions .muted {
+  margin-right: auto;
+  font-size: 13px;
+}
+.dialog-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.poll-form .field {
+  display: grid;
+  gap: 6px;
+}
+.poll-form-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.poll-form-option input {
+  flex: 1;
+}
+.poll-form .setting-row {
+  padding: 4px 0;
+}
+.forward-what {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--haze);
+  color: var(--ink-2);
+  font-size: 14px;
+  white-space: pre-wrap;
+  max-height: 90px;
+  overflow: hidden;
+}
+.forward-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  max-height: 340px;
+}
+.forward-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.forward-row:hover,
+.forward-row.on {
+  background: var(--haze);
+}
+.forward-row input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--ultra);
+}
+
+/* ---------- polls ---------- */
+.poll {
+  display: grid;
+  gap: 4px;
+  min-width: min(300px, 62vw);
+  padding-bottom: 2px;
+}
+.poll-q {
+  font-size: 15px;
+}
+.poll-kind {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.msg.out .poll-kind,
+.msg.out .poll-foot {
+  color: var(--out-meta);
+}
+.poll ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.poll-option {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--haze);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+}
+.msg.out .poll-option {
+  background: rgba(255, 255, 255, 0.14);
+}
+.poll-option:disabled {
+  cursor: default;
+}
+.poll-check {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  display: grid;
+  place-items: center;
+  opacity: 0.7;
+}
+.poll-check.square {
+  border-radius: 5px;
+}
+.poll-option.mine .poll-check {
+  opacity: 1;
+  background: var(--ultra);
+  border-color: var(--ultra);
+  color: var(--on-accent);
+}
+.msg.out .poll-option.mine .poll-check {
+  background: var(--out-text);
+  border-color: var(--out-text);
+  color: var(--bubble-out);
+}
+.poll-text {
+  flex: 1;
+}
+.poll-count {
+  font-size: 13px;
+  font-weight: 600;
+}
+.poll-bar {
+  position: absolute;
+  left: 10px;
+  bottom: 5px;
+  height: 3px;
+  max-width: calc(100% - 20px);
+  border-radius: 2px;
+  background: var(--ultra);
+  transition: width 0.25s;
+}
+.msg.out .poll-bar {
+  background: var(--out-text);
+}
+.poll-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.msg.out .poll-foot .link-btn {
+  color: var(--out-text);
 }

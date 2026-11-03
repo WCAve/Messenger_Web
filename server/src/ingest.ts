@@ -26,7 +26,7 @@ import {
   upsertContact,
 } from './store.js';
 import { db } from './db.js';
-import type { LinkPreview, MessageRow } from './store.js';
+import type { LinkPreview, MessageRow, Poll } from './store.js';
 import { setConversationTimer } from './store.js';
 import { type Ranges, cleanRanges } from './richtext.js';
 
@@ -121,6 +121,27 @@ function applyReaction(conv: ConversationRow, r: Json, reactor: string) {
   emitMessage(updateMessage(target.id, { reactions: reactions.length ? JSON.stringify(reactions) : null }));
 }
 
+/** Someone voted (or changed their vote). Signal keeps the vote with the highest count per person. */
+function applyPollVote(conv: ConversationRow, v: Json, voter: string) {
+  const target = findMessage(conv.id, v.targetSentTimestamp);
+  if (!target?.poll) return;
+  const poll: Poll = JSON.parse(target.poll);
+  const prev = poll.votes[voter];
+  const count = Number(v.voteCount) || 0;
+  if (prev && count && prev.count > count) return; // an older vote arriving late
+  const options = (Array.isArray(v.optionIndexes) ? v.optionIndexes : []).map(Number).filter((i: number) => Number.isInteger(i) && i >= 0 && i < poll.options.length);
+  poll.votes[voter] = { options: [...new Set<number>(options)], count };
+  emitMessage(updateMessage(target.id, { poll: JSON.stringify(poll) }));
+}
+
+function applyPollClose(conv: ConversationRow, targetTs: number, closer: string) {
+  const target = findMessage(conv.id, targetTs);
+  if (!target?.poll || target.author !== closer) return;
+  const poll: Poll = JSON.parse(target.poll);
+  poll.closed = true;
+  emitMessage(updateMessage(target.id, { poll: JSON.stringify(poll) }));
+}
+
 function applyDelete(conv: ConversationRow, targetTs: number, deleter: string) {
   const target = findMessage(conv.id, targetTs);
   if (!target || (target.author !== deleter && deleter !== 'admin')) return;
@@ -157,6 +178,8 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
   if (dm.remoteDelete) return applyDelete(conv, dm.remoteDelete.targetTimestamp ?? dm.remoteDelete.timestamp, authorKey);
   if (dm.adminDelete) return applyDelete(conv, dm.adminDelete.targetSentTimestamp, 'admin');
   if (dm.editMessage) return applyEdit(conv, dm.editMessage);
+  if (dm.pollVote) return applyPollVote(conv, dm.pollVote, authorKey);
+  if (dm.pollTerminate) return applyPollClose(conv, dm.pollTerminate.targetSentTimestamp, authorKey);
 
   const attachments = mapAttachments(dm.attachments);
   const rich = richFromSignal(dm.message, dm.mentions, dm.textStyles);
@@ -190,13 +213,14 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     attachments.length = 0;
     kind = 'system';
   }
-  if (!body && !attachments.length && kind === 'message') {
-    if (dm.pollCreate) {
-      body = `📊 Poll: ${dm.pollCreate.question}`;
-    } else {
-      return; // profile key updates, group updates, typing-only payloads, etc.
-    }
+  let poll: Poll | null = null;
+  if (dm.pollCreate?.question && Array.isArray(dm.pollCreate.options)) {
+    kind = 'poll';
+    body = String(dm.pollCreate.question);
+    ranges = null;
+    poll = { question: body, options: dm.pollCreate.options.map(String), multiple: !!dm.pollCreate.allowMultiple, votes: {} };
   }
+  if (!body && !attachments.length && kind === 'message') return; // profile key updates, group updates, typing-only payloads, etc.
 
   const quote = dm.quote
     ? {
@@ -220,6 +244,7 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     read: outgoing,
     sticker,
     ranges: kind === 'system' ? null : ranges,
+    poll,
     preview,
     expiresIn: kind === 'system' ? 0 : expiresIn,
     // Your own messages start counting down when sent; received ones once you've read them.

@@ -155,6 +155,13 @@ const MIGRATIONS: string[] = [
   CREATE INDEX messages_expires_at ON messages(expires_at) WHERE expires_at IS NOT NULL;
   ALTER TABLE conversations ADD COLUMN expire_timer INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- Polls: {question, options, multiple, closed, votes: {<voter key>: {options: [0-based], count}}}
+  ALTER TABLE messages ADD COLUMN poll TEXT;
+  -- Chat list: pinned chats (the time they were pinned, for order) and muting (ms; 0 = not muted).
+  ALTER TABLE conversations ADD COLUMN pinned_at INTEGER;
+  ALTER TABLE conversations ADD COLUMN muted_until INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function migrate() {

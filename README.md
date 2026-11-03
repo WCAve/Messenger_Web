@@ -23,7 +23,11 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Text, links, replies (quotes), reactions (quick bar plus every emoji)
 - @mentions: type `@` in a group to pick someone; mentions of you are highlighted
 - Text formatting, both ways: `*bold*`, `_italic_`, `~strikethrough~`, `` `monospace` ``, `||spoiler||` (click to reveal). Ctrl+B, Ctrl+I, Ctrl+Shift+X and Ctrl+Shift+M wrap the selection
-- Link previews that others send
+- Link previews, both ways: when you type an https link, Signal Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
+- Polls: vote, create (📊 button next to the paperclip) and end your own polls
+- Forward messages (text, files, stickers) to up to 5 chats
+- Pin (up to 4), mute and archive chats from the ⌄ button on a chat, or right-click. These stay in Signal Web; your phone keeps its own
+- Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat
 - Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Signal Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
@@ -41,7 +45,7 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 
 In a group, the ticks turn into two outlined circles once anyone has received the message, and fill in once every member has read it. Message info (ⓘ on your own messages) shows exactly who has received and read it. People who switched off read receipts never count as read, so with such a member in the group the ticks stay outlined.
 
-**Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), polls (shown as text), view-once media.
+**Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), view-once media.
 
 Stickers are downloaded from Signal's CDN (`cdn.signal.org`) by the signal-web container and decrypted there, like Signal Desktop does, so that container needs outbound internet access.
 
@@ -150,6 +154,7 @@ Back up both appdata folders:
 | `GIPHY_RATING` | `pg-13` | Content rating for GIF results: `g`, `pg`, `pg-13`, `r` |
 | `SEND_READ_RECEIPTS` | `true` | Send read receipts when you open a chat. Default only: the switch in Settings overrides it |
 | `SEND_TYPING_INDICATORS` | `true` | Send typing indicators. Default only: the switch in Settings overrides it |
+| `SEND_LINK_PREVIEWS` | `true` | Fetch pages you link to, to send a preview. Default only: the switch in Settings overrides it |
 | `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS through a proxy (automatic with `TLS_CERT_FILE`) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | (none) | PEM certificate and key: serve HTTPS directly |
 | `SESSION_DAYS` | `30` | How long a browser stays signed in |

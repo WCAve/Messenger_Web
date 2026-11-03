@@ -44,6 +44,16 @@ export interface ConversationRow {
   archived: number;
   created_at: number;
   expire_timer: number;
+  pinned_at: number | null;
+  muted_until: number;
+}
+
+export interface Poll {
+  question: string;
+  options: string[];
+  multiple: boolean;
+  closed?: boolean;
+  votes: Record<string, { options: number[]; count: number }>; // by voter key
 }
 
 export interface LinkPreview {
@@ -100,6 +110,7 @@ export interface MessageRow {
   preview: string | null;
   expires_in: number;
   expires_at: number | null;
+  poll: string | null;
 }
 
 /** Hooks other modules plug into (avoids import cycles). */
@@ -324,7 +335,24 @@ export function getOrCreateGroup(
 }
 
 export function touchConversation(id: number, ts: number) {
-  db.prepare('UPDATE conversations SET last_message_at = MAX(COALESCE(last_message_at, 0), ?), archived = 0 WHERE id = ?').run(ts, id);
+  // New messages bring an archived chat back, unless it's muted (like Signal).
+  db.prepare(
+    `UPDATE conversations SET last_message_at = MAX(COALESCE(last_message_at, 0), ?),
+       archived = CASE WHEN muted_until > ? THEN archived ELSE 0 END WHERE id = ?`,
+  ).run(ts, Date.now(), id);
+}
+
+export function setConversationFlags(id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) {
+  if (f.pinned !== undefined) db.prepare('UPDATE conversations SET pinned_at = ? WHERE id = ?').run(f.pinned ? Date.now() : null, id);
+  if (f.archived !== undefined) {
+    db.prepare('UPDATE conversations SET archived = ? WHERE id = ?').run(f.archived ? 1 : 0, id);
+    if (f.archived) db.prepare('UPDATE conversations SET pinned_at = NULL WHERE id = ?').run(id); // archiving unpins
+  }
+  if (f.mutedUntil !== undefined) db.prepare('UPDATE conversations SET muted_until = ? WHERE id = ?').run(Math.max(0, f.mutedUntil), id);
+}
+
+export function pinnedCount(): number {
+  return db.prepare<[], { n: number }>('SELECT count(*) AS n FROM conversations WHERE pinned_at IS NOT NULL').get()!.n;
 }
 
 export function recipientFor(conv: ConversationRow): string {
@@ -377,6 +405,7 @@ export function renderBody(body: string | null, rangesJson: string | null): Rend
 
 export function previewText(m: MessageRow): string {
   if (m.deleted) return 'This message was deleted';
+  if (m.kind === 'poll' && m.poll) return '📊 ' + (JSON.parse(m.poll) as Poll).question;
   if (m.kind === 'sticker') {
     const s: StickerRef | null = m.sticker ? JSON.parse(m.sticker) : null;
     return [s && stickerEmoji(s), 'Sticker'].filter(Boolean).join(' ');
@@ -420,6 +449,8 @@ export function conversationDto(row: ConversationRow) {
       : null,
     unread: unreadStmt.get(conv.id)!.n,
     archived: !!conv.archived,
+    pinnedAt: conv.pinned_at ?? null,
+    mutedUntil: conv.muted_until > Date.now() ? conv.muted_until : 0,
     expireTimer: conv.expire_timer || 0,
   };
 }
@@ -653,13 +684,14 @@ export function insertMessage(m: {
   preview?: LinkPreview | null;
   expiresIn?: number;
   expiresAt?: number | null;
+  poll?: Poll | null;
 }): MessageRow | undefined {
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO messages
         (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
-         ranges, preview, expires_in, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ranges, preview, expires_in, expires_at, poll)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -680,6 +712,7 @@ export function insertMessage(m: {
       m.preview ? JSON.stringify(m.preview) : null,
       m.expiresIn ?? 0,
       m.expiresAt ?? null,
+      m.poll ? JSON.stringify(m.poll) : null,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
@@ -689,7 +722,7 @@ export function insertMessage(m: {
 
 export function updateMessage(
   id: number,
-  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at'>>,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll'>>,
 ) {
   const keys = Object.keys(fields);
   if (!keys.length) return msgById.get(id);
@@ -711,7 +744,9 @@ export function messageDto(m: MessageRow) {
   const sticker: StickerRef | null = m.sticker && !m.deleted ? JSON.parse(m.sticker) : null;
   const rich = m.deleted ? null : renderBody(m.body, m.ranges);
   const preview: LinkPreview | null = m.preview && !m.deleted ? JSON.parse(m.preview) : null;
+  const poll: Poll | null = m.poll && !m.deleted ? JSON.parse(m.poll) : null;
   return {
+    poll: poll ? pollDto(poll) : null,
     id: m.id,
     rev: nextRev(),
     sticker: sticker ? { ...sticker, emoji: stickerEmoji(sticker), url: stickerUrl(sticker.packId, sticker.stickerId) } : null,
@@ -738,6 +773,21 @@ export function messageDto(m: MessageRow) {
   };
 }
 export type MessageDto = ReturnType<typeof messageDto>;
+
+function pollDto(p: Poll) {
+  const voters: { key: string; name: string }[][] = p.options.map(() => []);
+  for (const [key, v] of Object.entries(p.votes)) {
+    for (const i of v.options) if (voters[i]) voters[i].push({ key, name: nameForKey(key) });
+  }
+  return {
+    question: p.question,
+    multiple: p.multiple,
+    closed: !!p.closed,
+    options: p.options.map((text, i) => ({ text, voters: voters[i] })),
+    mine: p.votes.self?.options ?? [],
+    totalVoters: Object.values(p.votes).filter((v) => v.options.length).length,
+  };
+}
 
 export function listMessages(conversationId: number, before: number | undefined, limit: number) {
   const rows = db
@@ -798,7 +848,7 @@ export function searchMessages(q: string, conversationId: number | undefined, li
   const rows = db
     .prepare<[string, number, number, number], MessageRow>(
       `SELECT * FROM messages
-       WHERE deleted = 0 AND kind = 'message' AND body LIKE ? ESCAPE '\\' AND (? = 0 OR conversation_id = ?)
+       WHERE deleted = 0 AND kind IN ('message', 'poll') AND body LIKE ? ESCAPE '\\' AND (? = 0 OR conversation_id = ?)
        ORDER BY sent_ts DESC LIMIT ?`,
     )
     .all(like, conversationId ?? 0, conversationId ?? 0, limit);

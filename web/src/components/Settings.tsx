@@ -302,6 +302,13 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
             disabled={!server}
             onChange={(v) => void saveServer({ sendTypingIndicators: v })}
           />
+          <Toggle
+            label="Send link previews"
+            hint="When you type a link, the Signal Web server fetches that page to show its title and picture, like Signal Desktop does. The site sees your server's address."
+            checked={!!server?.sendLinkPreviews}
+            disabled={!server}
+            onChange={(v) => void saveServer({ sendLinkPreviews: v })}
+          />
         </Section>
 
         <Section title="Account">

@@ -90,6 +90,8 @@ export const signalApi = {
     sticker?: string; // "<pack_id>:<sticker_id>"
     /** Positions in the message *after* the API strips the text_mode=styled markup. */
     mentions?: { start: number; length: number; author: string }[];
+    /** The url must start with https:// and appear in the message; title is required. */
+    link_preview?: { url: string; title: string; description?: string; base64_thumbnail?: string };
   }) => call<SendResponse>('POST', '/v2/send', body, 180_000),
 
   react: (number: string, body: { recipient: string; reaction: string; target_author: string; timestamp: number }) =>
@@ -112,6 +114,14 @@ export const signalApi = {
   /** Note: in json-rpc mode a timer of 0 is dropped by the API, so this can't switch the timer off. */
   updateContact: (number: string, body: { recipient: string; expiration_in_seconds?: number }) =>
     call<void>('PUT', `/v1/contacts/${enc(number)}`, body, 60_000),
+
+  createPoll: (number: string, body: { recipient: string; question: string; answers: string[]; allow_multiple_selections: boolean }) =>
+    call<{ timestamp?: string }>('POST', `/v1/polls/${enc(number)}`, body, 120_000),
+  /** selected_answers count from 1. The API always sends vote-count 1, so a changed vote may not reach everyone. */
+  votePoll: (number: string, body: { recipient: string; poll_author: string; poll_timestamp: string; selected_answers: number[] }) =>
+    call<void>('POST', `/v1/polls/${enc(number)}/vote`, body, 120_000),
+  closePoll: (number: string, body: { recipient: string; poll_timestamp: string }) =>
+    call<void>('DELETE', `/v1/polls/${enc(number)}`, body, 120_000),
 
   deleteAttachment: (id: string) => call<void>('DELETE', `/v1/attachments/${enc(id)}`, undefined, 10_000),
 

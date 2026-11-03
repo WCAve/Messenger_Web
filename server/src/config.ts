@@ -35,6 +35,10 @@ export const config = {
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Giphy API key for the GIF picker (free at developers.giphy.com). Without it the GIF tab explains how to add one. */
   giphyApiKey: process.env.GIPHY_API_KEY?.trim() || null,
+  /** Tests only: let link previews reach private addresses and skip certificate checks. */
+  linkPreviewInsecure: process.env.LINK_PREVIEW_INSECURE === '1',
+  /** Default for "Send link previews" (the server fetches pages you link to). */
+  sendLinkPreviews: bool(process.env.SEND_LINK_PREVIEWS, true),
   /** Giphy content rating: g, pg, pg-13 or r. */
   giphyRating: process.env.GIPHY_RATING?.trim() || 'pg-13',
 };

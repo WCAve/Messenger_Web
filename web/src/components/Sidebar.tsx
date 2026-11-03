@@ -16,7 +16,8 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const typing = useStore((s) => s.typing);
   const account = useStore((s) => s.signal.account);
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState<'list' | 'new' | 'settings'>('list');
+  const [mode, setMode] = useState<'list' | 'new' | 'settings' | 'archived'>('list');
+  const drafts = useStore((s) => s.drafts);
   const [menu, setMenu] = useState(false);
   const [found, setFound] = useState<SearchResult[] | null>(null);
 
@@ -34,16 +35,51 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
     };
   }, [query]);
 
-  const list = useMemo(() => {
+  const archivedMode = mode === 'archived';
+  const { list, archivedCount, archivedUnread } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return Object.values(conversations)
-      .filter((c) => c.lastMessageAt)
+    const all = Object.values(conversations).filter((c) => c.lastMessageAt);
+    const archived = all.filter((c) => c.archived);
+    const shown = all
+      // Searching covers archived chats too; otherwise they live in their own list.
+      .filter((c) => (q ? true : archivedMode ? c.archived : !c.archived))
       .filter((c) => !q || c.title.toLowerCase().includes(q) || c.number?.includes(q))
-      .sort((a, b) => (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0));
-  }, [conversations, query]);
+      .sort((a, b) => {
+        // Pinned chats first, in the order they were pinned; then newest first.
+        if (!archivedMode && (a.pinnedAt || b.pinnedAt)) {
+          if (a.pinnedAt && b.pinnedAt) return a.pinnedAt - b.pinnedAt;
+          return a.pinnedAt ? -1 : 1;
+        }
+        return (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0);
+      });
+    return { list: shown, archivedCount: archived.length, archivedUnread: archived.filter((c) => c.unread && !(c.mutedUntil > Date.now())).length };
+  }, [conversations, query, archivedMode]);
+
+  useEffect(() => {
+    if (archivedMode && !archivedCount) setMode('list');
+  }, [archivedMode, archivedCount]);
 
   if (mode === 'new') return <NewChat onClose={() => setMode('list')} />;
   if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
+
+  if (archivedMode) {
+    return (
+      <aside className="sidebar">
+        <header className="side-head">
+          <button className="icon-btn" onClick={() => setMode('list')} aria-label="Back to chats">
+            <Icon name="back" />
+          </button>
+          <h2>Archived</h2>
+        </header>
+        <p className="muted archived-note">Archived chats come back when a new message arrives, unless they're muted. Archiving only applies to Signal Web.</p>
+        <nav className="chat-list" aria-label="Archived chats">
+          {list.map((c) => (
+            <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
+          ))}
+        </nav>
+      </aside>
+    );
+  }
 
   return (
     <aside className="sidebar">
@@ -94,9 +130,20 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         )}
       </div>
       <nav className="chat-list" aria-label="Chats">
+        {!query && archivedCount > 0 && (
+          <button className="chat-row archived-row" onClick={() => setMode('archived')}>
+            <span className="archived-icon">
+              <Icon name="archive" size={20} />
+            </span>
+            <span className="chat-row-main">
+              <span className="chat-title">Archived</span>
+            </span>
+            <span className="archived-count">{archivedUnread || archivedCount}</span>
+          </button>
+        )}
         {query && found && list.length > 0 && <h3 className="list-heading">Chats</h3>}
         {list.map((c) => (
-          <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} />
+          <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
         ))}
         {found && found.length > 0 && (
           <>
@@ -231,10 +278,68 @@ export function SidebarResizer() {
   );
 }
 
-function ChatRow({ c, active, typing }: { c: Conversation; active: boolean; typing: boolean }) {
-  const lm = c.lastMessage;
+const MUTE_OPTIONS: [string, number][] = [
+  ['For 8 hours', 8 * 3600_000],
+  ['For 1 week', 7 * 86400_000],
+  ['Always', 0],
+];
+const FOREVER = 8.64e15; // the largest date JS can show
+
+function ChatRowMenu({ c, onClose }: { c: Conversation; onClose: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [muteOpen, setMuteOpen] = useState(false);
+  const muted = c.mutedUntil > Date.now();
+  async function set(f: Parameters<typeof api.setFlags>[1]) {
+    try {
+      upsertConversation(await api.setFlags(c.id, f));
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
-    <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
+    <div className="menu row-menu" role="menu" onMouseLeave={onClose}>
+      {!c.archived && (
+        <button role="menuitem" onClick={() => void set({ pinned: !c.pinnedAt })}>
+          <Icon name="pin" size={18} /> {c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
+        </button>
+      )}
+      {muted ? (
+        <button role="menuitem" onClick={() => void set({ mutedUntil: 0 })}>
+          <Icon name="bell" size={18} /> Unmute
+        </button>
+      ) : muteOpen ? (
+        MUTE_OPTIONS.map(([label, ms]) => (
+          <button key={label} role="menuitem" className="sub" onClick={() => void set({ mutedUntil: ms ? Date.now() + ms : FOREVER })}>
+            {label}
+          </button>
+        ))
+      ) : (
+        <button role="menuitem" onClick={() => setMuteOpen(true)}>
+          <Icon name="mute" size={18} /> Mute notifications…
+        </button>
+      )}
+      <button role="menuitem" onClick={() => void set({ archived: !c.archived })}>
+        <Icon name={c.archived ? 'unarchive' : 'archive'} size={18} /> {c.archived ? 'Unarchive' : 'Archive chat'}
+      </button>
+      {error && <p className="form-error pad">{error}</p>}
+    </div>
+  );
+}
+
+function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolean; typing: boolean; draft?: string }) {
+  const lm = c.lastMessage;
+  const [menu, setMenu] = useState(false);
+  const muted = c.mutedUntil > Date.now();
+  return (
+    <div
+      className={`chat-row-wrap${menu ? ' menu-open' : ''}`}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu(true);
+      }}
+    >
+    <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
       <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} />
       <span className="chat-row-main">
         <span className="chat-row-top">
@@ -245,6 +350,11 @@ function ChatRow({ c, active, typing }: { c: Conversation; active: boolean; typi
           <span className="preview">
             {typing ? (
               <em className="typing-text">typing…</em>
+            ) : draft ? (
+              <>
+                <span className="draft-label">Draft: </span>
+                {draft}
+              </>
             ) : lm ? (
               <>
                 {lm.outgoing && <StatusMark status={lm.status} />}
@@ -253,10 +363,19 @@ function ChatRow({ c, active, typing }: { c: Conversation; active: boolean; typi
               </>
             ) : null}
           </span>
+          <span className="row-icons">
+            {muted && <Icon name="mute" size={16} title="Muted" />}
+            {c.pinnedAt && <Icon name="pin" size={16} title="Pinned" />}
+          </span>
           {c.unread > 0 && <span className="badge" aria-label={`${c.unread} unread`}>{c.unread > 99 ? '99+' : c.unread}</span>}
         </span>
       </span>
     </button>
+      <button className="icon-btn sm row-menu-btn" onClick={() => setMenu((m) => !m)} aria-label={`Options for ${c.title}`} aria-expanded={menu} title="Chat options">
+        <Icon name="chevron" size={20} />
+      </button>
+      {menu && <ChatRowMenu c={c} onClose={() => setMenu(false)} />}
+    </div>
   );
 }
 

@@ -4,10 +4,11 @@ import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs } from '../prefs';
-import { getState, setHasNewer, setState, upsertMessages, useStore } from '../store';
+import { getState, setDraft, setHasNewer, setState, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, Message } from '../types';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
+import { PollDialog, PollView } from './Extras';
 import { Avatar, Icon, StatusMark } from './ui';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
@@ -214,6 +215,9 @@ function MessageList({
   const focus = useStore((s) => s.focus);
   const id = conversation.id;
   const last = messages?.[messages.length - 1];
+  // Unread count when this chat was opened (it drops to 0 right after, once it's marked read).
+  const openInfo = useRef<{ id: number; unread: number; dividerId?: number | null; scrolled?: boolean }>({ id, unread: conversation.unread });
+  if (openInfo.current.id !== id) openInfo.current = { id, unread: conversation.unread };
 
   useLayoutEffect(() => {
     stick.current = true;
@@ -232,6 +236,15 @@ function MessageList({
       loadingNewer.current = false; // appended below: nothing moves
     } else if (!hasNewer && (stick.current || (newLast && last?.outgoing))) {
       el.scrollTop = el.scrollHeight;
+    }
+    // On opening a chat with more unread messages than fit, start at the "unread" divider.
+    if (!openInfo.current.scrolled && openInfo.current.dividerId !== undefined && messages?.length) {
+      openInfo.current.scrolled = true;
+      const divider = el.querySelector<HTMLElement>('.unread-divider');
+      if (divider && divider.offsetTop < el.scrollTop) {
+        el.scrollTop = Math.max(0, divider.offsetTop - 12);
+        stick.current = false;
+      }
     }
     prevHeight.current = el.scrollHeight;
   }, [messages, last?.id, last?.outgoing, hasNewer]);
@@ -321,6 +334,14 @@ function MessageList({
 
   if (!messages) return <div className="messages" />;
 
+  // "N unread messages": decided once when the chat opens, from its unread count at that moment.
+  if (openInfo.current.dividerId === undefined && messages.length) {
+    const n = openInfo.current.unread;
+    const incoming = messages.filter((m) => !m.outgoing && m.kind !== 'system');
+    openInfo.current.dividerId = n > 0 && incoming.length ? incoming[Math.max(0, incoming.length - n)].id : null;
+  }
+  const dividerId = openInfo.current.dividerId;
+
   const items: ReactNode[] = [];
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
@@ -328,6 +349,16 @@ function MessageList({
       items.push(
         <div className="day" key={`d${m.sentAt}`}>
           <span>{formatDay(m.sentAt)}</span>
+        </div>,
+      );
+    }
+    if (m.id === dividerId) {
+      const n = openInfo.current.unread;
+      items.push(
+        <div className="unread-divider" key="unread">
+          <span>
+            {n} unread message{n === 1 ? '' : 's'}
+          </span>
         </div>,
       );
     }
@@ -585,6 +616,8 @@ const MessageItem = memo(function MessageItem({
           <p className="body">
             <em>Sticker</em>
           </p>
+        ) : m.kind === 'poll' && m.poll ? (
+          <PollView m={m} />
         ) : (
           m.body && (
             <p className="body">
@@ -647,7 +680,12 @@ const MessageItem = memo(function MessageItem({
               <Icon name="pencil" size={17} />
             </button>
           )}
-          {m.body && (
+          {canAct && m.kind !== 'poll' && (
+            <button className="icon-btn sm" onClick={() => setState({ forwarding: m })} aria-label="Forward" title="Forward">
+              <Icon name="forward" size={18} />
+            </button>
+          )}
+          {m.body && m.kind !== 'poll' && (
             <button className="icon-btn sm" onClick={() => navigator.clipboard?.writeText(m.body ?? '')} aria-label="Copy text" title="Copy text">
               <Icon name="copy" size={17} />
             </button>
@@ -816,14 +854,17 @@ function Composer({
   clearDropped: () => void;
   disabled: boolean;
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => getState().drafts[conversation.id]?.text ?? '');
   const [files, setFiles] = useState<Pending[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [panel, setPanel] = useState<PickerTab | null>(null);
   const [suggest, setSuggest] = useState<{ start: number; term: string; items: ReturnType<typeof searchEmoji>; index: number } | null>(null);
   const [mentionSuggest, setMentionSuggest] = useState<{ start: number; items: { key: string; name: string }[]; index: number } | null>(null);
-  const mentions = useRef<ComposerMention[]>([]); // people picked from the @ suggestions
+  const mentions = useRef<ComposerMention[]>(getState().drafts[conversation.id]?.mentions ?? []); // people picked from the @ suggestions
+  const [pollOpen, setPollOpen] = useState(false);
+  const [linkCard, setLinkCard] = useState<{ url: string; title: string; description: string | null; image: string | null } | null>(null);
+  const dismissedLinks = useRef(new Set<string>());
   const pendingSelection = useRef<number | null>(null);
   const editOriginal = useRef('');
   const area = useRef<HTMLTextAreaElement>(null);
@@ -879,6 +920,29 @@ function Composer({
   }, [dropped]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep what you typed per chat, so switching chats doesn't lose it.
+  useEffect(() => {
+    if (!editing) setDraft(id, { text, mentions: mentions.current });
+  }, [text, editing, id]);
+
+  // Link preview for the first https link in the message, like Signal Desktop.
+  const firstLink = !editing && !files.length ? /https:\/\/[^\s<]+[^\s<.,:;"')\]!?]/.exec(text)?.[0] ?? null : null;
+  useEffect(() => {
+    if (!firstLink || dismissedLinks.current.has(firstLink)) return setLinkCard(null);
+    if (linkCard?.url === firstLink) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      api
+        .linkPreview(firstLink)
+        .then((r) => !cancelled && setLinkCard(r.preview && r.preview.url === firstLink ? r.preview : null))
+        .catch(() => !cancelled && setLinkCard(null));
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [firstLink]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-grow the textarea
   useLayoutEffect(() => {
@@ -1007,7 +1071,10 @@ function Composer({
       const attachments = await Promise.all(
         files.map(async (p) => ({ name: p.file.name || 'file', type: p.file.type || 'application/octet-stream', data: await fileToBase64(p.file) })),
       );
-      const msg = await api.send(id, { ...rich, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined });
+      const previewUrl = linkCard && linkCard.url === firstLink && rich.text.includes(linkCard.url) ? linkCard.url : undefined;
+      const msg = await api.send(id, { ...rich, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined, previewUrl });
+      setLinkCard(null);
+      dismissedLinks.current.clear();
       if (getState().hasNewer[id]) await loadLatest(id).catch(() => {}); // back to the bottom to see it
       upsertMessages(id, [msg]);
       files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
@@ -1191,6 +1258,25 @@ function Composer({
           </button>
         </div>
       )}
+      {linkCard && !editing && (
+        <div className="compose-preview">
+          {linkCard.image && <img src={linkCard.image} alt="" />}
+          <div>
+            <strong>{linkCard.title}</strong>
+            {linkCard.description && <span>{linkCard.description}</span>}
+            <small>{linkCard.url.replace(/^https:\/\/(www\.)?/, '').split('/')[0]}</small>
+          </div>
+          <button
+            className="icon-btn sm"
+            onClick={() => (dismissedLinks.current.add(linkCard.url), setLinkCard(null), area.current?.focus())}
+            aria-label="Send without link preview"
+            title="Send without preview"
+          >
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+      )}
+      {pollOpen && <PollDialog conversationId={id} onClose={() => (setPollOpen(false), area.current?.focus())} />}
       {files.length > 0 && (
         <div className="pending-files">
           {files.map((p, i) => (
@@ -1268,6 +1354,9 @@ function Composer({
           disabled={disabled || !!editing}
         >
           <Icon name="gif" size={26} />
+        </button>
+        <button className="icon-btn" onClick={() => setPollOpen(true)} aria-label="New poll" title="New poll" disabled={disabled || !!editing}>
+          <Icon name="poll" />
         </button>
         <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled || !!editing}>
           <Icon name="attach" />

@@ -8,6 +8,20 @@ export interface Typing {
   until: number;
 }
 
+export interface Draft {
+  text: string;
+  mentions: { name: string; key: string }[];
+}
+
+const DRAFTS_KEY = 'sw-drafts';
+function loadDrafts(): Record<number, Draft> {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '{}') ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export interface State {
   signal: SignalState;
   live: boolean; // event stream connected
@@ -22,6 +36,10 @@ export interface State {
   activeId: number | null;
   /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
   panel: { kind: 'chat' } | { kind: 'search' } | { kind: 'message'; messageId: number } | null;
+  /** Unsent text per chat (this browser only). */
+  drafts: Record<number, Draft>;
+  /** The message being forwarded (the forward dialog is open). */
+  forwarding: Message | null;
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
 }
@@ -38,7 +56,30 @@ let state: State = {
   activeId: null,
   panel: null,
   receiptTick: 0,
+  drafts: loadDrafts(),
+  forwarding: null,
 };
+
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+export function setDraft(conversationId: number, d: Draft | null) {
+  const cur = state.drafts[conversationId];
+  if (!d?.text.trim()) {
+    if (!cur) return;
+    const { [conversationId]: _gone, ...rest } = state.drafts;
+    setState({ drafts: rest });
+  } else {
+    if (cur && cur.text === d.text) return;
+    setState((s) => ({ drafts: { ...s.drafts, [conversationId]: d } }));
+  }
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(DRAFTS_KEY, JSON.stringify(state.drafts));
+    } catch {
+      /* private mode: drafts live until the tab closes */
+    }
+  }, 300);
+}
 
 const listeners = new Set<() => void>();
 export function getState() {

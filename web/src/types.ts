@@ -20,6 +20,8 @@ export interface Conversation {
   unread: number;
   archived: boolean;
   expireTimer: number; // disappearing messages, seconds; 0 = off
+  pinnedAt: number | null;
+  mutedUntil: number; // ms; 0 = not muted
 }
 
 export interface Attachment {
@@ -94,7 +96,7 @@ export interface Message {
   author: string;
   authorName: string;
   outgoing: boolean;
-  kind: 'message' | 'sticker' | 'system';
+  kind: 'message' | 'sticker' | 'system' | 'poll';
   body: string | null;
   attachments: Attachment[];
   quote: { sentAt: number; author: string; authorName: string; text: string } | null;
@@ -108,8 +110,18 @@ export interface Message {
   styles?: StyleRange[];
   mentions?: { start: number; length: number; key: string; name: string }[];
   preview: LinkPreview | null;
+  poll: Poll | null;
   expiresIn?: number; // seconds
   expiresAt?: number; // ms; unset until the countdown starts (received messages: once read)
+}
+
+export interface Poll {
+  question: string;
+  multiple: boolean;
+  closed: boolean;
+  options: { text: string; voters: { key: string; name: string }[] }[];
+  mine: number[]; // indexes you voted for
+  totalVoters: number;
 }
 
 export type TextStyle = 'BOLD' | 'ITALIC' | 'STRIKETHROUGH' | 'MONOSPACE' | 'SPOILER';

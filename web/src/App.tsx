@@ -3,6 +3,7 @@ import { api, onUnauthorized } from './api';
 import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
 import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
+import { ForwardDialog } from './components/Extras';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar, SidebarResizer } from './components/Sidebar';
@@ -30,8 +31,10 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const live = useStore((s) => s.live);
   const activeId = useStore((s) => s.activeId);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
-  const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + c.unread, 0));
+  // Muted chats don't count towards the number in the tab title.
+  const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + (c.mutedUntil > Date.now() ? 0 : c.unread), 0));
   const panel = useStore((s) => s.panel);
+  const forwarding = useStore((s) => s.forwarding);
   const sidebarWidth = usePrefs().sidebarWidth;
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
@@ -95,6 +98,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       )}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
       {active && panel?.kind === 'search' && <SearchPanel conversation={active} />}
+      {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
@@ -159,6 +163,9 @@ function notify(e: Extract<ServerEvent, { type: 'message' }>) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const s = getState();
   if (document.visibilityState === 'visible' && document.hasFocus() && s.activeId === m.conversationId) return;
+  const conv = s.conversations[m.conversationId];
+  // Muted chats stay quiet, except when someone mentions you.
+  if (conv && conv.mutedUntil > Date.now() && !m.mentions?.some((x) => x.key === 'self')) return;
   if (Date.now() - m.sentAt > 10 * 60_000) return; // don't notify for a backlog
   notified.add(m.id);
   const c = s.conversations[m.conversationId];
