@@ -93,6 +93,9 @@ const QR = png(232, 232, (x, y) => {
   return (qrSeed[(cx * 26 + cy) % 64] >> (cx % 8)) & 1 ? [0, 0, 0] : [255, 255, 255];
 });
 const AVATAR_ALICE = png(96, 96, (x, y) => (Math.hypot(x - 48, y - 40) < 22 ? [250, 210, 180] : y > 70 ? [60, 90, 160] : [230, 120, 90]));
+let selfProfile = { given: 'Wouter', family: 'Tester', about: 'Testing Signal Web' };
+let selfAvatar = null; // like Signal: a profile update without a picture removes it
+let groupAvatar = null;
 const AVATAR_GROUP = png(96, 96, (x, y) => ((Math.floor(x / 24) + Math.floor(y / 24)) % 2 ? [255, 190, 60] : [70, 160, 120]));
 // ---------- sticker packs, encrypted exactly like Signal's CDN serves them ----------
 function varint(n) {
@@ -282,7 +285,10 @@ const server = http.createServer(async (req, res) => {
     const avatarMatch = p.match(/^\/v1\/(contacts|groups)\/[^/]+\/([^/]+)\/avatar$/);
     if (avatarMatch) {
       const id = decodeURIComponent(avatarMatch[2]);
-      const img = avatarMatch[1] === 'groups' ? (id === GROUP_REST_ID ? AVATAR_GROUP : null) : id === PEOPLE.alice.uuid ? AVATAR_ALICE : null;
+      const img =
+        avatarMatch[1] === 'groups'
+          ? id === GROUP_REST_ID ? groupAvatar ?? AVATAR_GROUP : null
+          : id === PEOPLE.alice.uuid ? AVATAR_ALICE : id === SELF.uuid || id === SELF.number ? selfAvatar : null;
       if (!img) return json(res, 404, { error: 'No avatar found.' });
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(img);
@@ -314,8 +320,24 @@ const server = http.createServer(async (req, res) => {
       const all = url.searchParams.get('all_recipients') === 'true';
       const list = Object.values(PEOPLE).map((x) => ({ number: x.number, uuid: x.uuid, name: x.name, profile_name: x.profile, username: '', blocked: false, given_name: '',
         profile: { given_name: x.profile, lastname: '', about: x === PEOPLE.alice ? 'Hiking whenever I can 🥾' : '', has_avatar: x === PEOPLE.alice }, nickname: { name: '', given_name: '', family_name: '' } }));
+      if (all) list.push({ number: SELF.number, uuid: SELF.uuid, name: '', profile_name: `${selfProfile.given} ${selfProfile.family}`, username: '', blocked: false, given_name: selfProfile.given,
+        profile: { given_name: selfProfile.given, lastname: selfProfile.family, about: selfProfile.about, has_avatar: !!selfAvatar }, nickname: {} });
       if (all) list.push({ number: '', uuid: DAVE.uuid, name: '', profile_name: DAVE.profile, username: '', blocked: false, given_name: '', profile: { given_name: 'Dave', lastname: 'Bakker', about: '', has_avatar: false }, nickname: {} });
       return json(res, 200, list);
+    }
+    if (p.startsWith('/v1/profiles/') && m === 'PUT') {
+      const b = await body(req);
+      if (!b.name) return json(res, 400, { error: "Couldn't process request - profile name missing" });
+      selfProfile = { ...selfProfile, given: b.name, about: b.about ?? selfProfile.about };
+      selfAvatar = b.base64_avatar ? Buffer.from(b.base64_avatar, 'base64') : null;
+      sent.push({ path: p, method: m, name: b.name, about: b.about, avatarBytes: selfAvatar?.length ?? 0 });
+      return json(res, 204);
+    }
+    if (p.startsWith('/v1/groups/') && m === 'PUT') {
+      const b = await body(req);
+      if (b.base64_avatar) groupAvatar = Buffer.from(b.base64_avatar, 'base64');
+      sent.push({ path: p, method: m, avatarBytes: b.base64_avatar ? groupAvatar.length : 0 });
+      return json(res, 204);
     }
     if (p.startsWith('/v1/groups/'))
       return json(res, 200, [{ name: GROUP.name, description: GROUP.description, id: GROUP_REST_ID, internal_id: GROUP.internal_id,
@@ -332,6 +354,7 @@ const server = http.createServer(async (req, res) => {
       const ts = Date.now();
       sent.push({ ...b, base64_attachments: b.base64_attachments?.map((a) => a.slice(0, 60) + '…'), ts });
       if (String(b.message).includes('fail')) return json(res, 400, { error: 'Mock failure: recipient unreachable' });
+      if (b.edit_timestamp) return json(res, 201, [{ timestamp: String(ts) }]); // edits: no receipts or auto-reply
       const recipient = b.recipients?.[0];
       const person = personFor(recipient);
       const isGroup = recipient === GROUP_REST_ID;

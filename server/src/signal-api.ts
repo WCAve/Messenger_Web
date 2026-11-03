@@ -102,6 +102,12 @@ export const signalApi = {
   addStickerPack: (number: string, packId: string, packKey: string) =>
     call<void>('POST', `/v1/sticker-packs/${enc(number)}`, { pack_id: packId, pack_key: packKey }, 120_000),
 
+  /** Note: the API removes your profile picture when base64_avatar is left out. */
+  updateProfile: (number: string, body: { name: string; about?: string; base64_avatar?: string }) =>
+    call<void>('PUT', `/v1/profiles/${enc(number)}`, body, 120_000),
+  updateGroup: (number: string, groupId: string, body: { base64_avatar?: string; name?: string; description?: string }) =>
+    call<void>('PUT', `/v1/groups/${enc(number)}/${enc(groupId)}`, body, 120_000),
+
   receipt: (number: string, body: { recipient: string; receipt_type: 'read' | 'viewed'; timestamp: number }) =>
     call<void>('POST', `/v1/receipts/${enc(number)}`, body),
 

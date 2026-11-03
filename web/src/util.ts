@@ -72,3 +72,28 @@ export function isJumbomoji(text: string | null) {
   if (!text || text.length > 12) return false;
   return /^(\p{Extended_Pictographic}|\p{Emoji_Component}|‍|️|\s)+$/u.test(text) && !/^[\d#*\s]+$/.test(text);
 }
+
+/** Center-crop an image file to a square JPEG (base64, no data: prefix), like Signal does for avatars. */
+export async function squareAvatar(file: File, size = 640): Promise<string> {
+  if (!file.type.startsWith('image/')) throw new Error('Choose an image file');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = () => reject(new Error("Couldn't read that image"));
+      i.src = url;
+    });
+    const side = Math.min(img.naturalWidth, img.naturalHeight);
+    const out = Math.min(size, side);
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = out;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#fff'; // transparent PNGs get a white background, as JPEG has no transparency
+    ctx.fillRect(0, 0, out, out);
+    ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, out, out);
+    return canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}

@@ -39,6 +39,9 @@ export const api = {
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>
     call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
+  profile: () => call<Profile>('GET', '/api/profile'),
+  updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
+  setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
   updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
@@ -50,12 +53,21 @@ export const api = {
     b: { text: string; quoteId?: number; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
+  edit: (id: number, text: string) => call<Message>('POST', `/api/messages/${id}/edit`, { text }),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };
+
+export interface Profile {
+  known: boolean;
+  givenName: string;
+  familyName: string;
+  about: string;
+  avatar: string | null;
+}
 
 export interface ServerSettings {
   sendReadReceipts: boolean;

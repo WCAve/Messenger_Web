@@ -23,18 +23,20 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link
-- Settings: light/dark/system theme, Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
+- Settings: your profile (picture, first name, about), light/dark/system theme, Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
+- Change a group's picture from Group info (if the group lets you)
+- Resizable chat list: drag the divider, or double-click it to reset
 - Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
 - Group and contact info: description, members and admins, profile pictures, shared media, docs and links
 - Delivery and read ticks, plus per-person "Read by / Delivered to" in Message info
 - Read receipts and typing indicators, both ways
-- Delete for everyone (your own messages), retry failed sends
+- Edit your own text messages for 24 hours (↑ in an empty message box edits your last one), delete for everyone, retry failed sends
 - Edits and deletes made by others are shown
 - Browser notifications, dark mode, layout for wide screens and phones
 
 Ticks work like in Signal's own apps: in a group, two ticks once anyone has received the message, filled once anyone has read it. Message info (ⓘ on your own messages) shows exactly who. People who switched off read receipts never show as read.
 
-**Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing your own messages, polls (shown as text), view-once media.
+**Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), polls (shown as text), view-once media.
 
 Stickers are downloaded from Signal's CDN (`cdn.signal.org`) by the signal-web container and decrypted there, like Signal Desktop does, so that container needs outbound internet access.
 

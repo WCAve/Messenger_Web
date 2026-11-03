@@ -6,9 +6,11 @@ export interface Prefs {
   enterToSend: boolean;
   notifications: boolean;
   notificationPreview: boolean;
+  /** Chat list width in px; null = automatic. */
+  sidebarWidth: number | null;
 }
 
-const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true };
+const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null };
 const KEY = 'sw-prefs';
 
 function load(): Prefs {

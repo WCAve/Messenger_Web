@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';
-import { getAvatar } from './avatars.js';
+import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
 import { applyPendingReceipts } from './ingest.js';
@@ -19,7 +19,7 @@ import {
 } from './auth.js';
 import { config } from './config.js';
 import { addClient, broadcast, closeAllClients } from './events.js';
-import { type Ctx, HttpError, Router, setCookie } from './http.js';
+import { type Ctx, HttpError, Router, sendFile, setCookie } from './http.js';
 import { getState, recheckSoon, refreshDirectory } from './signal.js';
 import { groupRecipientId, sentTimestamp, signalApi } from './signal-api.js';
 import {
@@ -32,6 +32,8 @@ import {
   conversationInfo,
   getConversation,
   getMessage,
+  getSelfProfile,
+  setSelfProfile,
   getOrCreateDirect,
   insertMessage,
   listContacts,
@@ -64,6 +66,8 @@ export const MIME: Record<string, string> = {
   '.opus': 'audio/ogg',
   '.pdf': 'application/pdf',
 };
+
+const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal's limit is 24 h; keep a minute of margin
 
 function emitConversation(conv: ConversationRow) {
   broadcast({ type: 'conversation', conversation: conversationDto(conv) });
@@ -192,6 +196,68 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   r.get('/api/state', () => getState());
 
+  // ---------- your Signal profile ----------
+  const selfAvatarId = () => self.uuid || self.number!;
+  const profileDto = () => {
+    const p = getSelfProfile();
+    return {
+      known: !!p,
+      givenName: p?.givenName ?? '',
+      familyName: p?.familyName ?? '',
+      about: p?.about ?? '',
+      avatar: p?.hasAvatar ? `/api/avatars/self?v=${Date.now()}` : null,
+    };
+  };
+  r.get('/api/profile', async () => {
+    requireAccount();
+    if (!getSelfProfile()) await refreshDirectory().catch(() => {});
+    return profileDto();
+  });
+  r.get('/api/avatars/self', (ctx) => sendAvatar(ctx, 'profile', selfAvatarId()));
+
+  // Body: { givenName, about, avatar }. avatar: base64 image = new picture, null = remove, absent = keep.
+  r.post('/api/profile', async (ctx) => {
+    const account = requireAccount();
+    const givenName = String(ctx.body?.givenName ?? '').trim();
+    const about = typeof ctx.body?.about === 'string' ? ctx.body.about.trim().slice(0, 140) : undefined;
+    if (!givenName) throw new HttpError(400, 'Signal needs at least a first name.');
+    if (givenName.length > 26) throw new HttpError(400, 'Signal allows at most 26 characters for a first name.');
+    const current = getSelfProfile();
+    let base64: string | undefined;
+    if (typeof ctx.body?.avatar === 'string') {
+      base64 = ctx.body.avatar;
+    } else if (ctx.body?.avatar === undefined && current?.hasAvatar) {
+      // The Signal API removes the picture unless we send it again, so re-send the current one.
+      const buf = await readAvatar(account, 'profile', selfAvatarId());
+      if (!buf) throw new HttpError(409, "Couldn't read your current profile picture to keep it. Choose a picture again, or remove it.");
+      base64 = buf.toString('base64');
+    }
+    await signalApi.updateProfile(account, { name: givenName, about, base64_avatar: base64 });
+    setSelfProfile({ givenName, familyName: current?.familyName ?? '', about: about ?? current?.about ?? '', hasAvatar: !!base64 });
+    invalidateAvatar('profile', selfAvatarId());
+    log('info', 'profile updated');
+    return profileDto();
+  });
+
+  // Change (base64) or remove (null) a group's picture. Signal decides who may (usually admins).
+  r.post('/api/conversations/:id/avatar', async (ctx) => {
+    const account = requireAccount();
+    const c = conv(ctx);
+    if (c.kind !== 'group') throw new HttpError(400, "You can only change a group's picture here");
+    const data = ctx.body?.avatar;
+    if (typeof data !== 'string' || !data) throw new HttpError(400, 'Choose a picture');
+    const gid = groupRecipientId(c.group_id!);
+    try {
+      await signalApi.updateGroup(account, gid, { base64_avatar: data });
+    } catch (e) {
+      const msg = (e as Error).message;
+      throw new HttpError(400, /permission|not allowed|admin/i.test(msg) ? 'Only group admins can change the picture of this group.' : msg.replace(/^.*?failed \(\d+\): /, ''));
+    }
+    invalidateAvatar('group', gid);
+    emitConversation(c);
+    return conversationDto(c);
+  });
+
   r.get('/api/settings', () => settingsDto());
   r.post('/api/settings', (ctx) => {
     updateSettings(ctx.body ?? {});
@@ -261,8 +327,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       ctx.res.writeHead(404, { 'cache-control': 'private, max-age=300', 'content-type': 'text/plain' });
       return ctx.res.end('Sticker not available');
     }
-    ctx.res.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
-    fs.createReadStream(found.file).pipe(ctx.res);
+    sendFile(ctx.res, found.file, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
   });
 
   // Avatars (proxied from the Signal API and cached on disk)
@@ -273,8 +338,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       ctx.res.writeHead(404, { 'cache-control': 'private, max-age=3600', 'content-type': 'text/plain' });
       return ctx.res.end('No avatar');
     }
-    ctx.res.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' });
-    fs.createReadStream(found.file).pipe(ctx.res);
+    sendFile(ctx.res, found.file, { 'content-type': found.type, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' });
   };
   r.get('/api/avatars/conversation/:id', (ctx) => {
     const c = conv(ctx);
@@ -381,6 +445,33 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return messageDto(updated);
   });
 
+  // Edit one of your own text messages (Signal allows this for 24 hours).
+  r.post('/api/messages/:id/edit', async (ctx) => {
+    const account = requireAccount();
+    const m = message(ctx);
+    const text = String(ctx.body?.text ?? '').trim();
+    if (!m.outgoing || m.deleted || m.kind !== 'message' || m.attachments) throw new HttpError(400, 'Only your own text messages can be edited');
+    if (m.status === 'pending' || m.status === 'failed') throw new HttpError(400, 'This message has not been sent yet');
+    if (!m.ts_confirmed) throw new HttpError(400, "This message was sent before editing was supported and can't be edited");
+    if (Date.now() - m.sent_ts > EDIT_WINDOW_MS) throw new HttpError(400, 'Messages can only be edited for 24 hours after sending');
+    if (!text) throw new HttpError(400, 'A message can’t be empty. Delete it instead.');
+    if (text === m.body) return messageDto(m);
+    const c = getConversation(m.conversation_id)!;
+    const quote = m.quote ? (JSON.parse(m.quote) as { sentTs: number; author: string; text?: string | null }) : null;
+    await signalApi.send({
+      number: account,
+      recipients: [recipientFor(c)],
+      message: text,
+      edit_timestamp: m.sent_ts, // always the original message's timestamp, also for later edits
+      quote_timestamp: quote?.sentTs,
+      quote_author: quote ? addressForKey(quote.author) : undefined,
+      quote_message: quote ? quote.text ?? '' : undefined,
+    });
+    const updated = emitMessageRow(m.id, { body: text, edited: 1 })!;
+    emitConversation(c);
+    return messageDto(updated);
+  });
+
   // React (toggles: sending the same emoji again removes it)
   r.post('/api/messages/:id/reactions', async (ctx) => {
     const account = requireAccount();
@@ -453,10 +544,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!(await fetchAttachment(id))) throw new HttpError(404, 'Attachment not available');
     const file = localPath(id);
     const type = MIME[path.extname(id).toLowerCase()];
-    const stat = fs.statSync(file);
     const headers: Record<string, string | number> = {
       'content-type': type ?? 'application/octet-stream',
-      'content-length': stat.size,
       'x-content-type-options': 'nosniff',
       'cache-control': 'private, max-age=31536000, immutable',
     };
@@ -464,9 +553,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!type || ctx.query.has('download')) {
       headers['content-disposition'] = `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(name)}`;
     }
-    ctx.res.writeHead(200, headers);
-    if (ctx.req.method === 'HEAD') return ctx.res.end();
-    fs.createReadStream(file).pipe(ctx.res);
+    sendFile(ctx.res, file, headers, ctx.req.method === 'HEAD');
   });
 
   return r;

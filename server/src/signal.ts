@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { broadcast } from './events.js';
 import { handleEnvelope, ingestHooks } from './ingest.js';
 import { signalApi } from './signal-api.js';
-import { conversationDto, getOrCreateGroup, listConversationRows, self, upsertContact } from './store.js';
+import { conversationDto, getOrCreateGroup, listConversationRows, self, setSelfProfile, upsertContact } from './store.js';
 
 /** Names and group details may have changed: push fresh chat-list rows to open browsers. */
 function broadcastAllConversations() {
@@ -144,6 +144,17 @@ export async function refreshDirectory() {
     signalApi.groups(account),
   ]);
   for (const c of contacts) {
+    if (self.is(c.uuid, c.number)) {
+      // Your own entry: remember your profile for the Settings screen.
+      if (c.uuid && !self.uuid) self.uuid = c.uuid;
+      setSelfProfile({
+        givenName: c.profile?.given_name ?? c.given_name ?? '',
+        familyName: c.profile?.lastname ?? '',
+        about: c.profile?.about ?? '',
+        hasAvatar: !!c.profile?.has_avatar,
+      });
+      continue;
+    }
     const nick = c.nickname?.name || [c.nickname?.given_name, c.nickname?.family_name].filter(Boolean).join(' ');
     const profile = c.profile_name || [c.profile?.given_name, c.profile?.lastname].filter(Boolean).join(' ');
     upsertContact({

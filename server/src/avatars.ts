@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from './config.js';
+import { kvGet, kvSet } from './db.js';
 import { signalApi } from './signal-api.js';
 
 const dir = path.join(config.dataDir, 'avatars');
@@ -24,8 +25,31 @@ function sniff(buf: Buffer): string | null {
 
 const inflight = new Map<string, Promise<{ file: string; type: string } | null>>();
 
+function cacheName(kind: 'profile' | 'group', id: string) {
+  return crypto.createHash('sha256').update(`${kind}:${id}`).digest('hex').slice(0, 32);
+}
+
+/** Bumped whenever we change a picture, and part of its URL, so browsers drop their cached copy. */
+export function avatarRev(kind: 'profile' | 'group', id: string): number {
+  return Number(kvGet(`avatar_rev:${cacheName(kind, id)}`) ?? 0);
+}
+
+/** Forget the cached picture (after it was changed) so the next request fetches the new one. */
+export function invalidateAvatar(kind: 'profile' | 'group', id: string) {
+  const name = cacheName(kind, id);
+  fs.rmSync(path.join(dir, name), { force: true });
+  fs.rmSync(path.join(dir, name + '.none'), { force: true });
+  kvSet(`avatar_rev:${name}`, String(avatarRev(kind, id) + 1));
+}
+
+/** The cached picture file, if any (for re-sending your current photo with a profile update). */
+export async function readAvatar(account: string, kind: 'profile' | 'group', id: string): Promise<Buffer | null> {
+  const found = await getAvatar(account, kind, id);
+  return found ? fs.readFileSync(found.file) : null;
+}
+
 export function getAvatar(account: string, kind: 'profile' | 'group', id: string): Promise<{ file: string; type: string } | null> {
-  const name = crypto.createHash('sha256').update(`${kind}:${id}`).digest('hex').slice(0, 32);
+  const name = cacheName(kind, id);
   const file = path.join(dir, name);
   const miss = file + '.none';
   let p = inflight.get(name);

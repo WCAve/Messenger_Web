@@ -1,7 +1,8 @@
-import { type ReactNode, useEffect, useState } from 'react';
-import { type ServerSettings, api } from '../api';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type Profile, type ServerSettings, api } from '../api';
+import { squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
-import { Icon } from './ui';
+import { Avatar, Icon } from './ui';
 
 function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: ReactNode; disabled?: boolean }) {
   return (
@@ -21,6 +22,107 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       <h3>{title}</h3>
       {children}
     </section>
+  );
+}
+
+/** Your Signal profile: picture, first name, about. Changes sync to your phone and contacts. */
+function ProfileSection() {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [givenName, setGivenName] = useState('');
+  const [about, setAbout] = useState('');
+  const [photo, setPhoto] = useState<{ data: string; preview: string } | 'remove' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.profile().then(
+      (p) => {
+        setProfile(p);
+        setGivenName(p.givenName);
+        setAbout(p.about);
+      },
+      (e) => setError(e.message),
+    );
+  }, []);
+
+  async function choose(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const data = await squareAvatar(file);
+      setPhoto({ data, preview: `data:image/jpeg;base64,${data}` });
+      setSaved(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const p = await api.updateProfile({
+        givenName,
+        about,
+        ...(photo === 'remove' ? { avatar: null } : photo ? { avatar: photo.data } : {}),
+      });
+      setProfile(p);
+      setPhoto(null);
+      setSaved(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const shown = photo === 'remove' ? null : photo ? photo.preview : profile?.avatar ?? null;
+  const dirty = !!profile && (givenName !== profile.givenName || about !== profile.about || photo !== null);
+  const fullName = [givenName, profile?.familyName].filter(Boolean).join(' ') || 'You';
+
+  return (
+    <Section title="Profile">
+      <div className="profile-edit">
+        <button className="profile-photo" onClick={() => fileInput.current?.click()} title="Change profile picture" aria-label="Change profile picture">
+          <Avatar key={shown ?? 'none'} name={fullName} seed="self" size={88} src={shown} />
+          <span className="photo-overlay">
+            <Icon name="camera" size={22} />
+          </span>
+        </button>
+        <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => (void choose(e.target.files?.[0]), (e.target.value = ''))} />
+        <div className="profile-fields">
+          <label className="field">
+            <span>First name</span>
+            <input value={givenName} maxLength={26} onChange={(e) => (setGivenName(e.target.value), setSaved(false))} disabled={!profile} />
+          </label>
+          {profile?.familyName && <p className="setting-note">Last name “{profile.familyName}” stays as it is; change it on your phone.</p>}
+          <label className="field">
+            <span>About</span>
+            <input value={about} maxLength={140} placeholder="A few words about yourself" onChange={(e) => (setAbout(e.target.value), setSaved(false))} disabled={!profile} />
+          </label>
+        </div>
+      </div>
+      {error && <p className="form-error setting-note">{error}</p>}
+      {saved && <p className="setting-note">Saved. Your phone and contacts get the new profile within a few minutes.</p>}
+      <div className="setting-actions">
+        <button className="btn primary" onClick={save} disabled={busy || !dirty || !givenName.trim()}>
+          {busy ? 'Saving…' : 'Save profile'}
+        </button>
+        {(profile?.avatar || (photo && photo !== 'remove')) && photo !== 'remove' && (
+          <button className="btn" onClick={() => (setPhoto('remove'), setSaved(false))} disabled={busy}>
+            Remove picture
+          </button>
+        )}
+        {photo && (
+          <button className="btn" onClick={() => setPhoto(null)} disabled={busy}>
+            Undo picture change
+          </button>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -90,6 +192,8 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
       </header>
       <div className="settings-body">
         {error && <p className="form-error pad">{error}</p>}
+
+        <ProfileSection />
 
         <Section title="Appearance">
           <div className="setting-row">

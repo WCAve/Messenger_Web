@@ -1,4 +1,5 @@
 /** Minimal HTTP router on top of node:http — just what Signal Web needs. */
+import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export class HttpError extends Error {
@@ -78,6 +79,31 @@ async function readBody(req: IncomingMessage, limit: number): Promise<unknown> {
   } catch {
     throw new HttpError(400, 'Invalid JSON');
   }
+}
+
+/**
+ * Send a file without ever crashing the process: the file is opened before the headers go out (so a
+ * file deleted mid-request becomes a 404), and read errors just end the response.
+ */
+export function sendFile(res: ServerResponse, file: string, headers: Record<string, string | number>, headOnly = false) {
+  let fd: number;
+  try {
+    fd = fs.openSync(file, 'r');
+  } catch {
+    if (!res.headersSent) sendJson(res, 404, { error: 'Not found' });
+    else res.end();
+    return;
+  }
+  const size = fs.fstatSync(fd).size;
+  res.writeHead(200, { ...headers, 'content-length': size });
+  if (headOnly) {
+    fs.closeSync(fd);
+    return res.end();
+  }
+  const stream = fs.createReadStream('', { fd });
+  stream.on('error', () => res.destroy());
+  res.on('close', () => stream.destroy());
+  stream.pipe(res);
 }
 
 export function sendJson(res: ServerResponse, status: number, data: unknown) {

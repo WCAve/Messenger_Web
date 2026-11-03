@@ -19,6 +19,21 @@ export interface LightboxItem {
   sentAt: number;
 }
 
+const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal allows edits for 24 hours
+
+/** Your own sent text message, less than 24 hours old (Signal's edit rules). */
+export function canEdit(m: Message) {
+  return (
+    m.outgoing &&
+    m.kind === 'message' &&
+    !m.deleted &&
+    !!m.body &&
+    !m.attachments.length &&
+    (m.status === 'sent' || m.status === 'delivered' || m.status === 'read') &&
+    Date.now() - m.sentAt < EDIT_WINDOW_MS
+  );
+}
+
 /** Media that loops silently: animated GIF images and Signal's GIF-style videos. */
 function isLoopingMedia(a: Attachment) {
   return a.contentType === 'image/gif' || (a.contentType.startsWith('video/') && a.gif === true);
@@ -32,6 +47,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const connected = useStore((s) => s.signal.status === 'connected');
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [reactTo, setReactTo] = useState<Message | null>(null);
+  const [editing, setEditing] = useState<Message | null>(null);
   const [dragging, setDragging] = useState(false);
   const [dropped, setDropped] = useState<File[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -40,6 +56,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   useEffect(() => {
     setReplyTo(null);
     setReactTo(null);
+    setEditing(null);
     setLoadError(null);
     if (getState().messages[id]) return;
     api
@@ -118,7 +135,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           conversation={conversation}
           messages={messages}
           hasMore={hasMore}
-          onReply={setReplyTo}
+          onReply={(m) => (setEditing(null), setReplyTo(m))}
+          onEdit={(m) => (setReplyTo(null), setEditing(m))}
           onMoreReactions={setReactTo}
           onOpenImage={(att, msg) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt })}
         />
@@ -131,6 +149,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         clearReply={() => setReplyTo(null)}
         reactTo={reactTo}
         clearReact={() => setReactTo(null)}
+        editing={editing}
+        setEditing={setEditing}
         dropped={dropped}
         clearDropped={() => setDropped([])}
         disabled={!connected}
@@ -148,6 +168,7 @@ function MessageList({
   messages,
   hasMore,
   onReply,
+  onEdit,
   onMoreReactions,
   onOpenImage,
 }: {
@@ -155,6 +176,7 @@ function MessageList({
   messages: Message[] | undefined;
   hasMore: boolean;
   onReply: (m: Message) => void;
+  onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
   onOpenImage: (a: Attachment, m: Message) => void;
 }) {
@@ -181,6 +203,17 @@ function MessageList({
     }
     prevHeight.current = el.scrollHeight;
   }, [messages, last?.outgoing]);
+
+  // The list gets shorter when the composer grows (reply/edit bar, pickers): stay pinned to the bottom.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [messages === undefined]);
 
   // Images/GIFs finish loading after layout: stay pinned to the bottom when they do.
   const onMediaLoad = useCallback(() => {
@@ -237,6 +270,7 @@ function MessageList({
         selected={selected === m.id}
         onSelect={() => setSelected((s) => (s === m.id ? null : m.id))}
         onReply={onReply}
+        onEdit={onEdit}
         onMoreReactions={onMoreReactions}
         onOpenImage={onOpenImage}
         onJump={jumpTo}
@@ -311,6 +345,7 @@ const MessageItem = memo(function MessageItem({
   selected,
   onSelect,
   onReply,
+  onEdit,
   onMoreReactions,
   onOpenImage,
   onJump,
@@ -322,6 +357,7 @@ const MessageItem = memo(function MessageItem({
   selected: boolean;
   onSelect: () => void;
   onReply: (m: Message) => void;
+  onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
   onOpenImage: (a: Attachment, m: Message) => void;
   onJump: (sentAt: number) => void;
@@ -468,6 +504,11 @@ const MessageItem = memo(function MessageItem({
               <Icon name="reply" size={18} />
             </button>
           )}
+          {canEdit(m) && (
+            <button className="icon-btn sm" onClick={() => onEdit(m)} aria-label="Edit" title="Edit (↑ in an empty message box edits your last message)">
+              <Icon name="pencil" size={17} />
+            </button>
+          )}
           {m.body && (
             <button className="icon-btn sm" onClick={() => navigator.clipboard?.writeText(m.body ?? '')} aria-label="Copy text" title="Copy text">
               <Icon name="copy" size={17} />
@@ -598,6 +639,8 @@ function Composer({
   clearReply,
   reactTo,
   clearReact,
+  editing,
+  setEditing,
   dropped,
   clearDropped,
   disabled,
@@ -607,6 +650,8 @@ function Composer({
   clearReply: () => void;
   reactTo: Message | null;
   clearReact: () => void;
+  editing: Message | null;
+  setEditing: (m: Message | null) => void;
   dropped: File[];
   clearDropped: () => void;
   disabled: boolean;
@@ -641,6 +686,22 @@ function Composer({
   useEffect(() => {
     if (reactTo) setPanel('emoji');
   }, [reactTo]);
+
+  // Entering edit mode puts the message text in the box; leaving it clears the box again.
+  const draftBeforeEdit = useRef('');
+  useEffect(() => {
+    if (editing) {
+      draftBeforeEdit.current = text;
+      setPanel(null);
+      setTextAndCaret(editing.body ?? '', (editing.body ?? '').length);
+    }
+  }, [editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function stopEditing() {
+    setEditing(null);
+    setTextAndCaret(draftBeforeEdit.current, draftBeforeEdit.current.length);
+    draftBeforeEdit.current = '';
+  }
 
   useEffect(() => {
     if (dropped.length) {
@@ -726,6 +787,25 @@ function Composer({
 
   async function send() {
     const body = replaceShortcodes(text.trim());
+    if (editing) {
+      if (!body || sending) return;
+      setSending(true);
+      setError(null);
+      setSuggest(null);
+      try {
+        const updated = await api.edit(editing.id, body);
+        upsertMessages(id, [updated]);
+        setEditing(null);
+        setText(draftBeforeEdit.current);
+        draftBeforeEdit.current = '';
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setSending(false);
+        area.current?.focus();
+      }
+      return;
+    }
     if ((!body && !files.length) || sending) return;
     setSending(true);
     setError(null);
@@ -815,6 +895,22 @@ function Composer({
         return;
       }
     }
+    if (e.key === 'ArrowUp' && !text && !files.length && !editing && !e.shiftKey && !e.altKey) {
+      // Like Signal Desktop/Slack: ↑ in an empty box edits your last message.
+      const list = getState().messages[id] ?? [];
+      const last = [...list].reverse().find((m) => m.outgoing && !m.deleted && m.kind !== 'system');
+      if (last && canEdit(last)) {
+        e.preventDefault();
+        clearReply();
+        setEditing(last);
+      }
+      return;
+    }
+    if (e.key === 'Escape' && editing) {
+      e.preventDefault();
+      stopEditing();
+      return;
+    }
     const enterSends = getPrefs().enterToSend;
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && (enterSends || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -851,7 +947,19 @@ function Composer({
           onClose={closePanel}
         />
       )}
-      {replyTo && (
+      {editing && (
+        <div className="reply-preview editing" style={{ ['--hue' as string]: 221 }}>
+          <Icon name="pencil" size={18} />
+          <div>
+            <strong>Editing message</strong>
+            <span>{editing.body}</span>
+          </div>
+          <button className="icon-btn sm" onClick={stopEditing} aria-label="Cancel editing" title="Cancel (Esc)">
+            <Icon name="close" size={18} />
+          </button>
+        </div>
+      )}
+      {replyTo && !editing && (
         <div className="reply-preview" style={{ ['--hue' as string]: replyTo.author === 'self' ? 221 : hueFor(replyTo.author) }}>
           <div>
             <strong>Replying to {replyTo.author === 'self' ? 'yourself' : replyTo.authorName}</strong>
@@ -916,11 +1024,11 @@ function Composer({
           aria-label="GIF"
           title="GIF"
           aria-expanded={panel === 'gif'}
-          disabled={disabled}
+          disabled={disabled || !!editing}
         >
           <Icon name="gif" size={26} />
         </button>
-        <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled}>
+        <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled || !!editing}>
           <Icon name="attach" />
         </button>
         <input
@@ -954,8 +1062,14 @@ function Composer({
           aria-label={`Message ${conversation.title}`}
           aria-autocomplete="list"
         />
-        <button className="send-btn" onClick={send} disabled={disabled || sending || (!text.trim() && !files.length)} aria-label="Send">
-          <Icon name="send" />
+        <button
+          className="send-btn"
+          onClick={send}
+          disabled={disabled || sending || (!text.trim() && !files.length) || (!!editing && text.trim() === editing.body)}
+          aria-label={editing ? 'Save edit' : 'Send'}
+          title={editing ? 'Save edit' : undefined}
+        >
+          <Icon name={editing ? 'check' : 'send'} />
         </button>
       </div>
     </footer>

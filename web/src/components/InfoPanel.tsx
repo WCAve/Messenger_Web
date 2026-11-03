@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient } from '../types';
-import { formatDay, formatSize, formatTime } from '../util';
+import { formatDay, formatSize, formatTime, squareAvatar } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
 
 function closePanel() {
@@ -53,6 +53,22 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
   const long = !!text && (text.length > 220 || text.split('\n').length > 5);
   const members = (info?.members ?? []).filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.number?.includes(filter));
 
+  const photoInput = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  async function changeGroupPhoto(file: File | undefined) {
+    if (!file) return;
+    setPhotoBusy(true);
+    setError(null);
+    try {
+      const data = await squareAvatar(file);
+      upsertConversation(await api.setGroupAvatar(id, data));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
   async function openMember(m: Member) {
     if (m.key === 'self') return;
     try {
@@ -69,7 +85,15 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
       <PanelHead title={group ? 'Group info' : 'Contact info'} />
       <div className="panel-body">
         <section className="panel-hero">
-          <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={group} size={120} src={conversation.avatar} />
+          {group ? (
+            <button className="profile-photo" onClick={() => photoInput.current?.click()} title="Change group picture" aria-label="Change group picture" disabled={photoBusy}>
+              <Avatar key={conversation.avatar ?? ''} name={conversation.title} seed={String(conversation.title)} group size={120} src={conversation.avatar} />
+              <span className="photo-overlay">{photoBusy ? <span className="spinner small" /> : <Icon name="camera" size={26} />}</span>
+            </button>
+          ) : (
+            <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} size={120} src={conversation.avatar} />
+          )}
+          <input ref={photoInput} type="file" accept="image/*" hidden onChange={(e) => (void changeGroupPhoto(e.target.files?.[0]), (e.target.value = ''))} />
           <h3>{conversation.title}</h3>
           <p className="muted">
             {group

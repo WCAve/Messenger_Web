@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { type CSSProperties, useEffect, useState } from 'react';
 import { api, onUnauthorized } from './api';
 import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
 import { ChatInfoPanel, MessageInfoPanel } from './components/InfoPanel';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, SidebarResizer } from './components/Sidebar';
 import { applyEvent, getState, setState, upsertConversation, upsertMessages, useStore } from './store';
-import { getPrefs } from './prefs';
+import { getPrefs, usePrefs } from './prefs';
 import type { ServerEvent } from './types';
 
 export function App() {
@@ -31,6 +31,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
   const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + c.unread, 0));
   const panel = useStore((s) => s.panel);
+  const sidebarWidth = usePrefs().sidebarWidth;
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   // Message info belongs to one chat: close it when switching chats.
@@ -66,7 +67,11 @@ function Main({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className={`app${activeId ? ' chat-open' : ''}${active && panel ? ' panel-open' : ''}`}>
+    <div
+      className={`app${activeId ? ' chat-open' : ''}${active && panel ? ' panel-open' : ''}`}
+      style={sidebarWidth ? ({ '--side-w': `${sidebarWidth}px` } as CSSProperties) : undefined}
+    >
+      <SidebarResizer />
       {(!live || signal.status === 'connecting') && (
         <div className="banner" role="status">
           {!live ? 'Reconnecting to Signal Web…' : signal.error ?? 'Connecting to Signal…'}

@@ -1,6 +1,7 @@
 /** Data access + the JSON shapes sent to the browser. */
 import { db, kvGet, kvSet } from './db.js';
 import { groupRecipientId } from './signal-api.js';
+import { avatarRev } from './avatars.js';
 import { cachedManifest, stickerUrl } from './stickers.js';
 
 export interface StickerRef {
@@ -108,6 +109,21 @@ export const self = {
   },
 };
 
+export interface SelfProfile {
+  givenName: string;
+  familyName: string;
+  about: string;
+  hasAvatar: boolean;
+}
+
+export function getSelfProfile(): SelfProfile | null {
+  const v = kvGet('self_profile');
+  return v ? (JSON.parse(v) as SelfProfile) : null;
+}
+export function setSelfProfile(p: SelfProfile) {
+  kvSet('self_profile', JSON.stringify(p));
+}
+
 // ---------- contacts ----------
 
 const contactByUuid = db.prepare<[string], ContactRow>('SELECT * FROM contacts WHERE uuid = ?');
@@ -187,7 +203,8 @@ export function contactByKeyOrId(key: string): ContactRow | undefined {
 
 export function avatarUrlForKey(key: string): string | null {
   const c = contactByKeyOrId(key);
-  return c?.has_avatar && (c.uuid || c.number) ? `/api/avatars/contact/${encodeURIComponent(c.key)}` : null;
+  const id = c?.uuid || c?.number;
+  return c?.has_avatar && id ? `/api/avatars/contact/${encodeURIComponent(c.key)}?v=${avatarRev('profile', id)}` : null;
 }
 
 export function nameForKey(key: string): string {
@@ -369,8 +386,10 @@ export function conversationDto(row: ConversationRow) {
 export type ConversationDto = ReturnType<typeof conversationDto>;
 
 function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string | null {
-  if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}`; // 404s (and is cached) when the group has none
-  return peer?.has_avatar ? `/api/avatars/conversation/${conv.id}` : null;
+  // Groups: always offered; it 404s (and that is cached) when the group has no picture.
+  if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}?v=${avatarRev('group', groupRecipientId(conv.group_id!))}`;
+  const id = conv.peer_uuid || conv.peer_number;
+  return peer?.has_avatar && id ? `/api/avatars/conversation/${conv.id}?v=${avatarRev('profile', id)}` : null;
 }
 
 export interface GroupMember {

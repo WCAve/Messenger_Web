@@ -1,8 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import type { Conversation, DirectoryContact } from '../types';
 import { formatListTime } from '../util';
+import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
 import { Avatar, Icon, StatusMark } from './ui';
 
@@ -82,6 +83,67 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         )}
       </nav>
     </aside>
+  );
+}
+
+/**
+ * The divider between the chat list and the chat: drag it, use ←/→ when focused, or double-click to
+ * reset. The width is remembered per browser.
+ */
+export function SidebarResizer() {
+  const width = usePrefs().sidebarWidth;
+  const MIN = 260;
+  const max = () => Math.min(720, window.innerWidth - 380);
+  const clamp = (w: number) => Math.round(Math.max(MIN, Math.min(max(), w)));
+  const current = () => (document.querySelector('.sidebar') as HTMLElement | null)?.getBoundingClientRect().width ?? 360;
+
+  function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const app = document.querySelector('.app') as HTMLElement | null;
+    const left = app?.getBoundingClientRect().left ?? 0;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    document.body.classList.add('resizing');
+    let w = current();
+    const move = (ev: PointerEvent) => {
+      w = clamp(ev.clientX - left);
+      app?.style.setProperty('--side-w', `${w}px`); // live, without re-rendering React
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      document.body.classList.remove('resizing');
+      setPrefs({ sidebarWidth: w });
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  return (
+    <div
+      className="side-resizer"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize chat list"
+      aria-valuenow={Math.round(width ?? current())}
+      aria-valuemin={MIN}
+      aria-valuemax={max()}
+      tabIndex={0}
+      title="Drag to resize, double-click to reset"
+      onPointerDown={onPointerDown}
+      onDoubleClick={() => {
+        (document.querySelector('.app') as HTMLElement | null)?.style.removeProperty('--side-w');
+        setPrefs({ sidebarWidth: null });
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        setPrefs({ sidebarWidth: clamp(current() + (e.key === 'ArrowRight' ? 24 : -24)) });
+      }}
+    />
   );
 }
 

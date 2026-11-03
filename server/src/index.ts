@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { db } from './db.js';
-import { sendJson } from './http.js';
+import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
 import { startSignal, stopSignal } from './signal.js';
@@ -53,12 +53,15 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
     file = path.join(webDist, 'index.html'); // SPA fallback
   }
   const isIndex = file.endsWith('index.html');
-  res.writeHead(200, {
-    'content-type': STATIC_MIME[path.extname(file)] ?? 'application/octet-stream',
-    'cache-control': isIndex ? 'no-cache' : urlPath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
-  });
-  if (req.method === 'HEAD') return res.end();
-  fs.createReadStream(file).pipe(res);
+  sendFile(
+    res,
+    file,
+    {
+      'content-type': STATIC_MIME[path.extname(file)] ?? 'application/octet-stream',
+      'cache-control': isIndex ? 'no-cache' : urlPath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    },
+    req.method === 'HEAD',
+  );
 }
 
 const server = http.createServer(async (req, res) => {

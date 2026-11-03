@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useId, useState } from 'react';
 import { hueFor, initials } from '../util';
 
 const PATHS: Record<string, ReactNode> = {
@@ -30,6 +30,11 @@ const PATHS: Record<string, ReactNode> = {
   info: <path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16z" />,
   gif: <path d="M11.5 9H13v6h-1.5zM9 9H6c-.6 0-1 .5-1 1v4c0 .5.4 1 1 1h3c.6 0 1-.5 1-1v-2H8.5v1.5h-2v-3H10V10c0-.5-.4-1-1-1zm10 1.5V9h-4.5v6H16v-2h2v-1.5h-2v-1z" />,
   link: <path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12zM8 13h8v-2H8zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10z" />,
+  camera: (
+    <path d="M12 9a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7zm8-3h-3.2L15 4H9L7.2 6H4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2zm-8 12a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11z" />
+  ),
+  check: <path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z" />,
+  pencil: <path d="M3 17.3V21h3.7L17.8 9.9l-3.7-3.7zM20.7 7a1 1 0 0 0 0-1.4l-2.3-2.3a1 1 0 0 0-1.4 0l-1.8 1.8 3.7 3.7z" />,
   gear: (
     <path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.9a7 7 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.9a7 7 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)" />
   ),
@@ -72,27 +77,71 @@ export function Avatar({ name, seed, group, size = 44, src }: { name: string; se
   );
 }
 
-/** Delivery state of an outgoing message: clock, one tick, two ticks, two filled ticks, or a warning. */
+/**
+ * Delivery state of an outgoing message, drawn like Signal: one outlined circle = sent, two outlined
+ * circles = delivered, two filled circles = read. Filled vs outlined stays readable at a glance.
+ */
 export function StatusMark({ status }: { status: string | null }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   if (status === 'pending')
     return (
-      <svg className="status pending" width="15" height="15" viewBox="0 0 16 16" aria-label="Sending">
-        <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M8 4.5V8l2.2 1.6" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <svg className="status pending" width="16" height="16" viewBox="0 0 16 16" aria-label="Sending">
+        <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="2.2 1.6" />
       </svg>
     );
   if (status === 'failed')
     return (
-      <svg className="status failed" width="15" height="15" viewBox="0 0 16 16" aria-label="Not sent">
+      <svg className="status failed" width="16" height="16" viewBox="0 0 16 16" aria-label="Not sent">
         <circle cx="8" cy="8" r="7" fill="currentColor" />
         <path d="M8 4v5M8 11.2v.6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     );
-  const two = status === 'delivered' || status === 'read';
+  const check = (cx: number) => `M${cx - 2.5} 8.1l1.7 1.7 3.3-3.5`;
+  const line = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
+  if (status !== 'delivered' && status !== 'read') {
+    return (
+      <svg className="status sent" width="16" height="16" viewBox="0 0 16 16" aria-label="Sent">
+        <circle cx="8" cy="8" r="5.6" {...line} />
+        <path d={check(8)} {...line} />
+      </svg>
+    );
+  }
+  const read = status === 'read';
+  const cut = { fill: 'none', stroke: 'black', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;
   return (
-    <svg className={`status ${status ?? 'sent'}`} width={two ? 19 : 15} height="15" viewBox={two ? '0 0 20 16' : '0 0 16 16'} aria-label={status === 'read' ? 'Read' : two ? 'Delivered' : 'Sent'}>
-      <path d="M2.5 8.5 6 12l7.5-8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-      {two && <path d="M8.8 11.2 9.6 12 17 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />}
+    <svg className={`status ${status}`} width="21" height="16" viewBox="0 0 21 16" aria-label={read ? 'Read' : 'Delivered'}>
+      <defs>
+        {/* the back circle disappears where the front one overlaps it */}
+        <mask id={`b${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="21" height="16">
+          <rect width="21" height="16" fill="white" />
+          <circle cx="13.5" cy="8" r="7.2" fill="black" />
+          {read && <path d={check(7.5)} {...cut} />}
+        </mask>
+        {read && (
+          <mask id={`f${uid}`} maskUnits="userSpaceOnUse" x="0" y="0" width="21" height="16">
+            <rect width="21" height="16" fill="white" />
+            <path d={check(13.5)} {...cut} />
+          </mask>
+        )}
+      </defs>
+      <g mask={`url(#b${uid})`}>
+        {read ? (
+          <circle cx="7.5" cy="8" r="6.1" fill="currentColor" />
+        ) : (
+          <>
+            <circle cx="7.5" cy="8" r="5.6" {...line} />
+            <path d={check(7.5)} {...line} />
+          </>
+        )}
+      </g>
+      {read ? (
+        <circle cx="13.5" cy="8" r="6.1" fill="currentColor" mask={`url(#f${uid})`} />
+      ) : (
+        <>
+          <circle cx="13.5" cy="8" r="5.6" {...line} />
+          <path d={check(13.5)} {...line} />
+        </>
+      )}
     </svg>
   );
 }
