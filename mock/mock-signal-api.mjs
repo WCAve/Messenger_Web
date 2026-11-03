@@ -392,7 +392,8 @@ const server = http.createServer(async (req, res) => {
     if (p === '/mock/sent') return json(res, 200, sent);
     if (p === '/mock/receipt' && m === 'POST') {
       const b = await body(req); // {"from":"alice","ts":123,"kind":"read"|"delivery"}
-      receipt(PEOPLE[b.from ?? 'alice'], Number(b.ts), b.kind ?? 'read');
+      const who = b.from === 'dave' ? DAVE : b.from === 'stranger' ? { number: '', uuid: STRANGER_UUID, profile: '' } : PEOPLE[b.from ?? 'alice'];
+      receipt(who, Number(b.ts), b.kind ?? 'read');
       return json(res, 200, { ok: true });
     }
     if (p === '/mock/incoming' && m === 'POST') {

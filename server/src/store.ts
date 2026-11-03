@@ -475,6 +475,46 @@ export function statusRank(s: string | null) {
   return STATUS_RANK[s ?? 'sent'] ?? 1;
 }
 
+/**
+ * Overall tick status of an outgoing message, worked out from its receipts. Delivered as soon as anyone
+ * has it (so inactive members don't keep a group message at one tick forever); read only once every
+ * other current member has read it. Message info shows who exactly.
+ */
+export function receiptStatus(m: MessageRow): string {
+  if (m.status === 'pending' || m.status === 'failed') return m.status;
+  const rows = db
+    .prepare<[number], { recipient: string; read_at: number | null }>('SELECT recipient, read_at FROM message_receipts WHERE message_id = ?')
+    .all(m.id);
+  if (!rows.length) return m.status === 'delivered' || m.status === 'read' ? m.status : 'sent'; // e.g. synced from the phone
+  const readers = new Set(rows.filter((r) => r.read_at).map((r) => r.recipient));
+  const conv = convById.get(m.conversation_id)!;
+  let everyoneRead = readers.size > 0;
+  if (conv.kind === 'group') {
+    const others = groupMembers(conv).filter((x) => x.key !== 'self').map((x) => x.key);
+    if (others.length) everyoneRead = others.every((k) => readers.has(k));
+  }
+  return everyoneRead ? 'read' : 'delivered';
+}
+
+/** One-off: group messages that were marked read when only one member had read them. */
+export function recomputeGroupReadStatuses(): number {
+  const rows = db
+    .prepare<[], MessageRow>(
+      `SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE c.kind = 'group' AND m.outgoing = 1 AND m.status = 'read'`,
+    )
+    .all();
+  let changed = 0;
+  for (const m of rows) {
+    const status = receiptStatus(m);
+    if (status !== m.status) {
+      db.prepare('UPDATE messages SET status = ? WHERE id = ?').run(status, m.id);
+      changed++;
+    }
+  }
+  return changed;
+}
+
 /** Record a delivery or read receipt from one recipient; returns the message's new overall status. */
 export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered' | 'read', when: number): string {
   db.prepare(
@@ -483,14 +523,7 @@ export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered
        delivered_at = COALESCE(delivered_at, excluded.delivered_at),
        read_at = COALESCE(read_at, excluded.read_at)`,
   ).run(m.id, recipient, when, kind === 'read' ? when : null);
-  const counts = db
-    .prepare<[number], { delivered: number; read: number }>(
-      `SELECT count(*) AS delivered, count(read_at) AS read FROM message_receipts WHERE message_id = ?`,
-    )
-    .get(m.id)!;
-  // Like Signal's own apps: the highest status any recipient reached (Message info has the details).
-  const status = counts.read > 0 ? 'read' : counts.delivered > 0 ? 'delivered' : 'sent';
-  return statusRank(status) > statusRank(m.status) ? status : m.status ?? 'sent';
+  return receiptStatus(m);
 }
 
 /** Per-recipient delivery state of an outgoing message, for the "message info" view. */

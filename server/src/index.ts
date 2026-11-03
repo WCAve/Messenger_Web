@@ -3,10 +3,11 @@ import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
-import { db } from './db.js';
+import { db, kvGet, kvSet } from './db.js';
 import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
+import { recomputeGroupReadStatuses } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
@@ -82,6 +83,15 @@ server.requestTimeout = 10 * 60_000; // large uploads
 server.keepAliveTimeout = 65_000;
 
 setTimeout(() => {
+  try {
+    if (kvGet('fix_group_read_v1') !== 'done') {
+      const n = recomputeGroupReadStatuses();
+      kvSet('fix_group_read_v1', 'done');
+      if (n) log('info', `ticks: ${n} group messages no longer show as read (not everyone has read them)`);
+    }
+  } catch (e) {
+    log('warn', `tick fix failed: ${(e as Error).message}`);
+  }
   try {
     backfillGifFlags();
   } catch (e) {

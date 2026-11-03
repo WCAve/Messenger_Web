@@ -34,7 +34,7 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Edits and deletes made by others are shown
 - Browser notifications, dark mode, layout for wide screens and phones
 
-Ticks work like in Signal's own apps: in a group, two ticks once anyone has received the message, filled once anyone has read it. Message info (ⓘ on your own messages) shows exactly who. People who switched off read receipts never show as read.
+In a group, the ticks turn into two outlined circles once anyone has received the message, and fill in once every member has read it. Message info (ⓘ on your own messages) shows exactly who has received and read it. People who switched off read receipts never count as read, so with such a member in the group the ticks stay outlined.
 
 **Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), polls (shown as text), view-once media.
 
