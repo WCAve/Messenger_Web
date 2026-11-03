@@ -136,6 +136,15 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (message_id, recipient)
   );
   `,
+  `
+  ALTER TABLE messages ADD COLUMN sticker TEXT;  -- JSON {packId, stickerId}
+  `,
+  `
+  -- 0 = an outgoing message whose real Signal timestamp we never learned (sent before the fix for
+  -- the new send-response format). Receipts and reactions for it are matched by closeness instead.
+  ALTER TABLE messages ADD COLUMN ts_confirmed INTEGER NOT NULL DEFAULT 1;
+  UPDATE messages SET ts_confirmed = 0 WHERE outgoing = 1;
+  `,
 ];
 
 function migrate() {

@@ -87,12 +87,20 @@ export const signalApi = {
     quote_message?: string;
     edit_timestamp?: number;
     text_mode?: 'normal' | 'styled';
-  }) => call<{ timestamp: string | number }>('POST', '/v2/send', body, 180_000),
+    sticker?: string; // "<pack_id>:<sticker_id>"
+
+  }) => call<SendResponse>('POST', '/v2/send', body, 180_000),
 
   react: (number: string, body: { recipient: string; reaction: string; target_author: string; timestamp: number }) =>
     call<void>('POST', `/v1/reactions/${enc(number)}`, body),
   unreact: (number: string, body: { recipient: string; reaction: string; target_author: string; timestamp: number }) =>
     call<void>('DELETE', `/v1/reactions/${enc(number)}`, body),
+
+  /** Every sticker pack signal-cli knows; url is a signal.art link that includes the pack key. */
+  stickerPacks: (number: string) =>
+    call<{ pack_id: string; url: string; installed: boolean; title: string; author: string }[]>('GET', `/v1/sticker-packs/${enc(number)}`),
+  addStickerPack: (number: string, packId: string, packKey: string) =>
+    call<void>('POST', `/v1/sticker-packs/${enc(number)}`, { pack_id: packId, pack_key: packKey }, 120_000),
 
   receipt: (number: string, body: { recipient: string; receipt_type: 'read' | 'viewed'; timestamp: number }) =>
     call<void>('POST', `/v1/receipts/${enc(number)}`, body),
@@ -136,6 +144,16 @@ export const signalApi = {
     return config.signalApiUrl.replace(/^http/, 'ws') + `/v1/receive/${enc(number)}`;
   },
 };
+
+/** Older signal-cli-rest-api versions answer {timestamp}, newer ones (Oct 2026+) a list of them. */
+type SendResponse = { timestamp?: string | number } | { timestamp?: string | number }[];
+
+/** The Signal timestamp of a message we just sent, whichever response shape the API used. */
+export function sentTimestamp(res: SendResponse | undefined): number | null {
+  const raw = Array.isArray(res) ? res[0]?.timestamp : res?.timestamp;
+  const ts = Number(raw);
+  return Number.isSafeInteger(ts) && ts > 0 ? ts : null;
+}
 
 /** signal-cli-rest-api addresses groups as "group." + base64(internal_id). */
 export function groupRecipientId(internalId: string): string {

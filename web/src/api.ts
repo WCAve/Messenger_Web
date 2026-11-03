@@ -1,4 +1,4 @@
-import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SignalState } from './types';
+import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SignalState, StickerPack } from './types';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -39,7 +39,16 @@ export const api = {
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>
     call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
-  send: (id: number, b: { text: string; quoteId?: number; attachments?: { name: string; type: string; data: string }[] }) =>
+  settings: () => call<ServerSettings>('GET', '/api/settings'),
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators'>>) =>
+    call<ServerSettings>('POST', '/api/settings', patch),
+  logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
+  stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
+  addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
+  send: (
+    id: number,
+    b: { text: string; quoteId?: number; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
+  ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
@@ -47,6 +56,17 @@ export const api = {
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };
+
+export interface ServerSettings {
+  sendReadReceipts: boolean;
+  sendTypingIndicators: boolean;
+  account: string | null;
+  status: string;
+  apiVersion: string | null;
+  deviceName: string;
+  giphyConfigured: boolean;
+  sessions: number;
+}
 
 export function attachmentUrl(id: string, download?: string) {
   return `/api/attachments/${encodeURIComponent(id)}${download ? `?download=1&name=${encodeURIComponent(download)}` : ''}`;

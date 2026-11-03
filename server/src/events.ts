@@ -35,6 +35,12 @@ setInterval(() => {
   for (const res of clients) res.write(': ping\n\n');
 }, 25_000).unref();
 
+/** Drop every live connection (after "sign out everywhere"); browsers reconnect and hit the login page. */
+export function closeAllClients() {
+  for (const res of clients) res.end();
+  clients.clear();
+}
+
 export function clientCount() {
   return clients.size;
 }

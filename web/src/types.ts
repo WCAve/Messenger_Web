@@ -60,6 +60,21 @@ export interface ConversationInfo extends Conversation {
   links: { messageId: number; sentAt: number; authorName: string; url: string }[];
 }
 
+export interface StickerItem {
+  id: number;
+  emoji: string | null;
+  url: string;
+}
+
+export interface StickerPack {
+  packId: string;
+  title: string;
+  author: string;
+  installed: boolean;
+  cover: StickerItem;
+  stickers: StickerItem[];
+}
+
 export interface Recipient {
   key: string;
   name: string;
@@ -71,6 +86,7 @@ export interface Recipient {
 export interface Message {
   id: number;
   rev: number; // snapshot revision; higher wins
+  sticker: { packId: string; stickerId: number; emoji: string | null; url: string } | null;
 
   conversationId: number;
   sentAt: number;

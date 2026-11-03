@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { CATEGORIES, EMOJI, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';
+import type { StickerItem, StickerPack } from '../types';
 import { Icon } from './ui';
 
 export interface PickedGif {
@@ -8,23 +9,32 @@ export interface PickedGif {
   title: string;
 }
 
+export interface PickedSticker {
+  packId: string;
+  stickerId: number;
+}
+
+export type PickerTab = 'emoji' | 'gif' | 'sticker';
+
 /** The panel above the composer: emoji grid and GIF search, like WhatsApp's. */
 export function Picker({
   tab,
   onTab,
   onEmoji,
   onGif,
+  onSticker,
   onClose,
   title,
   allowGif = true,
 }: {
-  tab: 'emoji' | 'gif';
-  onTab: (t: 'emoji' | 'gif') => void;
+  tab: PickerTab;
+  onTab: (t: PickerTab) => void;
   onEmoji: (e: string) => void;
   onGif: (g: PickedGif) => void;
+  onSticker: (s: PickedSticker) => void;
   onClose: () => void;
   title?: string;
-  allowGif?: boolean;
+  allowGif?: boolean; // false = emoji only (choosing a reaction)
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -46,6 +56,11 @@ export function Picker({
             GIF
           </button>
         )}
+        {allowGif && (
+          <button className={tab === 'sticker' ? 'on' : undefined} onClick={() => onTab('sticker')}>
+            Stickers
+          </button>
+        )}
         <button className="icon-btn sm picker-close" onClick={onClose} aria-label="Close">
           <Icon name="close" size={18} />
         </button>
@@ -57,10 +72,150 @@ export function Picker({
             onEmoji(e);
           }}
         />
-      ) : (
+      ) : tab === 'gif' ? (
         <GifGrid onPick={onGif} />
+      ) : (
+        <StickerGrid onPick={onSticker} />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+const RECENT_STICKERS = 'sw-recent-stickers';
+function recentStickers(): (PickedSticker & { url: string })[] {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_STICKERS) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+function rememberSticker(s: PickedSticker & { url: string }) {
+  try {
+    const list = [s, ...recentStickers().filter((x) => !(x.packId === s.packId && x.stickerId === s.stickerId))].slice(0, 16);
+    localStorage.setItem(RECENT_STICKERS, JSON.stringify(list));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+let packsCache: StickerPack[] | null = null;
+
+function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
+  const [packs, setPacks] = useState<StickerPack[] | null>(packsCache);
+  const [active, setActive] = useState<string>('recent');
+  const [error, setError] = useState<string | null>(null);
+  const [link, setLink] = useState('');
+  const [adding, setAdding] = useState(false);
+  const recent = useMemo(() => recentStickers(), []);
+
+  useEffect(() => {
+    api
+      .stickers()
+      .then((r) => {
+        packsCache = r.packs;
+        setPacks(r.packs);
+        setActive((a) => (a === 'recent' && !recent.length && r.packs[0] ? r.packs[0].packId : a));
+      })
+      .catch((e) => setError(e.message));
+  }, [recent.length]);
+
+  async function addPack() {
+    setAdding(true);
+    setError(null);
+    try {
+      const r = await api.addStickerPack(link.trim());
+      packsCache = r.packs;
+      setPacks(r.packs);
+      const added = /pack_id=([0-9a-f]{32})/i.exec(link)?.[1]?.toLowerCase();
+      if (added) setActive(added);
+      setLink('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const pick = (packId: string, s: StickerItem) => {
+    rememberSticker({ packId, stickerId: s.id, url: s.url });
+    onPick({ packId, stickerId: s.id });
+  };
+
+  const current = packs?.find((p) => p.packId === active);
+  const showRecent = active === 'recent' && recent.length > 0;
+
+  return (
+    <>
+      <nav className="sticker-packs" aria-label="Sticker packs">
+        {recent.length > 0 && (
+          <button className={active === 'recent' ? 'on' : undefined} onClick={() => setActive('recent')} title="Recent">
+            🕘
+          </button>
+        )}
+        {packs?.map((p) => (
+          <button key={p.packId} className={active === p.packId ? 'on' : undefined} onClick={() => setActive(p.packId)} title={p.title}>
+            <img src={p.cover.url} alt={p.title} loading="lazy" />
+          </button>
+        ))}
+        <button className={active === 'add' ? 'on' : undefined} onClick={() => setActive('add')} title="Add a sticker pack" aria-label="Add a sticker pack">
+          <Icon name="plus" size={20} />
+        </button>
+      </nav>
+      <div className="picker-body">
+        {error && <p className="form-error picker-empty">{error}</p>}
+        {!packs && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
+        {showRecent && (
+          <div className="sticker-grid">
+            {recent.map((s) => (
+              <button key={`${s.packId}:${s.stickerId}`} className="sticker-cell" onClick={() => onPick(s)}>
+                <img src={s.url} alt="Sticker" loading="lazy" />
+              </button>
+            ))}
+          </div>
+        )}
+        {current && (
+          <>
+            <h4>
+              {current.title}
+              {current.author && <span className="muted"> · {current.author}</span>}
+            </h4>
+            <div className="sticker-grid">
+              {current.stickers.map((s) => (
+                <button key={s.id} className="sticker-cell" onClick={() => pick(current.packId, s)} title={s.emoji ?? 'Sticker'}>
+                  <img src={s.url} alt={s.emoji ?? 'Sticker'} loading="lazy" />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {packs && (active === 'add' || (!packs.length && !recent.length)) && (
+          <form
+            className="sticker-add"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (link.trim()) void addPack();
+            }}
+          >
+            {!packs.length && <p>No sticker packs yet. Packs you install in Signal on your phone appear here automatically.</p>}
+            <p>
+              Add a pack from{' '}
+              <a href="https://signalstickers.org/" target="_blank" rel="noopener noreferrer">
+                signalstickers.org
+              </a>
+              : open a pack, copy the “Add to Signal” link, and paste it here.
+            </p>
+            <div className="picker-search">
+              <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://signal.art/addstickers/#pack_id=…" aria-label="Sticker pack link" />
+            </div>
+            <button className="btn primary" disabled={adding || !link.trim()}>
+              {adding ? 'Adding…' : 'Add pack'}
+            </button>
+          </form>
+        )}
+      </div>
+    </>
   );
 }
 

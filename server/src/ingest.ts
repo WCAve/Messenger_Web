@@ -3,6 +3,7 @@
  * Envelope schema: see the "receive.*" definitions in signal-cli-rest-api's swagger.json.
  */
 import { fetchAttachment, isSilentVideo } from './attachments.js';
+import { getManifest, getStickerImage } from './stickers.js';
 import { broadcast } from './events.js';
 import {
   type Attachment,
@@ -19,6 +20,7 @@ import {
   messageDto,
   nameForKey,
   recordReceipt,
+  repairOwnTimestamp,
   self,
   updateMessage,
   upsertContact,
@@ -126,7 +128,12 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
   const attachments = mapAttachments(dm.attachments);
   let body = resolveMentions(dm.message, dm.mentions);
   let kind = 'message';
-  if (dm.sticker) kind = 'sticker';
+  let sticker: { packId: string; stickerId: number } | null = null;
+  if (dm.sticker?.packId && Number.isInteger(dm.sticker.stickerId)) {
+    kind = 'sticker';
+    sticker = { packId: String(dm.sticker.packId).toLowerCase(), stickerId: dm.sticker.stickerId };
+    attachments.length = 0; // signal-cli may also list the sticker image as an attachment
+  } else if (dm.sticker) kind = 'sticker';
   if (dm.viewOnce) {
     body = 'View-once media — open it on your phone';
     attachments.length = 0;
@@ -164,8 +171,21 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     quote,
     status: outgoing ? 'sent' : null,
     read: outgoing,
+    sticker,
   });
   if (!row) return; // duplicate delivery
+  if (sticker && self.number) {
+    // Fetch the pack now so the sticker (and its emoji) is ready when someone opens the chat.
+    const s = sticker;
+    const account = self.number;
+    getManifest(account, s.packId)
+      .then(() => getStickerImage(account, s.packId, s.stickerId))
+      .then(() => {
+        emitMessage(getMessage(row.id));
+        emitConversation(conv);
+      })
+      .catch((e) => ingestHooks.log(`sticker ${s.packId}/${s.stickerId}`, e));
+  }
   emitMessage(row);
   emitConversation(conv);
 
@@ -241,8 +261,17 @@ function handleReceipt(rm: Json, src: Address) {
   if (recipient === 'self') return;
   const when = Number(rm.when) || Date.now();
   for (const ts of rm.timestamps ?? []) {
-    const rows = db.prepare<[number], MessageRow>('SELECT * FROM messages WHERE outgoing = 1 AND sent_ts = ?').all(ts);
+    let rows = db.prepare<[number], MessageRow>('SELECT * FROM messages WHERE outgoing = 1 AND sent_ts = ?').all(ts);
     if (!rows.length) {
+      const repaired = repairOwnTimestamp(ts);
+      if (repaired) {
+        ingestHooks.debug(`receipt for ${ts}: matched message ${repaired.id} by closeness and fixed its timestamp`);
+        emitMessage(repaired);
+        rows = [repaired];
+      }
+    }
+    if (!rows.length) {
+      ingestHooks.debug(`receipt ${kind} from ${recipient} for unknown timestamp ${ts} (kept for 10 min)`);
       const list = pendingReceipts.get(ts) ?? [];
       list.push({ recipient, kind, when, expires: Date.now() + 10 * 60_000 });
       pendingReceipts.set(ts, list);

@@ -25,6 +25,14 @@ export function destroySession(token: string | undefined) {
   if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(hash(token).toString('hex'));
 }
 
+export function destroyAllSessions() {
+  db.prepare('DELETE FROM sessions').run();
+}
+
+export function activeSessionCount(): number {
+  return db.prepare<[number], { n: number }>('SELECT count(*) AS n FROM sessions WHERE expires_at > ?').get(Date.now())!.n;
+}
+
 export function isValidSession(token: string | undefined): boolean {
   if (!token) return false;
   const row = db.prepare<[string], { expires_at: number }>('SELECT expires_at FROM sessions WHERE token = ?').get(hash(token).toString('hex'));

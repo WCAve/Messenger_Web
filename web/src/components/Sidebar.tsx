@@ -3,6 +3,7 @@ import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import type { Conversation, DirectoryContact } from '../types';
 import { formatListTime } from '../util';
+import { SettingsView } from './Settings';
 import { Avatar, Icon, StatusMark } from './ui';
 
 export function Sidebar({ onLogout }: { onLogout: () => void }) {
@@ -11,7 +12,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const typing = useStore((s) => s.typing);
   const account = useStore((s) => s.signal.account);
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState<'list' | 'new'>('list');
+  const [mode, setMode] = useState<'list' | 'new' | 'settings'>('list');
   const [menu, setMenu] = useState(false);
 
   const list = useMemo(() => {
@@ -23,6 +24,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   }, [conversations, query]);
 
   if (mode === 'new') return <NewChat onClose={() => setMode('list')} />;
+  if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
 
   return (
     <aside className="sidebar">
@@ -43,11 +45,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           </button>
           {menu && (
             <div className="menu" role="menu" onMouseLeave={() => setMenu(false)}>
-              {'Notification' in window && Notification.permission === 'default' && (
-                <button role="menuitem" onClick={() => (Notification.requestPermission(), setMenu(false))}>
-                  <Icon name="bell" size={18} /> Turn on notifications
-                </button>
-              )}
+              <button role="menuitem" onClick={() => (setMode('settings'), setMenu(false))}>
+                <Icon name="gear" size={18} /> Settings
+              </button>
               <button role="menuitem" onClick={() => (api.refreshDirectory().catch(() => {}), setMenu(false))}>
                 <Icon name="refresh" size={18} /> Refresh contacts and groups
               </button>

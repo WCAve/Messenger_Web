@@ -2,11 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';
 import { getAvatar } from './avatars.js';
+import { getSettings, updateSettings } from './settings.js';
+import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
 import { applyPendingReceipts } from './ingest.js';
 import {
   SESSION_COOKIE,
   clearLoginFailures,
   createSession,
+  activeSessionCount,
+  destroyAllSessions,
   destroySession,
   isValidSession,
   loginBlocked,
@@ -14,10 +18,10 @@ import {
   recordLoginFailure,
 } from './auth.js';
 import { config } from './config.js';
-import { addClient, broadcast } from './events.js';
+import { addClient, broadcast, closeAllClients } from './events.js';
 import { type Ctx, HttpError, Router, setCookie } from './http.js';
 import { getState, recheckSoon, refreshDirectory } from './signal.js';
-import { groupRecipientId, signalApi } from './signal-api.js';
+import { groupRecipientId, sentTimestamp, signalApi } from './signal-api.js';
 import {
   type Attachment,
   type ConversationRow,
@@ -94,7 +98,12 @@ async function deliver(
   account: string,
   c: ConversationRow,
   messageId: number,
-  payload: { text: string; base64: string[]; quote?: { sentTs: number; author: string; text?: string | null } | null },
+  payload: {
+    text: string;
+    base64: string[];
+    quote?: { sentTs: number; author: string; text?: string | null } | null;
+    sticker?: { packId: string; stickerId: number } | null;
+  },
   log: (m: string) => void,
 ) {
   try {
@@ -106,15 +115,30 @@ async function deliver(
       quote_timestamp: payload.quote?.sentTs,
       quote_author: payload.quote ? addressForKey(payload.quote.author) : undefined,
       quote_message: payload.quote ? payload.quote.text ?? '' : undefined,
+      sticker: payload.sticker ? `${payload.sticker.packId}:${payload.sticker.stickerId}` : undefined,
     });
-    const ts = Number(res?.timestamp);
-    emitMessageRow(messageId, { status: 'sent', error: null, ...(ts ? { sent_ts: ts } : {}) });
+    const ts = sentTimestamp(res);
+    if (!ts) log(`send: no timestamp in Signal API response ${JSON.stringify(res)?.slice(0, 200)}`);
+    emitMessageRow(messageId, { status: 'sent', error: null, ...(ts ? { sent_ts: ts, ts_confirmed: 1 } : {}) });
     applyPendingReceipts(messageId); // receipts that arrived while the send was still running
   } catch (e) {
     log(`send failed: ${(e as Error).message}`);
     emitMessageRow(messageId, { status: 'failed', error: (e as Error).message });
   }
   emitConversation(getConversation(c.id)!);
+}
+
+function settingsDto() {
+  const st = getState();
+  return {
+    ...getSettings(),
+    account: st.account ?? self.number ?? null,
+    status: st.status,
+    apiVersion: st.apiVersion ?? null,
+    deviceName: config.deviceName,
+    giphyConfigured: !!config.giphyApiKey,
+    sessions: activeSessionCount(),
+  };
 }
 
 export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string) => void) {
@@ -168,6 +192,21 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   r.get('/api/state', () => getState());
 
+  r.get('/api/settings', () => settingsDto());
+  r.post('/api/settings', (ctx) => {
+    updateSettings(ctx.body ?? {});
+    return settingsDto();
+  });
+
+  // Sign out every browser (all sessions), including this one.
+  r.post('/api/logout-all', (ctx) => {
+    destroyAllSessions();
+    closeAllClients();
+    setCookie(ctx.res, SESSION_COOKIE, '', { expires: new Date(0), httpOnly: true, sameSite: 'Strict' });
+    log('info', 'all sessions signed out');
+    return { ok: true };
+  });
+
   // Settings the UI needs. The Giphy key is meant to be used from the browser (Giphy's terms).
   r.get('/api/config', () => ({ giphyApiKey: config.giphyApiKey, giphyRating: config.giphyRating }));
 
@@ -190,6 +229,40 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const m = message(ctx);
     if (!m.outgoing) throw new HttpError(400, 'Only your own messages have delivery info');
     return { message: messageDto(m), recipients: messageReceipts(m) };
+  });
+
+  // Stickers
+  r.get('/api/stickers', async () => {
+    const account = requireAccount();
+    return { packs: await listPacks(account, (m) => log('warn', m)) };
+  });
+
+  r.post('/api/stickers/packs', async (ctx) => {
+    const account = requireAccount();
+    const link = parsePackLink(String(ctx.body?.link ?? ''));
+    if (!link) throw new HttpError(400, 'Paste a signal.art/addstickers link (it contains pack_id and pack_key).');
+    await signalApi.addStickerPack(account, link.packId, link.packKey);
+    await refreshPacks(account, true);
+    const m = await getManifest(account, link.packId).catch(() => null);
+    if (!m) throw new HttpError(502, 'The pack was added, but its stickers could not be downloaded from Signal yet. Try again in a minute.');
+    return { packs: await listPacks(account, (msg) => log('warn', msg)) };
+  });
+
+  r.get('/api/stickers/:packId/:stickerId', async (ctx) => {
+    const account = self.number;
+    const id = Number(ctx.params.stickerId);
+    let found: { file: string; type: string } | null = null;
+    try {
+      found = account ? await getStickerImage(account, ctx.params.packId, id) : null;
+    } catch (e) {
+      log('warn', `sticker ${ctx.params.packId}/${id}: ${(e as Error).message}`);
+    }
+    if (!found) {
+      ctx.res.writeHead(404, { 'cache-control': 'private, max-age=300', 'content-type': 'text/plain' });
+      return ctx.res.end('Sticker not available');
+    }
+    ctx.res.writeHead(200, { 'content-type': found.type, 'cache-control': 'private, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' });
+    fs.createReadStream(found.file).pipe(ctx.res);
   });
 
   // Avatars (proxied from the Signal API and cached on disk)
@@ -243,7 +316,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const c = conv(ctx);
     const text = String(ctx.body?.text ?? '').trim();
     const files: { name?: string; type?: string; data: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
-    if (!text && !files.length) throw new HttpError(400, 'Empty message');
+    const rawSticker = ctx.body?.sticker;
+    const sticker =
+      rawSticker && typeof rawSticker.packId === 'string' && isPackId(rawSticker.packId) && Number.isInteger(rawSticker.stickerId)
+        ? { packId: rawSticker.packId as string, stickerId: rawSticker.stickerId as number }
+        : null;
+    if (rawSticker && !sticker) throw new HttpError(400, 'Invalid sticker');
+    if (sticker && (text || files.length)) throw new HttpError(400, 'A sticker is sent on its own');
+    if (!text && !files.length && !sticker) throw new HttpError(400, 'Empty message');
 
     const attachments: Attachment[] = [];
     const base64: string[] = [];
@@ -269,17 +349,19 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       author: 'self',
       authorNumber: account,
       outgoing: true,
+      kind: sticker ? 'sticker' : 'message',
       body: text || null,
       attachments,
       quote,
       status: 'pending',
       read: true,
+      sticker,
     });
     if (!pending) throw new HttpError(409, 'Duplicate message, try again');
     const dto = messageDto(pending);
     broadcast({ type: 'message', message: dto });
     emitConversation(getConversation(c.id)!);
-    void deliver(account, c, pending.id, { text, base64, quote }, (m) => log('warn', m));
+    void deliver(account, c, pending.id, { text, base64, quote, sticker }, (m) => log('warn', m));
     return dto;
   });
 
@@ -293,8 +375,9 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       (a) => `data:${a.contentType};filename=${a.filename ?? 'file'};base64,${fs.readFileSync(localPath(a.id)).toString('base64')}`,
     );
     const quote = m.quote ? JSON.parse(m.quote) : null;
+    const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const updated = emitMessageRow(m.id, { status: 'pending', error: null })!;
-    void deliver(account, c, m.id, { text: m.body ?? '', base64, quote }, (msg) => log('warn', msg));
+    void deliver(account, c, m.id, { text: m.body ?? '', base64, quote, sticker }, (msg) => log('warn', msg));
     return messageDto(updated);
   });
 
@@ -338,7 +421,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     markConversationRead(c.id);
     emitConversation(c);
     const account = self.number;
-    if (config.sendReadReceipts && account && getState().status === 'connected') {
+    if (getSettings().sendReadReceipts && account && getState().status === 'connected') {
       void (async () => {
         for (const m of unread.slice(-30)) {
           if (m.author === 'self') continue;
@@ -354,7 +437,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   r.post('/api/conversations/:id/typing', (ctx) => {
-    if (!config.sendTypingIndicators) return { ok: true };
+    if (!getSettings().sendTypingIndicators) return { ok: true };
     const c = conv(ctx);
     const account = self.number;
     if (account && getState().status === 'connected') {

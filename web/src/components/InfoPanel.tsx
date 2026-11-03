@@ -255,7 +255,10 @@ export function MessageInfoPanel({ messageId }: { messageId: number }) {
         {m && (
           <section className="panel-section info-preview">
             <div className="bubble out-preview">
-              {m.body || (m.attachments.length ? (m.attachments[0].contentType.startsWith('image/') ? 'Photo' : m.attachments[0].filename ?? 'Attachment') : '')}
+              {m.kind === 'sticker' && m.sticker ? (
+                <img className="sticker-img small" src={m.sticker.url} alt="Sticker" />
+              ) : null}
+              {m.body || (m.kind === 'sticker' ? '' : null) || (m.attachments.length ? (m.attachments[0].contentType.startsWith('image/') ? 'Photo' : m.attachments[0].filename ?? 'Attachment') : '')}
               <span className="meta">
                 {formatTime(m.sentAt)} <StatusMark status={m.status} />
               </span>

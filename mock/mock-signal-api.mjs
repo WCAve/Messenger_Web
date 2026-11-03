@@ -10,6 +10,7 @@
  *   POST /mock/incoming {"from":"alice","text":"hi"}           incoming direct message (alice|bob|carol)
  *   POST /mock/incoming {"from":"bob","text":"hi","group":true} incoming group message
  *   GET  /mock/sent                                             everything Signal Web sent
+ *   POST /mock/receipt {"from":"alice","ts":<sent ts>,"kind":"read"}  a delivery/read receipt
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -93,6 +94,56 @@ const QR = png(232, 232, (x, y) => {
 });
 const AVATAR_ALICE = png(96, 96, (x, y) => (Math.hypot(x - 48, y - 40) < 22 ? [250, 210, 180] : y > 70 ? [60, 90, 160] : [230, 120, 90]));
 const AVATAR_GROUP = png(96, 96, (x, y) => ((Math.floor(x / 24) + Math.floor(y / 24)) % 2 ? [255, 190, 60] : [70, 160, 120]));
+// ---------- sticker packs, encrypted exactly like Signal's CDN serves them ----------
+function varint(n) {
+  const out = [];
+  while (n > 127) {
+    out.push((n & 127) | 128);
+    n >>>= 7;
+  }
+  out.push(n);
+  return Buffer.from(out);
+}
+const pbField = (num, buf) => Buffer.concat([varint((num << 3) | 2), varint(buf.length), buf]);
+const pbVarint = (num, n) => Buffer.concat([varint(num << 3), varint(n)]);
+const pbSticker = (id, emoji) => Buffer.concat([pbVarint(1, id), pbField(2, Buffer.from(emoji))]);
+function stickerEncrypt(plain, packKeyHex) {
+  const keys = Buffer.from(crypto.hkdfSync('sha256', Buffer.from(packKeyHex, 'hex'), Buffer.alloc(32), Buffer.from('Sticker Pack'), 64));
+  const iv = crypto.randomBytes(16);
+  const c = crypto.createCipheriv('aes-256-cbc', keys.subarray(0, 32), iv);
+  const body = Buffer.concat([iv, c.update(plain), c.final()]);
+  return Buffer.concat([body, crypto.createHmac('sha256', keys.subarray(32)).update(body).digest()]);
+}
+function stickerFace(hue, mood) {
+  const [r, g, b] = [Math.round(128 + 120 * Math.cos(hue)), Math.round(128 + 120 * Math.cos(hue + 2.1)), Math.round(128 + 120 * Math.cos(hue + 4.2))];
+  return png(160, 160, (x, y) => {
+    const d = Math.hypot(x - 80, y - 80);
+    if (d > 70) return [255, 255, 255];
+    if (d > 64) return [40, 40, 60];
+    if (Math.hypot(x - 56, y - 64) < 9 || Math.hypot(x - 104, y - 64) < 9) return [40, 40, 60];
+    const smile = mood === 'happy' ? Math.abs(Math.hypot(x - 80, y - 82) - 34) < 4 && y > 92 : Math.abs(Math.hypot(x - 80, y - 140) - 34) < 4 && y < 112 && y > 100;
+    if (smile) return [40, 40, 60];
+    return [r, g, b];
+  });
+}
+const STICKER_PACKS = [
+  { id: '0123456789abcdef0123456789abcdef', key: 'a'.repeat(64), title: 'Blob faces', author: 'Signal Web mock', installed: true,
+    stickers: [[0, '😀', 0.2, 'happy'], [1, '😢', 3.6, 'sad'], [2, '🥳', 1.4, 'happy'], [3, '😡', 0.0, 'sad'], [4, '😎', 4.8, 'happy'], [5, '🙃', 2.4, 'happy']] },
+  { id: 'fedcba9876543210fedcba9876543210', key: 'b'.repeat(64), title: 'Moods', author: 'Mock artist', installed: false,
+    stickers: [[0, '😴', 5.5, 'sad'], [1, '🤩', 1.0, 'happy'], [2, '😬', 3.0, 'sad']] },
+];
+const EXTRA_PACK = { id: '00112233445566778899aabbccddeeff', key: 'c'.repeat(64), title: 'Added from a link', author: 'signalstickers.org', installed: true,
+  stickers: [[0, '👍', 2.0, 'happy'], [1, '🎉', 0.7, 'happy']] };
+const knownPacks = [...STICKER_PACKS];
+function manifestFor(pack) {
+  return Buffer.concat([
+    pbField(1, Buffer.from(pack.title)),
+    pbField(2, Buffer.from(pack.author)),
+    pbField(3, pbSticker(pack.stickers[0][0], pack.stickers[0][1])),
+    ...pack.stickers.map(([id, emoji]) => pbField(4, pbSticker(id, emoji))),
+  ]);
+}
+
 const PHOTO = png(640, 420, (x, y) => {
   const sky = y < 260;
   if (Math.hypot(x - 470, y - 110) < 50) return [255, 214, 120];
@@ -193,6 +244,7 @@ function seed() {
       groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' },
     },
   });
+  push({ ...from(PEOPLE.alice), timestamp: now - 90 * 60_000, dataMessage: { timestamp: now - 90 * 60_000, sticker: { packId: STICKER_PACKS[1].id, stickerId: 1 } } });
   incoming(PEOPLE.bob, '', { ts: now - 29 * 60_000, group: true, attachments: [{ contentType: 'video/mp4', filename: null, id: 'mockgif1.mp4', size: GIF_MP4.length, width: 240, height: 180 }] });
   push({ source: DAVE.uuid, sourceUuid: DAVE.uuid, sourceName: DAVE.profile, sourceDevice: 1, timestamp: now - 28 * 60_000,
     dataMessage: { timestamp: now - 28 * 60_000, message: 'Haha 😂 and here is the video from last time', groupInfo: { groupId: GROUP.internal_id, groupName: GROUP.name, type: 'DELIVER' },
@@ -235,6 +287,29 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(img);
     }
+    if (p.startsWith('/v1/sticker-packs/')) {
+      if (m === 'POST') {
+        const b = await body(req);
+        if (b.pack_id !== EXTRA_PACK.id || b.pack_key !== EXTRA_PACK.key) return json(res, 400, { error: 'Unknown sticker pack' });
+        if (!knownPacks.includes(EXTRA_PACK)) knownPacks.push(EXTRA_PACK);
+        return json(res, 204);
+      }
+      return json(res, 200, knownPacks.map((x) => ({ pack_id: x.id, url: `https://signal.art/addstickers/#pack_id=${x.id}&pack_key=${x.key}`, installed: x.installed, title: x.title, author: x.author })));
+    }
+    const cdn = p.match(/^\/stickers\/([0-9a-f]{32})\/(manifest\.proto|full\/(\d+))$/);
+    if (cdn) {
+      const pack = [...STICKER_PACKS, EXTRA_PACK].find((x) => x.id === cdn[1]);
+      if (!pack) return json(res, 404, { error: 'no such pack' });
+      let plain;
+      if (cdn[2] === 'manifest.proto') plain = manifestFor(pack);
+      else {
+        const st = pack.stickers.find(([id]) => id === Number(cdn[3]));
+        if (!st) return json(res, 404, { error: 'no such sticker' });
+        plain = stickerFace(st[2], st[3]);
+      }
+      res.writeHead(200, { 'content-type': 'application/octet-stream' });
+      return res.end(stickerEncrypt(plain, pack.key));
+    }
     if (p.startsWith('/v1/contacts/')) {
       const all = url.searchParams.get('all_recipients') === 'true';
       const list = Object.values(PEOPLE).map((x) => ({ number: x.number, uuid: x.uuid, name: x.name, profile_name: x.profile, username: '', blocked: false, given_name: '',
@@ -253,6 +328,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/v2/send' && m === 'POST') {
       const b = await body(req);
+      await new Promise((r) => setTimeout(r, 150)); // signal-cli assigns the timestamp a moment after the request
       const ts = Date.now();
       sent.push({ ...b, base64_attachments: b.base64_attachments?.map((a) => a.slice(0, 60) + '…'), ts });
       if (String(b.message).includes('fail')) return json(res, 400, { error: 'Mock failure: recipient unreachable' });
@@ -277,7 +353,8 @@ const server = http.createServer(async (req, res) => {
         }, 5500);
       }
       if (isGroup) await new Promise((r) => setTimeout(r, SEND_DELAY_MS));
-      return json(res, 201, { timestamp: String(ts) });
+      // signal-cli-rest-api answers with a list since Oct 2026 (one entry per send); MOCK_OLD_SEND=1 for the old shape.
+      return json(res, 201, process.env.MOCK_OLD_SEND === '1' ? { timestamp: String(ts) } : [{ timestamp: String(ts) }]);
     }
     if (p.startsWith('/v1/reactions/') || p.startsWith('/v1/receipts/') || p.startsWith('/v1/typing-indicator/')) {
       const b = m === 'GET' ? {} : await body(req);
@@ -290,6 +367,11 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, { timestamp: String(Date.now()) });
     }
     if (p === '/mock/sent') return json(res, 200, sent);
+    if (p === '/mock/receipt' && m === 'POST') {
+      const b = await body(req); // {"from":"alice","ts":123,"kind":"read"|"delivery"}
+      receipt(PEOPLE[b.from ?? 'alice'], Number(b.ts), b.kind ?? 'read');
+      return json(res, 200, { ok: true });
+    }
     if (p === '/mock/incoming' && m === 'POST') {
       const b = await body(req);
       const person = PEOPLE[b.from ?? 'alice'];

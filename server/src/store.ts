@@ -1,6 +1,16 @@
 /** Data access + the JSON shapes sent to the browser. */
 import { db, kvGet, kvSet } from './db.js';
 import { groupRecipientId } from './signal-api.js';
+import { cachedManifest, stickerUrl } from './stickers.js';
+
+export interface StickerRef {
+  packId: string;
+  stickerId: number;
+}
+
+function stickerEmoji(s: StickerRef): string | null {
+  return cachedManifest(s.packId)?.stickers.find((x) => x.id === s.stickerId)?.emoji ?? null;
+}
 
 // ---------- types ----------
 
@@ -74,6 +84,8 @@ export interface MessageRow {
   edited: number;
   deleted: number;
   received_at: number;
+  sticker: string | null;
+  ts_confirmed: number;
 }
 
 // ---------- self ----------
@@ -310,7 +322,10 @@ export function renderMentions(text: string | null | undefined): string | null {
 
 export function previewText(m: MessageRow): string {
   if (m.deleted) return 'This message was deleted';
-  if (m.kind === 'sticker') return 'Sticker';
+  if (m.kind === 'sticker') {
+    const s: StickerRef | null = m.sticker ? JSON.parse(m.sticker) : null;
+    return [s && stickerEmoji(s), 'Sticker'].filter(Boolean).join(' ');
+  }
   if (m.body) return renderMentions(m.body)!;
   const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
   if (atts.length) {
@@ -449,16 +464,13 @@ export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered
        delivered_at = COALESCE(delivered_at, excluded.delivered_at),
        read_at = COALESCE(read_at, excluded.read_at)`,
   ).run(m.id, recipient, when, kind === 'read' ? when : null);
-  const conv = convById.get(m.conversation_id)!;
   const counts = db
     .prepare<[number], { delivered: number; read: number }>(
       `SELECT count(*) AS delivered, count(read_at) AS read FROM message_receipts WHERE message_id = ?`,
     )
     .get(m.id)!;
-  // Like WhatsApp: in a group, two ticks once everyone got it, filled once everyone read it.
-  let expected = 1;
-  if (conv.kind === 'group') expected = Math.max(1, groupMembers(conv).filter((x) => x.key !== 'self').length);
-  const status = counts.read >= expected ? 'read' : counts.delivered >= expected ? 'delivered' : 'sent';
+  // Like Signal's own apps: the highest status any recipient reached (Message info has the details).
+  const status = counts.read > 0 ? 'read' : counts.delivered > 0 ? 'delivered' : 'sent';
   return statusRank(status) > statusRank(m.status) ? status : m.status ?? 'sent';
 }
 
@@ -509,7 +521,27 @@ export function getMessage(id: number) {
   return msgById.get(id);
 }
 export function findMessage(conversationId: number, sentTs: number) {
-  return msgByTs.get(conversationId, sentTs);
+  return msgByTs.get(conversationId, sentTs) ?? repairOwnTimestamp(sentTs, conversationId);
+}
+
+/**
+ * Something (a receipt, reaction, quote) refers to one of our messages by its real Signal timestamp,
+ * but we only have a provisional one, taken a moment *before* signal-cli assigned the real one. Pick
+ * the closest unconfirmed outgoing message from up to 20 s earlier and adopt the real timestamp.
+ */
+export function repairOwnTimestamp(realTs: number, conversationId?: number): MessageRow | undefined {
+  const m = db
+    .prepare<[number, number, number, number], MessageRow>(
+      `SELECT * FROM messages WHERE outgoing = 1 AND ts_confirmed = 0 AND sent_ts <= ? AND sent_ts >= ?
+         AND (? = 0 OR conversation_id = ?)
+       ORDER BY sent_ts DESC LIMIT 1`,
+    )
+    .get(realTs, realTs - 20_000, conversationId ?? 0, conversationId ?? 0);
+  if (!m) return undefined;
+  const taken = db.prepare<[number, number, string], { id: number }>('SELECT id FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ?').get(m.conversation_id, realTs, m.author);
+  if (taken) return undefined;
+  db.prepare('UPDATE messages SET sent_ts = ?, ts_confirmed = 1 WHERE id = ?').run(realTs, m.id);
+  return msgById.get(m.id);
 }
 
 export function insertMessage(m: {
@@ -524,12 +556,13 @@ export function insertMessage(m: {
   quote?: Quote | null;
   status?: string | null;
   read: boolean;
+  sticker?: StickerRef | null;
 }): MessageRow | undefined {
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO messages
-        (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -544,13 +577,18 @@ export function insertMessage(m: {
       m.status ?? null,
       m.read ? 1 : 0,
       Date.now(),
+      m.sticker ? JSON.stringify(m.sticker) : null,
+      m.status === 'pending' ? 0 : 1, // our own sends get their real timestamp once signal-cli answers
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
   return msgById.get(Number(info.lastInsertRowid));
 }
 
-export function updateMessage(id: number, fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts'>>) {
+export function updateMessage(
+  id: number,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed'>>,
+) {
   const keys = Object.keys(fields);
   if (!keys.length) return msgById.get(id);
   db.prepare(`UPDATE messages SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...fields, id });
@@ -568,9 +606,11 @@ function nextRev() {
 export function messageDto(m: MessageRow) {
   const quote: Quote | null = m.quote ? JSON.parse(m.quote) : null;
   const reactions: Reaction[] = m.reactions ? JSON.parse(m.reactions) : [];
+  const sticker: StickerRef | null = m.sticker && !m.deleted ? JSON.parse(m.sticker) : null;
   return {
     id: m.id,
     rev: nextRev(),
+    sticker: sticker ? { ...sticker, emoji: stickerEmoji(sticker), url: stickerUrl(sticker.packId, sticker.stickerId) } : null,
     conversationId: m.conversation_id,
     sentAt: m.sent_ts,
     author: m.author,

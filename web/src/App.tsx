@@ -6,6 +6,7 @@ import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar } from './components/Sidebar';
 import { applyEvent, getState, setState, upsertConversation, upsertMessages, useStore } from './store';
+import { getPrefs } from './prefs';
 import type { ServerEvent } from './types';
 
 export function App() {
@@ -144,6 +145,8 @@ const notified = new Set<number>();
 
 function notify(e: Extract<ServerEvent, { type: 'message' }>) {
   const m = e.message;
+  const prefs = getPrefs();
+  if (!prefs.notifications) return;
   if (m.outgoing || m.read || m.deleted || m.kind === 'system' || notified.has(m.id)) return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const s = getState();
@@ -152,7 +155,11 @@ function notify(e: Extract<ServerEvent, { type: 'message' }>) {
   notified.add(m.id);
   const c = s.conversations[m.conversationId];
   const title = c?.kind === 'group' ? `${m.authorName} in ${c.title}` : m.authorName;
-  const body = m.body ?? (m.attachments.length ? 'Sent an attachment' : 'New message');
+  const body = !prefs.notificationPreview
+    ? 'New message'
+    : m.kind === 'sticker'
+      ? [m.sticker?.emoji, 'Sticker'].filter(Boolean).join(' ')
+      : m.body ?? (m.attachments.length ? 'Sent an attachment' : 'New message');
   const n = new Notification(title, { body, tag: `conv-${m.conversationId}`, icon: '/icon.svg' });
   n.onclick = () => {
     window.focus();

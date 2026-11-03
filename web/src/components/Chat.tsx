@@ -1,10 +1,11 @@
 import { type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
+import { getPrefs } from '../prefs';
 import { getState, setState, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, Message } from '../types';
 import { fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay } from '../util';
-import { type PickedGif, Picker } from './Picker';
+import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { Avatar, Icon, StatusMark } from './ui';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
@@ -340,6 +341,7 @@ const MessageItem = memo(function MessageItem({
   const visual = m.attachments.filter((a) => a.contentType.startsWith('image/') || isLoopingMedia(a));
   const others = m.attachments.filter((a) => !visual.includes(a));
   const jumbo = !m.deleted && !m.attachments.length && !m.quote && isJumbomoji(m.body);
+  const sticker = !m.deleted && m.kind === 'sticker' ? m.sticker : null;
   const canAct = !m.deleted && m.status !== 'pending' && m.status !== 'failed';
 
   async function act(fn: () => Promise<unknown>) {
@@ -361,7 +363,7 @@ const MessageItem = memo(function MessageItem({
       onMouseLeave={() => setPicker(false)}
     >
       <div
-        className={`bubble${jumbo ? ' jumbo' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}
+        className={`bubble${jumbo ? ' jumbo' : ''}${sticker ? ' sticker' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest('a,button,video,audio,img')) return;
           onSelect();
@@ -408,6 +410,8 @@ const MessageItem = memo(function MessageItem({
           <p className="body">
             <em>{m.outgoing ? 'You deleted this message' : 'This message was deleted'}</em>
           </p>
+        ) : sticker ? (
+          <StickerImage sticker={sticker} onLoad={onMediaLoad} />
         ) : m.kind === 'sticker' ? (
           <p className="body">
             <em>Sticker</em>
@@ -502,6 +506,28 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
+function StickerImage({ sticker, onLoad }: { sticker: NonNullable<Message['sticker']>; onLoad: () => void }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <p className="body">
+        <em>{[sticker.emoji, 'Sticker'].filter(Boolean).join(' ')}</em>
+      </p>
+    );
+  }
+  return (
+    <img
+      className="sticker-img"
+      src={sticker.url}
+      alt={sticker.emoji ? `Sticker ${sticker.emoji}` : 'Sticker'}
+      width={180}
+      height={180}
+      onLoad={onLoad}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 function AttachmentView({ a }: { a: Attachment }) {
   const url = attachmentUrl(a.id);
   if (a.contentType.startsWith('video/')) return <video className="video" src={url} controls preload="metadata" />;
@@ -589,7 +615,7 @@ function Composer({
   const [files, setFiles] = useState<Pending[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [panel, setPanel] = useState<'emoji' | 'gif' | null>(null);
+  const [panel, setPanel] = useState<PickerTab | null>(null);
   const [suggest, setSuggest] = useState<{ start: number; term: string; items: ReturnType<typeof searchEmoji>; index: number } | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -744,6 +770,20 @@ function Composer({
     }
   }
 
+  async function sendSticker(s: PickedSticker) {
+    setPanel(null);
+    setError(null);
+    try {
+      const msg = await api.send(id, { text: '', quoteId: replyTo?.id, sticker: s });
+      upsertMessages(id, [msg]);
+      clearReply();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      area.current?.focus();
+    }
+  }
+
   async function react(e: string) {
     const target = reactTo;
     clearReact();
@@ -775,7 +815,8 @@ function Composer({
         return;
       }
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    const enterSends = getPrefs().enterToSend;
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && (enterSends || e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void send();
     } else if (e.key === 'Escape' && replyTo) {
@@ -806,6 +847,7 @@ function Composer({
           title={reactTo ? 'React' : undefined}
           onEmoji={(e) => (reactTo ? void react(e) : insertAtCaret(e))}
           onGif={sendGif}
+          onSticker={sendSticker}
           onClose={closePanel}
         />
       )}

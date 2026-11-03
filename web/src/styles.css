@@ -22,8 +22,27 @@
   color-scheme: light;
 }
 
+:root[data-theme='dark'] {
+  --ink: #e6e8f2;
+  --ink-2: #b4b9cf;
+  --ink-3: #868ca6;
+  --porcelain: #121527;
+  --paper: #1d2138;
+  --mist: #2c3150;
+  --haze: #242944;
+  --ultra: #5b78ea;
+  --ultra-deep: #4864d6;
+  --ultra-soft: #26305a;
+  --alarm: #ef6d65;
+  --bubble-in: #232843;
+  --sidebar: #181b30;
+  --shadow: none;
+  --name-l: 72%;
+  --name-s: 70%;
+  color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --ink: #e6e8f2;
     --ink-2: #b4b9cf;
     --ink-3: #868ca6;
@@ -498,8 +517,12 @@ p {
   color: hsl(var(--hue) 55% 30%);
   background: hsl(var(--hue) 70% 88%);
 }
+:root[data-theme='dark'] .avatar {
+  color: hsl(var(--hue) 70% 86%);
+  background: hsl(var(--hue) 35% 30%);
+}
 @media (prefers-color-scheme: dark) {
-  .avatar {
+  :root:not([data-theme='light']) .avatar {
     color: hsl(var(--hue) 70% 86%);
     background: hsl(var(--hue) 35% 30%);
   }
@@ -1668,4 +1691,252 @@ button.member:disabled {
   .picker-panel {
     height: min(340px, 45vh);
   }
+}
+
+/* ---------- stickers ---------- */
+.bubble.sticker {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+.msg.out .bubble.sticker {
+  background: transparent;
+}
+.sticker-img {
+  display: block;
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+}
+.sticker-img.small {
+  width: 96px;
+  height: 96px;
+}
+.bubble.sticker .meta,
+.msg.out .bubble.sticker .meta {
+  float: none;
+  align-self: flex-end;
+  display: inline-flex;
+  margin: 2px 0 0;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink-3);
+  box-shadow: var(--shadow);
+}
+.bubble.sticker {
+  display: flex;
+  flex-direction: column;
+}
+.msg.in .bubble.sticker {
+  align-items: flex-start;
+}
+.msg.out .bubble.sticker {
+  align-items: flex-end;
+}
+.bubble.sticker .author {
+  margin-bottom: 4px;
+}
+.sticker-packs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--mist);
+}
+.sticker-packs button {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  border-radius: 10px;
+  font-size: 20px;
+  color: var(--ink-2);
+}
+.sticker-packs button.on {
+  background: var(--ultra-soft);
+}
+.sticker-packs button:hover {
+  background: var(--haze);
+}
+.sticker-packs img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 4px;
+}
+.sticker-cell {
+  aspect-ratio: 1;
+  border: 0;
+  background: none;
+  border-radius: 12px;
+  padding: 6px;
+}
+.sticker-cell:hover {
+  background: var(--haze);
+}
+.sticker-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.sticker-add {
+  display: grid;
+  gap: 10px;
+  padding: 12px 4px;
+  color: var(--ink-2);
+  max-width: 560px;
+}
+.sticker-add .picker-search {
+  margin: 0;
+}
+.sticker-add a {
+  color: var(--ultra);
+}
+.sticker-add .btn {
+  justify-self: start;
+}
+/* Bubble-less messages (stickers, big emoji): ticks sit on the page background, not on blue. */
+.msg.out .bubble.sticker .status,
+.msg.out .bubble.jumbo .status {
+  color: var(--ink-3);
+}
+.msg.out .bubble.sticker .status.read,
+.msg.out .bubble.jumbo .status.read {
+  color: var(--ultra);
+}
+
+/* ---------- settings ---------- */
+.settings-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  background: var(--porcelain);
+}
+.settings-section {
+  background: var(--sidebar);
+  margin-bottom: 8px;
+  padding: 14px 16px 8px;
+}
+.settings-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ultra);
+  margin-bottom: 4px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  cursor: pointer;
+}
+.setting-row + .setting-row {
+  border-top: 1px solid var(--mist);
+}
+.setting-row.disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.setting-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.setting-text strong {
+  font-weight: 500;
+}
+.setting-text small,
+.setting-note {
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.setting-note {
+  padding: 4px 0 8px;
+}
+.switch {
+  appearance: none;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--mist);
+  position: relative;
+  cursor: pointer;
+  margin: 0;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: transform 0.15s;
+}
+.switch:checked {
+  background: var(--ultra);
+}
+.switch:checked::after {
+  transform: translateX(16px);
+}
+.switch:disabled {
+  cursor: default;
+}
+.segmented {
+  display: inline-flex;
+  flex: none;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--haze);
+}
+.segmented button {
+  border: 0;
+  background: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.segmented button.on {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(27, 31, 59, 0.15);
+}
+.setting-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 6px 0 12px;
+  font-size: 14px;
+}
+.setting-facts dt {
+  color: var(--ink-3);
+}
+.setting-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.setting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.btn.danger {
+  color: var(--alarm);
+  border-color: color-mix(in srgb, var(--alarm) 40%, var(--mist));
 }
