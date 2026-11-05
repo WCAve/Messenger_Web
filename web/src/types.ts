@@ -5,7 +5,7 @@ export type Network = 'signal' | 'whatsapp';
 export interface BackupState {
   stage: 'idle' | 'decrypting' | 'importing' | 'media' | 'done' | 'failed';
   file?: BackupFile | null;
-  progress?: { done: number; total: number };
+  progress?: { done: number; total: number; phase?: 'scan' | 'copy' };
   result?: { chats: number; messages: number; reactions: number; files: number; skipped: number; mediaFound?: number; mediaMissing?: number };
   error?: string;
 }

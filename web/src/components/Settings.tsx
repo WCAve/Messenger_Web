@@ -288,7 +288,9 @@ function BackupImport() {
             ? `Decrypting the backup…${pct(b.progress)}`
             : b?.stage === 'importing'
               ? `Importing messages…${b.progress?.total ? ` ${b.progress.done.toLocaleString()} of ${b.progress.total.toLocaleString()}` : ''}`
-              : `Matching media files…${pct(b?.progress)}`}{' '}
+              : b?.progress?.phase === 'copy'
+                ? `Copying matched files… ${b.progress.done.toLocaleString()} of ${b.progress.total.toLocaleString()}`
+                : `Looking through the folder…${b?.progress?.done ? ` ${b.progress.done.toLocaleString()} files so far` : ''}`}{' '}
           <button className="link-btn" onClick={() => void api.backupCancel().catch(() => {})}>
             Stop
           </button>

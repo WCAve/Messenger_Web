@@ -621,41 +621,68 @@ export function startMediaScan() {
   busy = true;
   stopRequested = false;
   void (async () => {
+    // Everything here is asynchronous and reports at least once a second: the folder can hold
+    // 100,000 files on a network share, and a single video can take a while to copy.
+    let lastReport = 0;
+    const report = (p: { done: number; total: number; phase: 'scan' | 'copy' }, force = false) => {
+      if (!force && Date.now() - lastReport < 1000) return;
+      lastReport = Date.now();
+      setBackup({ progress: p });
+    };
     try {
-      setBackup({ stage: 'media', progress: { done: 0, total: 0 }, error: undefined });
+      setBackup({ stage: 'media', progress: { done: 0, total: 0, phase: 'scan' }, error: undefined });
       // Index every file once: by "folder/name" and by name alone.
       const byTail = new Map<string, string>();
       const byName = new Map<string, string>();
-      const walk = (dir: string, depth: number) => {
-        if (depth > 8) return;
-        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const folders = new Map<string, number>(); // folder name → files, for the log
+      let seen = 0;
+      const walk = async (dir: string, depth: number): Promise<void> => {
+        if (depth > 8 || stopRequested) return;
+        let entries: fs.Dirent[];
+        try {
+          entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const e of entries) {
           const p = path.join(dir, e.name);
-          if (e.isDirectory()) walk(p, depth + 1);
+          if (e.isDirectory()) await walk(p, depth + 1);
           else if (e.isFile()) {
+            seen++;
             byName.set(e.name.toLowerCase(), p);
             byTail.set((path.basename(dir) + '/' + e.name).toLowerCase(), p);
+            folders.set(path.basename(dir), (folders.get(path.basename(dir)) ?? 0) + 1);
           }
         }
+        report({ done: seen, total: 0, phase: 'scan' });
       };
-      walk(backupDir, 0);
+      await walk(backupDir, 0);
+      log.info(`whatsapp backup: ${seen} files in the media folder (${[...folders].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f, n]) => `${f}: ${n}`).join(', ')})`);
       const rows = db.prepare<[], { id: string; message_id: number | null; backup_path: string | null }>("SELECT id, message_id, backup_path FROM wa_media WHERE backup_path IS NOT NULL AND state != 'done'").all();
       let found = 0;
       let i = 0;
+      const notFound: string[] = [];
       for (const r of rows) {
         if (stopRequested) break;
-        if (++i % 200 === 0) {
-          setBackup({ progress: { done: i, total: rows.length } });
-          await new Promise((res) => setImmediate(res));
-        }
+        i++;
+        report({ done: i, total: rows.length, phase: 'copy' });
+        if (i % 50 === 0) await new Promise((res) => setImmediate(res));
         const parts = r.backup_path!.replace(/\\/g, '/').split('/');
         const name = parts.pop()!.toLowerCase();
         const tail = ((parts.pop() ?? '') + '/' + name).toLowerCase();
         const srcFile = byTail.get(tail) ?? byName.get(name);
-        if (!srcFile) continue;
+        if (!srcFile) {
+          if (notFound.length < 10) notFound.push(r.backup_path!);
+          continue;
+        }
         const dest = localPath(r.id);
         try {
-          fs.copyFileSync(srcFile, dest);
-        } catch {
+          if (!fs.existsSync(dest)) {
+            await fs.promises.copyFile(srcFile, dest + '.part');
+            await fs.promises.rename(dest + '.part', dest);
+          }
+        } catch (e) {
+          if (notFound.length < 10) notFound.push(`${r.backup_path} (copy failed: ${(e as Error).message})`);
           continue;
         }
         found++;
@@ -671,11 +698,13 @@ export function startMediaScan() {
           emitMessage(updateMessage(m.id, { attachments: JSON.stringify(atts) }));
         }
       }
-      const missing = rows.length - found;
-      log.info(`whatsapp backup: matched ${found} of ${rows.length} files from the media folder`);
+      const missing = i - found;
+      log.info(`whatsapp backup: matched ${found} of ${rows.length} files from the media folder${stopRequested ? ' (stopped)' : ''}`);
+      if (notFound.length) log.info(`whatsapp backup: not in the folder, for example: ${notFound.join(' | ')}`);
       const prev = getWaState().backup?.result ?? { chats: 0, messages: 0, reactions: 0, files: 0, skipped: 0 };
       setBackup({ stage: 'done', progress: undefined, result: { ...prev, mediaFound: found, mediaMissing: missing } });
     } catch (e) {
+      log.warn(`whatsapp backup: media: ${(e as Error).message}`);
       setBackup({ stage: 'failed', progress: undefined, error: (e as Error).message });
     } finally {
       busy = false;
