@@ -159,6 +159,7 @@ function authed(req, url) {
 }
 
 const blocked = new Set();
+const mockConfig = { messagesDelayMs: 0 }; // POST /mock/config
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
@@ -212,6 +213,10 @@ const server = http.createServer(async (req, res) => {
         const b = await body(req);
         emit(b.event, b.payload);
         return json(res, 200, { ok: true });
+      }
+      if (p === '/mock/config') {
+        Object.assign(mockConfig, await body(req));
+        return json(res, 200, mockConfig);
       }
       if (p === '/mock/pin') {
         const b = await body(req);
@@ -293,6 +298,8 @@ const server = http.createServer(async (req, res) => {
       const limit = Number(url.searchParams.get('limit') ?? 10);
       // downloadMedia=false: like WAHA, no file url (fetch the single message to get it)
       const noMedia = url.searchParams.get('downloadMedia') === 'false';
+      if (mockConfig.messagesDelayMs) await new Promise((r) => setTimeout(r, mockConfig.messagesDelayMs));
+      if (status !== 'WORKING') return json(res, 422, { message: 'Session status is not as expected' });
       return json(res, 200, [...list].reverse().slice(0, limit).map((x) => (noMedia && x.media ? { ...x, media: null } : x)));
     }
     if (msgs && m === 'PUT') {

@@ -272,9 +272,11 @@ function WhatsAppSection() {
       {wa.importing && (
         <p className="setting-note">
           <span className="spinner small" />{' '}
-          {wa.importProgress
-            ? `Importing history from WhatsApp (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})…`
-            : 'Getting the chat list from WhatsApp…'}{' '}
+          {wa.importProgress?.waiting
+            ? `WhatsApp Web restarted. The import continues at chat ${wa.importProgress.done + 1} of ${wa.importProgress.total} once it's back…`
+            : wa.importProgress
+              ? `Importing history from WhatsApp (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})…`
+              : 'Getting the chat list from WhatsApp…'}{' '}
           <button className="link-btn" onClick={() => void api.whatsappImportCancel().catch(() => {})}>
             Stop
           </button>
@@ -284,9 +286,10 @@ function WhatsAppSection() {
         <p className={wa.lastImport.error ? 'form-error setting-note' : 'muted setting-note'}>
           {wa.lastImport.error
             ? `Import failed: ${wa.lastImport.error}`
-            : wa.lastImport.messages
-              ? `Imported ${wa.lastImport.messages} messages from ${wa.lastImport.chats} chats.`
-              : 'No older messages found that weren’t here already.'}
+            : (wa.lastImport.messages
+                ? `Imported ${wa.lastImport.messages} messages from ${wa.lastImport.chats} chats.`
+                : 'No older messages found that weren’t here already.') +
+              (wa.lastImport.skipped ? ` Skipped ${wa.lastImport.skipped} chat${wa.lastImport.skipped === 1 ? '' : 's'} that made WhatsApp Web crash.` : '')}
         </p>
       )}
       {wa.status === 'connected' && <HistorySettings />}

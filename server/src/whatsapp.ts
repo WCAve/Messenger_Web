@@ -58,8 +58,8 @@ export interface WaState {
   version?: string;
   error?: string;
   importing?: boolean;
-  importProgress?: { done: number; total: number };
-  lastImport?: { chats: number; messages: number; at: number; error?: string };
+  importProgress?: { done: number; total: number; waiting?: boolean };
+  lastImport?: { chats: number; messages: number; at: number; error?: string; skipped?: number };
 }
 
 type Logger = { info: (m: string) => void; warn: (m: string) => void; debug?: (m: string) => void };
@@ -97,14 +97,25 @@ function emitConversation(id: number) {
 
 const lidCache = new Map<string, string | null>();
 
+/** Ids come as strings, or (WEBJS, some fields) as {server, user, _serialized} objects. */
+function idString(x: unknown): string | null {
+  if (typeof x === 'string') return x || null;
+  if (x && typeof x === 'object') {
+    const o = x as { _serialized?: unknown; user?: unknown; server?: unknown };
+    if (typeof o._serialized === 'string') return o._serialized;
+    if (typeof o.user === 'string' && typeof o.server === 'string') return `${o.user}@${o.server}`;
+  }
+  return null;
+}
+
 /** Strip the device part and use one spelling: "316…:12@s.whatsapp.net" → "316…@c.us". */
-function bare(jid: string): string {
-  return jid.replace(/:\d+@/, '@').replace('@s.whatsapp.net', '@c.us');
+function bare(jid: unknown): string {
+  return (idString(jid) ?? '').replace(/:\d+@/, '@').replace('@s.whatsapp.net', '@c.us');
 }
 
 /** Prefer phone-number ids over WhatsApp's privacy ids (@lid) when WAHA knows the number. */
-async function resolve(jid: string | null | undefined): Promise<string | null> {
-  if (!jid) return null;
+async function resolve(jid: unknown): Promise<string | null> {
+  if (!idString(jid)) return null;
   const j = bare(jid);
   if (!j.endsWith('@lid')) return j;
   if (lidCache.has(j)) return lidCache.get(j) ?? j;
@@ -129,8 +140,9 @@ function keyFor(jid: string): string {
   return self.isWa(jid) ? 'self' : 'wa:' + jid;
 }
 
-function skipChat(jid: string) {
-  return jid === 'status@broadcast' || jid.endsWith('@newsletter') || jid.endsWith('@broadcast');
+function skipChat(raw: unknown) {
+  const jid = idString(raw) ?? '';
+  return !jid || jid === 'status@broadcast' || jid.endsWith('@newsletter') || jid.endsWith('@broadcast');
 }
 
 // ---------- connection ----------
@@ -258,7 +270,7 @@ export async function runHistoryImport(): Promise<{ chats: number; messages: num
   importing = true;
   setState({ ...state, importing: true, importProgress: undefined });
   try {
-    const r = await importHistory((done, total) => setState({ ...state, importProgress: { done, total } }));
+    const r = await importHistory((done, total, waiting) => setState({ ...state, importProgress: { done, total, ...(waiting ? { waiting } : {}) } }));
     log.info(`whatsapp: history import: ${r.messages} new messages from ${r.chats} chats`);
     await refreshDirectory().catch(() => {});
     setState({ ...state, lastImport: { ...r, at: Date.now() } });
@@ -879,26 +891,61 @@ const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * the plain chat list (the "overview" looks up every chat's picture at once), messages without
  * media, then each file on its own, one chat at a time. Stops when the session goes down.
  */
-async function importHistory(progress: (done: number, total: number) => void = () => {}): Promise<{ chats: number; messages: number }> {
+/** Wait (up to a few minutes) for the session to come back after WAHA restarted it. */
+async function waitForSession(maxMs: number): Promise<boolean> {
+  const until = Date.now() + maxMs;
+  while (Date.now() < until && !cancelRequested) {
+    if (state.status === 'connected') {
+      await pause(Number(process.env.WAHA_RESUME_SETTLE_MS) || 20_000); // let WhatsApp Web finish starting up first
+      if (state.status === 'connected') return true;
+    }
+    await pause(2000);
+  }
+  return false;
+}
+
+async function importHistory(
+  progress: (done: number, total: number, waiting?: boolean) => void = () => {},
+): Promise<{ chats: number; messages: number; skipped?: number }> {
   const { waHistoryChats, waHistoryMessages } = getSettings();
   cancelRequested = false;
-  const chats = (await waha.chats(waHistoryChats || 5000)) ?? [];
+  let chats: Json[] = [];
+  for (let attempt = 0; ; attempt++) {
+    try {
+      chats = (await waha.chats(waHistoryChats || 5000)) ?? [];
+      break;
+    } catch (e) {
+      if (attempt >= 2) throw e;
+      await pause(5000);
+    }
+  }
   log.info(`whatsapp: checking ${chats.length} recent chats for history`);
   let total = 0;
   let touched = 0;
   let failures = 0;
   let chatFailures = 0;
-  let done = 0;
+  let restarts = 0;
+  const crashedOn = new Map<string, number>(); // chat → how often WhatsApp Web went down while on it
+  const skipped: string[] = [];
   progress(0, chats.length);
-  for (const c of chats) {
+  for (let i = 0; i < chats.length; i++) {
     if (cancelRequested) {
       log.info('whatsapp: history import stopped');
       break;
     }
-    if (state.status !== 'connected') throw new Error('WhatsApp disconnected during the import; what was imported so far is kept');
-    progress(done++, chats.length);
-    const idRaw = typeof c.id === 'string' ? c.id : c.id?._serialized;
+    const c = chats[i];
+    const idRaw = idString(c.id);
     if (!idRaw || skipChat(idRaw)) continue;
+    // WAHA restarts WhatsApp Web when it crashes: wait for it, then carry on with the same chat.
+    if (state.status !== 'connected') {
+      if (++restarts > 5) throw new Error('WhatsApp Web keeps restarting; stopped the import (what was imported so far is kept)');
+      log.warn(`whatsapp: session went down during the import (chat ${i + 1} of ${chats.length}); waiting for it to come back`);
+      progress(i, chats.length, true);
+      const back = await waitForSession(5 * 60_000);
+      if (cancelRequested) break;
+      if (!back) throw new Error('WhatsApp disconnected during the import and did not come back; what was imported so far is kept');
+    }
+    progress(i, chats.length);
     const id = await resolve(idRaw);
     if (!id) continue;
     const conv = getOrCreateWaChat(id, id.endsWith('@g.us') ? c.name : null);
@@ -909,6 +956,16 @@ async function importHistory(progress: (done: number, total: number) => void = (
       chatFailures = 0;
     } catch (e) {
       log.warn(`whatsapp: history for ${id}: ${(e as Error).message}`);
+      if (state.status !== 'connected' || !(await waha.session().then((x) => x.status === 'WORKING').catch(() => false))) {
+        // It took the session down. Try this chat once more after the restart, then skip it.
+        const n = (crashedOn.get(id) ?? 0) + 1;
+        crashedOn.set(id, n);
+        if (n < 2) i--;
+        else skipped.push(id);
+        recheckWa(500);
+        await pause(3000);
+        continue;
+      }
       if (++chatFailures >= 3) throw new Error(`WAHA stopped answering (${(e as Error).message.slice(0, 120)}); what was imported so far is kept`);
       await pause(3000);
       continue;
@@ -933,9 +990,17 @@ async function importHistory(progress: (done: number, total: number) => void = (
       for (const r of incoming) updateMessage(r.id, { read: 0 });
     }
     emitConversation(conv.id);
+    if (state.status !== 'connected' && !cancelRequested) {
+      // Went down halfway through this chat: do the rest after the restart (once), or skip it.
+      const n = (crashedOn.get(id) ?? 0) + 1;
+      crashedOn.set(id, n);
+      if (n < 2) i--;
+      else skipped.push(id);
+    }
     await pause(250);
   }
-  return { chats: touched, messages: total };
+  if (skipped.length) log.warn(`whatsapp: skipped ${skipped.length} chat(s) that made WhatsApp Web crash: ${skipped.join(', ')}`);
+  return { chats: touched, messages: total, ...(skipped.length ? { skipped: skipped.length } : {}) };
 }
 
 // ---------- outgoing ----------
