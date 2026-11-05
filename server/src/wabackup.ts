@@ -165,6 +165,11 @@ export function backupFileInfo(): BackupState['file'] {
   return { name: path.basename(f), size: st.size, at: st.mtimeMs, app };
 }
 
+/** Files from imported backups still waiting for the media folder (survives restarts, unlike the state). */
+export function backupMediaWaiting(): number {
+  return db.prepare<[], { n: number }>("SELECT count(*) AS n FROM wa_media WHERE backup_path IS NOT NULL").get()!.n;
+}
+
 export function refreshBackupInfo() {
   setBackup({ file: backupFileInfo() });
 }

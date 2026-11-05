@@ -9,7 +9,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
-import { backupDir, backupFileInfo, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
+import { backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
   deleteWa,
@@ -420,7 +420,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   // Android backup (msgstore.db.crypt15 + the 64-digit key), then optionally the media folder.
   r.get('/api/whatsapp/backup', () => {
     refreshBackupInfo();
-    return { file: backupFileInfo(), folder: backupDir };
+    return { file: backupFileInfo(), folder: backupDir, mediaWaiting: backupMediaWaiting() };
   });
   r.upload('/api/whatsapp/backup/upload', (ctx) => receiveBackupUpload(ctx));
   r.post('/api/whatsapp/backup/import', (ctx) => startBackupImport(typeof ctx.body?.key === 'string' ? ctx.body.key : undefined));

@@ -182,7 +182,7 @@ function plural(n: number, one: string, many?: string) {
 function BackupImport() {
   const b = useStore((s) => s.whatsapp.backup);
   const [open, setOpen] = useState(false);
-  const [info, setInfo] = useState<{ file: BackupFile | null; folder: string } | null>(null);
+  const [info, setInfo] = useState<{ file: BackupFile | null; folder: string; mediaWaiting?: number } | null>(null);
   const [key, setKey] = useState('');
   const [upload, setUpload] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,7 +202,7 @@ function BackupImport() {
     setUpload(0);
     try {
       const r = await uploadBackup(f, setUpload);
-      setInfo((i) => ({ folder: i?.folder ?? '', file: r.file }));
+      setInfo((i) => ({ ...i, folder: i?.folder ?? '', file: r.file }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -304,9 +304,10 @@ function BackupImport() {
         </p>
       )}
 
-      {b?.result && (
+      {(b?.result || !!info?.mediaWaiting) && (
         <>
           <h4>Photos, videos and files</h4>
+          {!!info?.mediaWaiting && <p className="setting-note">{plural(info.mediaWaiting, 'file')} from the backup still to add.</p>}
           <p className="setting-note">
             Copy the phone's <code>Android/media/com.whatsapp/WhatsApp/Media</code> folder (or just the folders you want, like <em>WhatsApp Images</em>) into the <code>whatsapp-backup</code>
             folder in Messenger Web's data folder (in the container: <code>{info?.folder ?? '/data/whatsapp-backup'}</code>), then:
