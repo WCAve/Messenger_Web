@@ -1,4 +1,6 @@
 /** Data access + the JSON shapes sent to the browser. */
+import fs from 'node:fs';
+import { localPath } from './attachments.js';
 import { db, kvGet, kvSet } from './db.js';
 import { groupRecipientId } from './signal-api.js';
 import { avatarRev } from './avatars.js';
@@ -76,6 +78,7 @@ export interface Attachment {
   voiceNote?: boolean;
   caption?: string | null;
   gif?: boolean; // silent looping video (Signal's GIFs)
+  missing?: boolean; // WhatsApp: the file couldn't be fetched any more (old media)
 }
 
 export interface Quote {
@@ -116,6 +119,7 @@ export interface MessageRow {
   poll: string | null;
   ext_id: string | null;
   forwarded: number;
+  ext_raw: string | null;
 }
 
 /** Hooks other modules plug into (avoids import cycles). */
@@ -670,9 +674,23 @@ export function findMessageByExt(id: string | null | undefined): MessageRow | un
   if (!id) return undefined;
   const exact = db.prepare<[string], MessageRow>('SELECT * FROM messages WHERE ext_id = ?').get(id);
   if (exact) return exact;
-  const raw = id.split('_').pop()!;
-  if (!/^[A-Za-z0-9]{6,}$/.test(raw)) return undefined;
-  return db.prepare<[string], MessageRow>("SELECT * FROM messages WHERE ext_id LIKE '%\\_' || ? ESCAPE '\\'").get(raw);
+  const raw = extRawOf(id);
+  if (raw === id && !/^[A-Za-z0-9]{6,}$/.test(raw)) return undefined;
+  return db.prepare<[string], MessageRow>('SELECT * FROM messages WHERE ext_raw = ?').get(raw);
+}
+
+/** "false_<chat>_<RAW>[_<author>]" → RAW; ids without that shape are their own raw id. */
+export function extRawOf(id: string): string {
+  const p = id.split('_');
+  return (p[0] === 'true' || p[0] === 'false') && p.length >= 3 && p[2] ? p[2] : id;
+}
+
+/** Fill ext_raw for rows stored before it existed (once; quick). */
+export function backfillExtRaw(): number {
+  const rows = db.prepare<[], { id: number; ext_id: string }>('SELECT id, ext_id FROM messages WHERE ext_id IS NOT NULL AND ext_raw IS NULL').all();
+  const set = db.prepare('UPDATE messages SET ext_raw = ? WHERE id = ?');
+  db.transaction(() => rows.forEach((r) => set.run(extRawOf(r.ext_id), r.id)))();
+  return rows.length;
 }
 
 /** WhatsApp timestamps are whole seconds: nudge by a millisecond until (chat, time, author) is free. */
@@ -699,6 +717,7 @@ export function conversationInfo(conv: ConversationRow) {
   for (const m of rows) {
     const authorName = nameForKey(m.author);
     for (const a of (m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]) {
+      if (a.missing) continue; // WhatsApp couldn't provide it any more
       const entry = { messageId: m.id, sentAt: m.sent_ts, authorName, attachment: a };
       if (a.contentType.startsWith('image/') || a.contentType.startsWith('video/')) media.push(entry);
       else if (!a.voiceNote) files.push(entry);
@@ -874,8 +893,8 @@ export function insertMessage(m: {
     .prepare(
       `INSERT OR IGNORE INTO messages
         (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
-         ranges, preview, expires_in, expires_at, poll, ext_id, forwarded)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ranges, preview, expires_in, expires_at, poll, ext_id, forwarded, ext_raw)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -899,6 +918,7 @@ export function insertMessage(m: {
       m.poll ? JSON.stringify(m.poll) : null,
       m.extId ?? null,
       m.forwarded ?? 0,
+      m.extId ? extRawOf(m.extId) : null,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
@@ -910,9 +930,11 @@ export function updateMessage(
   id: number,
   fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id' | 'forwarded'>>,
 ) {
-  const keys = Object.keys(fields);
+  const all: Record<string, unknown> = { ...fields };
+  if (typeof fields.ext_id === 'string') all.ext_raw = extRawOf(fields.ext_id);
+  const keys = Object.keys(all);
   if (!keys.length) return msgById.get(id);
-  db.prepare(`UPDATE messages SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...fields, id });
+  db.prepare(`UPDATE messages SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...all, id });
   return msgById.get(id);
 }
 
@@ -922,6 +944,17 @@ let revCounter = 0;
 function nextRev() {
   revCounter = (revCounter + 1) % 1000;
   return Date.now() * 1000 + revCounter;
+}
+
+/** WhatsApp files from imported history may not be on the server yet ("pending": fetched on first view). */
+function attachmentDto(a: Attachment) {
+  if (!a.id.startsWith('wa-') || a.missing) return a;
+  try {
+    if (fs.existsSync(localPath(a.id))) return a;
+  } catch {
+    return a;
+  }
+  return { ...a, pending: true };
 }
 
 export function messageDto(m: MessageRow) {
@@ -948,7 +981,7 @@ export function messageDto(m: MessageRow) {
     preview,
     expiresIn: m.expires_in || undefined,
     expiresAt: m.expires_at ?? undefined,
-    attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]),
+    attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]).map(attachmentDto),
     quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '' } : null,
     reactions: reactions.map((r) => ({ emoji: r.emoji, author: r.author, authorName: nameForKey(r.author) })),
     status: m.status === 'viewed' ? 'read' : m.status,

@@ -56,7 +56,7 @@ In a group, the ticks turn into two outlined circles once anyone has received th
 
 WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S** on each avatar when both are set up.
 
-- Recent chats and messages are imported after linking (40 chats × 40 messages by default). Settings → WhatsApp lets you pick more, up to "as many as possible", and import again; messages you already have are skipped
+- Recent chats and messages are imported after linking (40 chats × 40 messages by default). Settings → WhatsApp lets you pick more, up to "as many as possible", and import again; messages you already have are skipped. Photos, videos and files in imported history are fetched when you open them (old ones WhatsApp no longer has show as "not available any more"); Settings → WhatsApp can also download them in the background
 - Text with WhatsApp formatting, replies, @mentions with suggestions, reactions, photos/videos/files both ways, voice notes and GIFs that others send
 - Edit (15 minutes, WhatsApp's limit) and delete for everyone, typing and "recording audio…" indicators, read receipts, ticks, per-person read lists in groups
 - Contact info shows someone's About text; group info shows the group description

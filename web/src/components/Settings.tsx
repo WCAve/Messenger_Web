@@ -180,7 +180,7 @@ function HistorySettings() {
     api.settings().then(setS, (e) => setError(e.message));
   }, []);
   if (!s) return error ? <p className="form-error setting-note">{error}</p> : null;
-  async function save(patch: { waHistoryChats?: number; waHistoryMessages?: number }) {
+  async function save(patch: { waHistoryChats?: number; waHistoryMessages?: number; waHistoryMedia?: boolean }) {
     try {
       setS(await api.updateSettings(patch));
     } catch (e) {
@@ -211,8 +211,14 @@ function HistorySettings() {
         </span>
       </label>
       <p className="muted setting-note">
-        Counted from the newest. Messages you already have are skipped. Larger imports fetch older messages from your phone and can take a long time, and photos and videos in them are downloaded too.
+        Counted from the newest. Messages you already have are skipped. Photos, videos and files are fetched when you open them: old ones can take WhatsApp a while, and some it no longer has.
       </p>
+      <Toggle
+        label="Download files from imported history"
+        hint="Fetches them one at a time in the background after an import, newest first, so they're on the server before you open them. Uses disk space; old files can take up to a minute each."
+        checked={s.waHistoryMedia}
+        onChange={(v) => void save({ waHistoryMedia: v })}
+      />
       {error && <p className="form-error setting-note">{error}</p>}
     </div>
   );

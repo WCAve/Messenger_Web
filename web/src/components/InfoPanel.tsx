@@ -146,7 +146,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
                     </>
                   ) : (
                     <>
-                      <video src={attachmentUrl(m.attachment.id)} muted preload="metadata" />
+                      <video src={attachmentUrl(m.attachment.id)} muted preload={m.attachment.pending ? 'none' : 'metadata'} />
                       {!m.attachment.gif && <span className="media-badge">Video</span>}
                       {m.attachment.gif && <span className="media-badge">GIF</span>}
                     </>

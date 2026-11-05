@@ -102,7 +102,13 @@ function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data
     ack,
     replyTo: replyTo ?? undefined,
     // wwebjs rawData: the short id, the sender's own name, the message type
-    _data: { id: { fromMe, remote: chat, id: raw, _serialized: id }, notifyName: author ? Object.values(PEOPLE).find((p) => p.id === author)?.pushname : undefined, type: media ? 'image' : 'chat', ...(data ?? {}) },
+    _data: {
+      id: { fromMe, remote: chat, id: raw, _serialized: id },
+      notifyName: author ? Object.values(PEOPLE).find((p) => p.id === author)?.pushname : undefined,
+      type: media ? (media.startsWith('image/') ? 'image' : media.startsWith('video/') ? 'video' : media.startsWith('audio/') ? 'ptt' : 'document') : 'chat',
+      ...(media ? { mimetype: media, size: 4321 } : {}),
+      ...(data ?? {}),
+    },
   };
 }
 function addHistory(m) {
@@ -118,6 +124,7 @@ function lateHistory() {
   groupHistoryLoaded = true;
   const now = Date.now();
   const H = 3600_000;
+  addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Taartfoto', ts: now - 5.5 * H, media: 'image/jpeg' }));
   addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Wie neemt er taart mee?', ts: now - 5 * H }));
   addHistory(msg({ chat: GROUP.id, author: PEOPLE.jan.id, body: '@31655500002 jij toch? 🎂', ts: now - 4 * H }));
   addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Hoe laat?', ts: now - 3.5 * H, data: { type: 'poll_creation', pollName: 'Hoe laat?', pollOptions: [{ name: '14:00' }, { name: '15:00' }], pollSelectableOptionsCount: 1 } }));
@@ -132,7 +139,11 @@ function seed() {
   addHistory(msg({ chat: j, fromMe: true, body: 'Ja, zeker 👍', ts: now - 29 * H, replyTo: { id: a.id, participant: j, body: a.body } }));
   addHistory(msg({ chat: j, body: 'Dit is *vet* en dit _schuin_', ts: now - 3 * H }));
   addHistory(msg({ chat: j, body: 'Kijk eens', ts: now - 2 * H, media: 'image/png' }));
+  addHistory(msg({ chat: PEOPLE.lid.id, body: 'Oude foto', ts: now - 9 * H, media: 'image/jpeg', data: { gone: true } })); // WhatsApp no longer has the file
+  addHistory(msg({ chat: PEOPLE.lid.id, body: '', ts: now - 8 * H, media: 'audio/ogg; codecs=opus' }));
+  addHistory(msg({ chat: PEOPLE.lid.id, body: 'Nog een foto', ts: now - 7 * H, media: 'image/png' }));
   addHistory(msg({ chat: PEOPLE.lid.id, body: 'Hallo via een privé-id', ts: now - 6 * H }));
+  addHistory(msg({ chat: '0@c.us', body: 'WhatsApp system chat', ts: now - 50 * H }));
 }
 seed();
 
@@ -159,7 +170,8 @@ function authed(req, url) {
 }
 
 const blocked = new Set();
-const mockConfig = { messagesDelayMs: 0 }; // POST /mock/config
+const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0 }; // POST /mock/config
+const stats = { singleFetches: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
@@ -214,6 +226,7 @@ const server = http.createServer(async (req, res) => {
         emit(b.event, b.payload);
         return json(res, 200, { ok: true });
       }
+      if (p === '/mock/stats') return json(res, 200, stats);
       if (p === '/mock/config') {
         Object.assign(mockConfig, await body(req));
         return json(res, 200, mockConfig);
@@ -294,7 +307,12 @@ const server = http.createServer(async (req, res) => {
     if (msgs && m === 'GET') {
       const chat = decodeURIComponent(msgs[1]);
       const list = history.get(chat) ?? [];
-      if (msgs[2]) return json(res, 200, list.find((x) => x.id === decodeURIComponent(msgs[2])) ?? null);
+      if (msgs[2]) {
+        stats.singleFetches++;
+        if (mockConfig.mediaDelayMs) await new Promise((r) => setTimeout(r, mockConfig.mediaDelayMs));
+        const x = list.find((y) => y.id === decodeURIComponent(msgs[2])) ?? null;
+        return json(res, 200, x?._data?.gone ? { ...x, media: null } : x);
+      }
       const limit = Number(url.searchParams.get('limit') ?? 10);
       // downloadMedia=false: like WAHA, no file url (fetch the single message to get it)
       const noMedia = url.searchParams.get('downloadMedia') === 'false';

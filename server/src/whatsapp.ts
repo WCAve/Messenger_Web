@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { isSafeId, isSilentVideo, localPath } from './attachments.js';
+import { attachmentHooks, isSafeId, isSilentVideo, localPath } from './attachments.js';
 import { config } from './config.js';
 import { getSettings } from './settings.js';
 import { db, kvGet, kvSet } from './db.js';
@@ -142,7 +142,7 @@ function keyFor(jid: string): string {
 
 function skipChat(raw: unknown) {
   const jid = idString(raw) ?? '';
-  return !jid || jid === 'status@broadcast' || jid.endsWith('@newsletter') || jid.endsWith('@broadcast');
+  return !jid || jid.startsWith('0@') || jid === 'status@broadcast' || jid.endsWith('@newsletter') || jid.endsWith('@broadcast');
 }
 
 // ---------- connection ----------
@@ -246,6 +246,7 @@ let historyTimers: ReturnType<typeof setTimeout>[] = [];
 
 async function afterConnect() {
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
+  setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
   if (kvGet(HISTORY_KEY) === 'done') return;
   // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
   // rounds; messages we already have are skipped, so later rounds only add what arrived since.
@@ -283,6 +284,11 @@ export async function runHistoryImport(): Promise<{ chats: number; messages: num
   } finally {
     importing = false;
     setState({ ...state, importing: false, importProgress: undefined });
+    // Afterwards, gently: member lists of groups the import found, then (if switched on) the files.
+    void refreshImportedGroups()
+      .catch(() => {})
+      .then(() => downloadPendingMedia())
+      .catch(() => {});
   }
 }
 
@@ -296,6 +302,7 @@ export function importHistoryNow() {
 
 export function startWhatsApp(logger: Logger) {
   log = logger;
+  attachmentHooks.whatsapp = fetchWaMedia;
   if (!config.wahaUrl) return;
   stopped = false;
   void check();
@@ -348,6 +355,21 @@ export async function refreshDirectory() {
     await refreshGroup(g).catch(() => {});
   }
   for (const g of listWaGroups()) emitConversation(g.id);
+}
+
+const groupsAfterImport = new Set<string>();
+/** Member lists for groups first seen during the import, one at a time. */
+async function refreshImportedGroups() {
+  const list = [...groupsAfterImport];
+  groupsAfterImport.clear();
+  for (const jid of list) {
+    if (state.status !== 'connected') return;
+    const conv = getOrCreateWaChat(jid);
+    if (!conv.group_name) await refreshGroupName(conv).catch(() => {});
+    await refreshGroup(conv).catch(() => {});
+    emitConversation(conv.id);
+    await pause(300);
+  }
 }
 
 const groupRefreshPending = new Map<string, ReturnType<typeof setTimeout>>();
@@ -439,6 +461,131 @@ async function downloadMedia(m: Json, extId: string): Promise<Attachment | null>
   return att;
 }
 
+const TYPE_MIME: Record<string, string> = { image: 'image/jpeg', video: 'video/mp4', ptt: 'audio/ogg', audio: 'audio/ogg', sticker: 'image/webp', document: 'application/octet-stream' };
+
+/** An attachment for a file that isn't downloaded yet, from what the message itself says about it. */
+function pendingMedia(m: Json, extId: string): Attachment {
+  const d = m._data ?? {};
+  const mimetype = String(d.mimetype ?? m.media?.mimetype ?? TYPE_MIME[d.type] ?? 'application/octet-stream').split(';')[0].trim() || 'application/octet-stream';
+  const filename: string | null = d.filename ?? m.media?.filename ?? null;
+  const ext = path.extname(filename ?? '').replace(/[^A-Za-z0-9.]/g, '').slice(0, 10) || EXT[mimetype] || '';
+  const att: Attachment = {
+    id: 'wa-' + crypto.createHash('sha1').update(extId).digest('hex').slice(0, 24) + ext,
+    contentType: mimetype,
+    filename,
+    size: Number(d.size) || null,
+    ...(Number(d.width) && Number(d.height) ? { width: Number(d.width), height: Number(d.height) } : {}),
+  };
+  if (mimetype.startsWith('audio/') && (d.type === 'ptt' || /ogg.*opus/i.test(String(d.mimetype ?? '')))) att.voiceNote = true;
+  if (mimetype.startsWith('video/') && d.isGif) att.gif = true;
+  return att;
+}
+
+// Files are fetched one or two at a time: WhatsApp Web may have to ask your phone for each.
+let mediaSlots = 2;
+const mediaWaiting: (() => void)[] = [];
+async function withMediaSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (mediaSlots === 0) await new Promise<void>((r) => mediaWaiting.push(r));
+  mediaSlots--;
+  try {
+    return await fn();
+  } finally {
+    mediaSlots++;
+    mediaWaiting.shift()?.();
+  }
+}
+const mediaInflight = new Map<string, Promise<boolean>>();
+let mediaWarnings = 0;
+
+type MediaRow = { id: string; chat: string; msg: string; message_id: number | null; ts: number | null; state: string; tried_at: number | null };
+
+/**
+ * A file from imported history, fetched now (someone opened it, or the background download).
+ * True when it's on the server afterwards. Files WhatsApp can't provide any more are marked missing
+ * on the message (asked again after a day).
+ */
+export function fetchWaMedia(id: string): Promise<boolean> {
+  let p = mediaInflight.get(id);
+  if (p) return p;
+  p = (async () => {
+    const file = localPath(id);
+    if (fs.existsSync(file)) return true;
+    const row = db.prepare<[string], MediaRow>('SELECT * FROM wa_media WHERE id = ?').get(id);
+    if (!row) return false;
+    if (row.state === 'missing' && Date.now() - (row.tried_at ?? 0) < 24 * 3600_000) return false;
+    if (state.status !== 'connected') return false;
+    return withMediaSlot(async () => {
+      let ok = false;
+      try {
+        const msg = await waha.message(row.chat, row.msg);
+        const url = msg?.media?.url;
+        if (url) {
+          const res = await waha.file(url);
+          if (res.ok && res.body) {
+            const tmp = file + '.part';
+            await pipeline(Readable.fromWeb(res.body as never), fs.createWriteStream(tmp));
+            fs.renameSync(tmp, file);
+            ok = true;
+          }
+        }
+      } catch (e) {
+        if (mediaWarnings++ < 5) log.warn(`whatsapp: file ${row.msg}: ${(e as Error).message}`);
+      }
+      db.prepare('UPDATE wa_media SET state = ?, tried_at = ? WHERE id = ?').run(ok ? 'done' : 'missing', Date.now(), id);
+      if (ok) db.prepare('DELETE FROM wa_media WHERE id = ?').run(id);
+      const m = row.message_id ? getMessage(row.message_id) : undefined;
+      if (m?.attachments) {
+        const atts: Attachment[] = JSON.parse(m.attachments);
+        const next = atts.map((a) => {
+          if (a.id !== id) return a;
+          const b: Attachment = { ...a };
+          delete b.missing;
+          if (!ok) b.missing = true;
+          else {
+            b.size = fs.statSync(file).size;
+            if (b.contentType.startsWith('video/')) {
+              const silent = isSilentVideo(id);
+              if (silent) b.gif = true;
+            }
+          }
+          return b;
+        });
+        emitMessage(updateMessage(m.id, { attachments: JSON.stringify(next) }));
+      }
+      return ok;
+    });
+  })().finally(() => mediaInflight.delete(id));
+  mediaInflight.set(id, p);
+  return p;
+}
+
+let mediaJob = false;
+/** Settings → "Download files from imported history": newest first, one at a time, in the background. */
+export async function downloadPendingMedia() {
+  if (mediaJob || !getSettings().waHistoryMedia) return;
+  mediaJob = true;
+  let n = 0;
+  try {
+    for (;;) {
+      if (state.status !== 'connected' || importing || !getSettings().waHistoryMedia) break;
+      const next = db
+        .prepare<[number], { id: string }>("SELECT id FROM wa_media WHERE state = 'pending' OR (state = 'missing' AND tried_at < ?) ORDER BY ts DESC LIMIT 1")
+        .get(Date.now() - 24 * 3600_000);
+      if (!next) break;
+      const before = db.prepare<[string], { tried_at: number | null }>('SELECT tried_at FROM wa_media WHERE id = ?').get(next.id);
+      await fetchWaMedia(next.id);
+      // Not fetched and not marked (session went down, …): stop rather than loop on it.
+      const after = db.prepare<[string], { tried_at: number | null }>('SELECT tried_at FROM wa_media WHERE id = ?').get(next.id);
+      if (after && after.tried_at === before?.tried_at) break;
+      n++;
+      await pause(500);
+    }
+  } finally {
+    mediaJob = false;
+    if (n) log.info(`whatsapp: background download: ${n} file${n === 1 ? '' : 's'} from imported history`);
+  }
+}
+
 const EXT: Record<string, string> = {
   'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif',
   'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'application/pdf': '.pdf',
@@ -496,8 +643,12 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
 
   const isGroup = chatId.endsWith('@g.us');
   const conv = getOrCreateWaChat(chatId);
-  if (isGroup && !conv.group_name) refreshGroupName(conv).catch(() => {});
-  if (isGroup && !conv.group_members) refreshGroupSoon(chatId);
+  // During an import, member lists of new groups are fetched afterwards (one WhatsApp Web call each).
+  if (isGroup && !conv.group_name && !opts.history) refreshGroupName(conv).catch(() => {});
+  if (isGroup && !conv.group_members) {
+    if (opts.history) groupsAfterImport.add(chatId);
+    else refreshGroupSoon(chatId);
+  }
 
   const senderRaw = fromMe ? null : isGroup ? m.participant ?? m.author : m.from;
   const sender = fromMe ? null : await resolve(senderRaw);
@@ -539,10 +690,17 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
   const poll = pollOf(m);
   let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv);
   const attachments: Attachment[] = [];
+  const pending: { id: string; chat: string; msg: string }[] = [];
   if (viewOnce) {
     const t = String(m._data?.type ?? '');
     body = `${t === 'video' ? '🎥 View-once video' : t === 'ptt' || t === 'audio' ? '🎤 View-once voice message' : '📷 View-once photo'}: open it on your phone`;
     ranges = null;
+  } else if (m.hasMedia && opts.history && !m.media?.url) {
+    // Imported history: don't download now (old files can take WhatsApp Web 15–50 s each, if they
+    // come at all). Record the file; it's fetched when someone looks at it.
+    const a = pendingMedia(m, extId);
+    attachments.push(a);
+    pending.push({ id: a.id, chat: String(chatRaw), msg: extId });
   } else if (m.hasMedia) {
     try {
       const a = await downloadMedia(m, extId);
@@ -591,6 +749,10 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     extId,
     forwarded,
   });
+  if (row && pending.length) {
+    const add = db.prepare("INSERT OR IGNORE INTO wa_media (id, chat, msg, message_id, ts, state) VALUES (?, ?, ?, ?, ?, 'pending')");
+    for (const x of pending) add.run(x.id, x.chat, x.msg, row.id, ts);
+  }
   if (row && !opts.history) {
     emitMessage(row);
     emitConversation(conv.id);

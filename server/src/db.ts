@@ -189,6 +189,23 @@ const MIGRATIONS: string[] = [
   ALTER TABLE messages ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE wa_contacts ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- The message id part of a WhatsApp id ("false_<chat>_<RAW>[_<author>]"): engines often refer to
+  -- messages by RAW alone (quotes, edits, deletes). Filled in for older rows at startup.
+  ALTER TABLE messages ADD COLUMN ext_raw TEXT;
+  CREATE INDEX messages_ext_raw ON messages(ext_raw) WHERE ext_raw IS NOT NULL;
+  -- WhatsApp files not downloaded yet (imported history): fetched when someone looks at them.
+  CREATE TABLE wa_media (
+    id TEXT PRIMARY KEY,         -- attachment id (file name under attachments/)
+    chat TEXT NOT NULL,          -- WAHA chat id to ask
+    msg TEXT NOT NULL,           -- WAHA message id
+    message_id INTEGER,          -- our message row
+    ts INTEGER,                  -- message time (newest first for background downloads)
+    state TEXT NOT NULL DEFAULT 'pending',  -- pending | missing
+    tried_at INTEGER
+  );
+  CREATE INDEX wa_media_state ON wa_media(state, ts);
+  `,
 ];
 
 function migrate() {

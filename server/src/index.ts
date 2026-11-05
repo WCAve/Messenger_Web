@@ -8,7 +8,7 @@ import { db, kvGet, kvSet } from './db.js';
 import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
-import { recomputeGroupReadStatuses } from './store.js';
+import { backfillExtRaw, recomputeGroupReadStatuses } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
 import { startWhatsApp, stopWhatsApp } from './whatsapp.js';
@@ -112,6 +112,12 @@ setTimeout(() => {
     }
   } catch (e) {
     log('warn', `tick fix failed: ${(e as Error).message}`);
+  }
+  try {
+    const n = backfillExtRaw();
+    if (n) log('info', `indexed ${n} WhatsApp message ids`);
+  } catch (e) {
+    log('warn', `id backfill failed: ${(e as Error).message}`);
   }
   try {
     backfillGifFlags();

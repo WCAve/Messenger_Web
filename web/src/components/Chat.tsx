@@ -624,17 +624,20 @@ const MessageItem = memo(function MessageItem({
         {visual.length > 0 && (
           <div className={`images n${Math.min(visual.length, 4)}`}>
             {visual.slice(0, 4).map((a, i) =>
-              a.contentType.startsWith('video/') ? (
+              a.missing ? (
+                <MissingMedia key={a.id} a={a} />
+              ) : a.contentType.startsWith('video/') ? (
                 <div key={a.id} className="img-btn">
                   <GifVideo a={a} onLoad={onMediaLoad} />
                 </div>
               ) : (
-                <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
+                <button key={a.id} className={`img-btn${a.pending ? ' pending' : ''}`} onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
                   <img
                     src={attachmentUrl(a.id)}
                     alt={a.caption ?? a.filename ?? 'Image'}
                     loading="lazy"
-                    onLoad={onMediaLoad}
+                    onLoad={(e) => (e.currentTarget.parentElement?.classList.remove('pending'), onMediaLoad?.())}
+                    onError={(e) => e.currentTarget.parentElement?.classList.add('failed')}
                     style={visual.length === 1 && a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}
                   />
                   {i === 3 && visual.length > 4 && <span className="more-images">+{visual.length - 4}</span>}
@@ -787,8 +790,50 @@ function StickerImage({ sticker, onLoad }: { sticker: NonNullable<Message['stick
   );
 }
 
+/** A WhatsApp file from imported history that WhatsApp can't provide any more. */
+function MissingMedia({ a }: { a: Attachment }) {
+  const what = a.contentType.startsWith('image/') ? 'Photo' : a.contentType.startsWith('video/') ? 'Video' : a.voiceNote ? 'Voice message' : a.contentType.startsWith('audio/') ? 'Audio' : a.filename || 'File';
+  return (
+    <div className="file missing" title="WhatsApp no longer has this file. It may still be on your phone.">
+      <Icon name="file" size={26} />
+      <span>
+        <strong>{what}</strong>
+        <small>Not available any more · open it on your phone</small>
+      </span>
+    </div>
+  );
+}
+
+/** Video or audio from imported WhatsApp history: loads when you press play, not when the chat opens. */
+function PendingPlayable({ a }: { a: Attachment }) {
+  const [on, setOn] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const url = attachmentUrl(a.id);
+  const video = a.contentType.startsWith('video/');
+  if (failed) return <MissingMedia a={a} />;
+  if (on) {
+    return video ? (
+      <video className="video" src={url} controls autoPlay onError={() => setFailed(true)} />
+    ) : (
+      <audio className="audio" src={url} controls autoPlay onError={() => setFailed(true)} />
+    );
+  }
+  return (
+    <button className="file pending-media" onClick={() => setOn(true)}>
+      <Icon name="play" size={26} />
+      <span>
+        <strong>{video ? 'Video' : a.voiceNote ? 'Voice message' : 'Audio'}</strong>
+        <small>{[formatSize(a.size), 'tap to load from WhatsApp'].filter(Boolean).join(' · ')}</small>
+      </span>
+    </button>
+  );
+}
+
 function AttachmentView({ a }: { a: Attachment }) {
   const url = attachmentUrl(a.id);
+  if (a.missing) return <MissingMedia a={a} />;
+  const playable = a.contentType.startsWith('video/') || a.contentType.startsWith('audio/') || a.voiceNote;
+  if (a.pending && playable) return <PendingPlayable a={a} />;
   if (a.contentType.startsWith('video/')) return <video className="video" src={url} controls preload="metadata" />;
   if (a.contentType.startsWith('audio/') || a.voiceNote) return <audio className="audio" src={url} controls preload="metadata" />;
   return (

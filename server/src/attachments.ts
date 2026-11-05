@@ -45,11 +45,17 @@ export function isSilentVideo(id: string): boolean | null {
 
 const inflight = new Map<string, Promise<boolean>>();
 
+/** Other sources of attachments (WhatsApp files fetched on first view), plugged in to avoid import cycles. */
+export const attachmentHooks = {
+  whatsapp: (_id: string): Promise<boolean> => Promise.resolve(false),
+};
+
 /** Copy an attachment from the Signal API into local storage. Resolves true when it's available locally. */
 export function fetchAttachment(id: string): Promise<boolean> {
   if (!isSafeId(id)) return Promise.resolve(false);
   const file = localPath(id);
   if (fs.existsSync(file)) return Promise.resolve(true);
+  if (id.startsWith('wa-')) return attachmentHooks.whatsapp(id);
   let p = inflight.get(id);
   if (!p) {
     p = (async () => {

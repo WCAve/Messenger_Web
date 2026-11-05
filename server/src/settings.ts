@@ -14,6 +14,8 @@ const DEFAULTS = {
   waHistoryMessages: config.wahaHistoryMessages,
   // Forward WhatsApp messages the way WhatsApp does (with the "Forwarded" label) instead of sending a copy.
   waNativeForward: true,
+  // Download files from imported history in the background (otherwise: when someone opens them).
+  waHistoryMedia: false,
 };
 export type ServerSettings = typeof DEFAULTS;
 

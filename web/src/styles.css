@@ -2914,3 +2914,49 @@ img.emoji {
   opacity: 0.6;
   cursor: default;
 }
+
+/* WhatsApp history files that load on first view */
+.img-btn.pending {
+  min-width: 220px;
+  min-height: 160px;
+}
+.img-btn.pending::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 50%;
+  border: 3px solid color-mix(in srgb, var(--ink-3) 35%, transparent);
+  border-top-color: var(--ink-3);
+  animation: spin 0.9s linear infinite;
+}
+.img-btn.failed img {
+  display: none;
+}
+.img-btn.failed::before {
+  display: none;
+}
+.img-btn.failed::after {
+  content: 'Photo not available any more · open it on your phone';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.file.missing {
+  opacity: 0.75;
+}
+.file.pending-media {
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  width: 100%;
+}

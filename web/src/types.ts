@@ -51,6 +51,8 @@ export interface Attachment {
   voiceNote?: boolean;
   caption?: string | null;
   gif?: boolean;
+  pending?: boolean; // WhatsApp history: not on the server yet, fetched when opened (can take a while)
+  missing?: boolean; // WhatsApp couldn't provide it any more
 }
 
 export interface Member {

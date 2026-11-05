@@ -19,6 +19,7 @@ import {
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
+  downloadPendingMedia,
   cancelImportWa,
   blockWa,
   refreshGroupInfoWa,
@@ -491,6 +492,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.get('/api/settings', () => settingsDto());
   r.post('/api/settings', (ctx) => {
     updateSettings(ctx.body ?? {});
+    if (ctx.body?.waHistoryMedia === true) void downloadPendingMedia().catch(() => {});
     return settingsDto();
   });
 
@@ -714,7 +716,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Forward a message (text, files, sticker) to other chats. Quotes are left behind, like Signal.
-  r.post('/api/messages/:id/forward', (ctx) => {
+  r.post('/api/messages/:id/forward', async (ctx) => {
     const m = message(ctx);
     if (m.deleted || m.kind === 'system' || m.kind === 'poll') throw new HttpError(400, "This message can't be forwarded");
     const ids: number[] = Array.isArray(ctx.body?.conversationIds) ? ctx.body.conversationIds.map(Number) : [];
@@ -724,23 +726,27 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (m.sticker && targets.some((t) => isWa(t!))) throw new HttpError(400, "Signal stickers can't be forwarded to WhatsApp");
     const accounts = targets.map((t) => accountFor(t!));
     const attachments: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
-    let base64: string[];
-    try {
-      base64 = attachments.map(readBase64);
-    } catch {
-      throw new HttpError(409, "An attachment of this message isn't available on the server");
+    const source = getConversation(m.conversation_id)!;
+    // WhatsApp → WhatsApp goes as a real forward (setting); anything else is sent as a copy.
+    const native = isWa(source) && !!m.ext_id && !m.ext_id.startsWith('call:') && getSettings().waNativeForward;
+    let base64: string[] = [];
+    if (!native || targets.some((t) => !isWa(t!))) {
+      try {
+        // Files from imported history may not be on the server yet.
+        for (const a of attachments) if (!(await fetchAttachment(a.id))) throw new Error('missing');
+        base64 = attachments.map(readBase64);
+      } catch {
+        throw new HttpError(409, "An attachment of this message isn't available on the server");
+      }
     }
     const ranges: Ranges | null = m.ranges ? JSON.parse(m.ranges) : null;
     const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const preview: LinkPreview | null = m.preview ? JSON.parse(m.preview) : null;
-    const source = getConversation(m.conversation_id)!;
-    // WhatsApp → WhatsApp goes as a real forward (setting); anything else is sent as a copy.
-    const native = isWa(source) && !!m.ext_id && !m.ext_id.startsWith('call:') && getSettings().waNativeForward;
     const sent = targets.map((t, i) =>
       queueOutgoing(
         accounts[i],
         t!,
-        { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview, forwardOf: native && isWa(t!) ? m.ext_id : null },
+        { text: m.body ?? '', ranges, attachments, base64: native && isWa(t!) ? [] : base64, quote: null, sticker, preview, forwardOf: native && isWa(t!) ? m.ext_id : null },
         (msg) => log('warn', msg),
       ),
     );

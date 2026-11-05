@@ -69,8 +69,9 @@ export const waha = {
   chats: (limit: number) => call<Json[]>('GET', `/api/${enc(S())}/chats?limit=${limit}&offset=0&sortBy=conversationTimestamp&sortOrder=desc`, undefined, 60_000),
   // Large limits make WEBJS page back through the phone's history, which takes a while.
   messages: (chatId: string, limit: number, downloadMedia: boolean) =>
-    call<Json[]>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages?limit=${limit}&downloadMedia=${downloadMedia}&sortBy=timestamp&sortOrder=desc`, undefined, limit > 200 ? 30 * 60_000 : 120_000),
-  message: (chatId: string, id: string) => call<Json>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(id)}?downloadMedia=true`),
+    call<Json[]>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages?limit=${limit}&downloadMedia=${downloadMedia}&sortBy=timestamp&sortOrder=desc`, undefined, 30 * 60_000), // WEBJS may page back through the phone's history: never give up early (the request would keep running in WAHA)
+  // Old files can take WhatsApp Web a minute or more (it asks your phone to upload them again).
+  message: (chatId: string, id: string) => call<Json>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(id)}?downloadMedia=true`, undefined, 5 * 60_000),
   contacts: () => call<Json[]>('GET', `/api/contacts/all?session=${enc(S())}`, undefined, 60_000),
   groups: () => call<Json>('GET', `/api/${enc(S())}/groups`, undefined, 60_000),
   group: (groupId: string) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(groupId)}`, undefined, 20_000),
