@@ -171,7 +171,7 @@ function authed(req, url) {
 
 const blocked = new Set();
 const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0 }; // POST /mock/config
-const stats = { singleFetches: 0 }; // GET /mock/stats
+const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
@@ -227,6 +227,14 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (p === '/mock/stats') return json(res, 200, stats);
+      if (p === '/mock/bulk') {
+        const b = await body(req); // {"from":"sanne","n":2500}: that many old messages in a direct chat
+        const who = PEOPLE[b.from ?? 'sanne'];
+        const base = Date.now() - 400 * 3600_000;
+        for (let k = 0; k < b.n; k++) addHistory(msg({ chat: who.id, body: `Oud bericht ${k + 1}`, ts: base + k * 60_000 }));
+        history.get(who.id).sort((x, y) => x.timestamp - y.timestamp);
+        return json(res, 200, { ok: true, total: history.get(who.id).length });
+      }
       if (p === '/mock/config') {
         Object.assign(mockConfig, await body(req));
         return json(res, 200, mockConfig);
@@ -256,6 +264,17 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/sessions' && m === 'POST') return json(res, 201, { name: SESSION, status });
     if (p === `/api/sessions/${SESSION}/start`) return json(res, 201, { name: SESSION, status });
+    // Like WAHA: a failed session only comes back when someone restarts it
+    if (p === `/api/sessions/${SESSION}/restart` && m === 'POST') {
+      stats.restarts++;
+      status = 'STARTING';
+      emit('session.status', { name: SESSION, status });
+      setTimeout(() => {
+        status = 'WORKING';
+        emit('session.status', { name: SESSION, status });
+      }, 1500);
+      return json(res, 201, { name: SESSION, status });
+    }
     if (p === `/api/sessions/${SESSION}/logout`) {
       status = 'SCAN_QR_CODE';
       sent.push({ path: p, method: m });
@@ -318,7 +337,9 @@ const server = http.createServer(async (req, res) => {
       const noMedia = url.searchParams.get('downloadMedia') === 'false';
       if (mockConfig.messagesDelayMs) await new Promise((r) => setTimeout(r, mockConfig.messagesDelayMs));
       if (status !== 'WORKING') return json(res, 422, { message: 'Session status is not as expected' });
-      return json(res, 200, [...list].reverse().slice(0, limit).map((x) => (noMedia && x.media ? { ...x, media: null } : x)));
+      const offset = Number(url.searchParams.get('offset') ?? 0);
+      stats.pages.push({ chat, limit, offset });
+      return json(res, 200, [...list].reverse().slice(offset, offset + limit).map((x) => (noMedia && x.media ? { ...x, media: null } : x)));
     }
     if (msgs && m === 'PUT') {
       const b = await body(req);

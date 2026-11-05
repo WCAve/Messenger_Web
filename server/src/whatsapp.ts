@@ -147,6 +147,10 @@ function skipChat(raw: unknown) {
 
 // ---------- connection ----------
 
+let failedSince = 0;
+let restartAttempts = 0;
+const RESTART_BACKOFF = [Number(process.env.WAHA_RESTART_AFTER_MS) || 20_000, 60_000, 3 * 60_000, 10 * 60_000, 30 * 60_000];
+
 async function check() {
   clearTimeout(checkTimer);
   if (stopped || !config.wahaUrl) return;
@@ -167,6 +171,8 @@ async function check() {
     if (!state.version) waha.version().then((v) => setState({ ...state, version: v.version, engine: state.engine ?? v.engine })).catch(() => {});
     switch (s.status) {
       case 'WORKING': {
+        restartAttempts = 0;
+        failedSince = 0;
         const me = s.me?.id ? bare(s.me.id) : undefined;
         if (me) self.waIds = [me, s.me?.lid ? bare(s.me.lid) : ''];
         const wasConnected = state.status === 'connected';
@@ -188,10 +194,22 @@ async function check() {
         await waha.startSession().catch(() => {});
         next = 3000;
         break;
-      case 'FAILED':
-        setState({ ...base, status: 'failed', error: 'WhatsApp session failed. Restart it, or link again.' });
-        next = 15_000;
+      case 'FAILED': {
+        // WAHA is supposed to restart a crashed WhatsApp Web itself, but doesn't always: do it for it,
+        // after giving it a moment, and less often if it keeps failing.
+        const now = Date.now();
+        if (!failedSince) failedSince = now;
+        const wait = RESTART_BACKOFF[Math.min(restartAttempts, RESTART_BACKOFF.length - 1)];
+        if (now - failedSince >= wait) {
+          restartAttempts++;
+          failedSince = now;
+          log.info(`whatsapp: session failed; restarting it (attempt ${restartAttempts})`);
+          await waha.restartSession().catch(() => waha.startSession().catch(() => {}));
+          next = 5000;
+        } else next = 10_000;
+        setState({ ...base, status: 'failed', error: 'WhatsApp Web stopped working. Restarting it automatically…' });
         break;
+      }
       default:
         setState({ ...base, status: 'starting', error: `WAHA session status ${s.status}` });
         next = 5000;
@@ -329,7 +347,7 @@ export async function logoutWhatsApp() {
 }
 
 export async function restartWhatsApp() {
-  await waha.startSession().catch(() => {});
+  await waha.restartSession().catch(() => waha.startSession().catch(() => {}));
   recheckWa(1500);
 }
 
@@ -1041,6 +1059,8 @@ async function handleEvent(e: Json) {
 // ---------- history ----------
 
 let cancelRequested = false;
+/** "As many as possible": per chat, as far back as WhatsApp Web has them, up to this many. */
+const MAX_PER_CHAT = 20_000;
 /** "Stop import" in Settings: finishes the message it's on, then stops. */
 export function cancelImportWa() {
   if (importing) cancelRequested = true;
@@ -1112,43 +1132,68 @@ async function importHistory(
     if (!id) continue;
     const conv = getOrCreateWaChat(id, id.endsWith('@g.us') ? c.name : null);
     if (!id.endsWith('@g.us') && c.name && !waContact(id)?.name) upsertWaContact({ jid: id, pushName: c.name });
-    let list: Json[] = [];
-    try {
-      list = await waha.messages(idRaw, waHistoryMessages || 100_000, false);
-      chatFailures = 0;
-    } catch (e) {
-      log.warn(`whatsapp: history for ${id}: ${(e as Error).message}`);
-      if (state.status !== 'connected' || !(await waha.session().then((x) => x.status === 'WORKING').catch(() => false))) {
-        // It took the session down. Try this chat once more after the restart, then skip it.
-        const n = (crashedOn.get(id) ?? 0) + 1;
-        crashedOn.set(id, n);
-        if (n < 2) i--;
-        else skipped.push(id);
-        recheckWa(500);
-        await pause(3000);
-        continue;
+    // In pages, newest first: one huge answer (a big group's whole history) is what makes WhatsApp
+    // Web fall over. Pages overlap a little, in case new messages arrive and shift them.
+    const target = waHistoryMessages || MAX_PER_CHAT;
+    const PAGE = Math.min(1000, target);
+    const doneKey = `wa_hist_complete:${id}`;
+    let offset = 0;
+    let first = true;
+    let pageFailed = false;
+    const newest: MessageRow[] = [];
+    while (offset < target && !cancelRequested && state.status === 'connected') {
+      const limit = Math.min(PAGE, target - offset);
+      let page: Json[];
+      try {
+        page = (await waha.messages(idRaw, limit, false, offset)) ?? [];
+        chatFailures = 0;
+      } catch (e) {
+        log.warn(`whatsapp: history for ${id}: ${(e as Error).message}`);
+        pageFailed = true;
+        if (state.status !== 'connected' || !(await waha.session().then((x) => x.status === 'WORKING').catch(() => false))) {
+          // It took the session down. Try this chat once more after the restart, then skip it.
+          const n = (crashedOn.get(id) ?? 0) + 1;
+          crashedOn.set(id, n);
+          if (n < 2) i--;
+          else skipped.push(id);
+          recheckWa(500);
+          await pause(3000);
+        } else {
+          if (++chatFailures >= 3) throw new Error(`WAHA stopped answering (${(e as Error).message.slice(0, 120)}); what was imported so far is kept`);
+          await pause(3000);
+        }
+        break;
       }
-      if (++chatFailures >= 3) throw new Error(`WAHA stopped answering (${(e as Error).message.slice(0, 120)}); what was imported so far is kept`);
-      await pause(3000);
-      continue;
+      const sorted = [...page].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+      let added = 0;
+      for (const m of sorted) {
+        if (cancelRequested || state.status !== 'connected') break;
+        const row = await ingestMessage(m, { history: true }).catch((e) => {
+          if (failures++ < 3) log.warn(`whatsapp: couldn't import message ${m?.id}: ${(e as Error).message}`);
+          return undefined;
+        });
+        if (row) {
+          added++;
+          if (first) newest.push(row);
+        }
+      }
+      total += added;
+      if (added) touched++;
+      first = false;
+      if (page.length < limit) {
+        kvSet(doneKey, '1'); // reached the start of what WhatsApp Web has
+        break;
+      }
+      // Everything on this page was here already and an earlier import reached the start: done.
+      if (!added && kvGet(doneKey) === '1') break;
+      offset += Math.max(1, page.length - 20);
+      if (page.length) await pause(200);
     }
-    list = [...(list ?? [])].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-    const rows: MessageRow[] = [];
-    for (const m of list) {
-      if (cancelRequested || state.status !== 'connected') break;
-      const row = await ingestMessage(m, { history: true }).catch((e) => {
-        if (failures++ < 3) log.warn(`whatsapp: couldn't import message ${m?.id}: ${(e as Error).message}`);
-        return undefined;
-      });
-      if (row) rows.push(row);
-      if (row && m.hasMedia) await pause(150); // files are fetched one by one; give WhatsApp Web room
-    }
-    total += rows.length;
-    if (rows.length) touched++;
+    if (pageFailed) continue;
     // Keep WhatsApp's unread count for the chat.
     const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? c._chat?.UnreadCount ?? 0);
     if (unread > 0) {
-      const incoming = rows.filter((r) => !r.outgoing).slice(-unread);
+      const incoming = newest.filter((r) => !r.outgoing).slice(-unread);
       for (const r of incoming) updateMessage(r.id, { read: 0 });
     }
     emitConversation(conv.id);

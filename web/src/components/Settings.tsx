@@ -170,7 +170,7 @@ function ProfileSection() {
 
 /** Linking and status of WhatsApp (through WAHA). */
 const HISTORY_CHATS = [[40, '40 chats'], [100, '100 chats'], [250, '250 chats'], [0, 'All chats']] as const;
-const HISTORY_MESSAGES = [[40, '40 messages'], [200, '200 messages'], [1000, '1,000 messages'], [0, 'As many as possible']] as const;
+const HISTORY_MESSAGES = [[40, '40 messages'], [200, '200 messages'], [1000, '1,000 messages'], [0, 'As many as possible (up to 20,000)']] as const;
 
 /** How much history "Import history now" fetches (and the automatic import after linking). */
 function HistorySettings() {
