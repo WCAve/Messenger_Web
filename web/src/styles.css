@@ -2384,13 +2384,21 @@ body.resizing * {
   border-color: var(--ink-3);
 }
 .chat-row-wrap:hover .row-menu-btn,
-.chat-row-wrap.active .row-menu-btn,
 .chat-row-wrap.menu-open .row-menu-btn,
 .row-menu-btn:focus-visible {
   opacity: 1;
 }
-.chat-row-wrap.active .badge {
-  visibility: hidden;
+/* While the button shows, the preview makes room for it instead of running underneath. */
+.chat-row-wrap:hover .row-icons,
+.chat-row-wrap.menu-open .row-icons {
+  display: none;
+}
+.chat-row-wrap:hover .chat-row-bottom,
+.chat-row-wrap.menu-open .chat-row-bottom {
+  padding-right: 34px;
+}
+.row-menu-anchor {
+  position: static;
 }
 .head-menu {
   top: 44px;

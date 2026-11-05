@@ -417,7 +417,7 @@ export function MessageInfoPanel({ messageId }: { messageId: number }) {
         {list(m?.status === 'pending' ? 'Sending to' : 'Not delivered yet', waiting, () => null)}
         {data && !data.recipients.length && (
           <p className="muted panel-empty">
-            {conv?.network === 'whatsapp' ? 'WhatsApp only reports whether everyone has received or read it, shown by the ticks.' : 'No delivery information yet.'}
+            No delivery information yet.
           </p>
         )}
         <p className="muted panel-note">

@@ -751,7 +751,6 @@ export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered
 /** Per-recipient delivery state of an outgoing message, for the "message info" view. */
 export function messageReceipts(m: MessageRow) {
   const conv = convById.get(m.conversation_id)!;
-  if (conv.network === 'whatsapp') return []; // WhatsApp only reports the overall ticks
   const rows = db
     .prepare<[number], { recipient: string; delivered_at: number | null; read_at: number | null }>(
       'SELECT recipient, delivered_at, read_at FROM message_receipts WHERE message_id = ?',
@@ -761,7 +760,7 @@ export function messageReceipts(m: MessageRow) {
   const people: { key: string; name: string }[] =
     conv.kind === 'group'
       ? groupMembers(conv).filter((x) => x.key !== 'self')
-      : [{ key: contactKey(conv.peer_uuid, conv.peer_number), name: conversationTitle(conv) }];
+      : [{ key: conv.network === 'whatsapp' ? 'wa:' + conv.wa_id : contactKey(conv.peer_uuid, conv.peer_number), name: conversationTitle(conv) }];
   for (const r of rows) if (!people.some((p) => p.key === r.recipient)) people.push({ key: r.recipient, name: nameForKey(r.recipient) });
   return people.map((p) => {
     const r = byKey.get(p.key);

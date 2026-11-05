@@ -87,6 +87,7 @@ export const api = {
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
+  opened: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/open`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };

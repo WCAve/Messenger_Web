@@ -29,6 +29,7 @@ import {
   listWaGroups,
   messageDto,
   nameForKey,
+  recordReceipt,
   renderBody,
   self,
   setConversationFlags,
@@ -656,15 +657,34 @@ async function handleEvent(e: Json) {
       emitMessage(updateMessage(target.id, { reactions: reactions.length ? JSON.stringify(reactions) : null }));
       return;
     }
-    case 'message.ack': {
+    case 'message.ack':
+    case 'message.ack.group': {
+      // Direct chats: one ack for the other person. Groups (WEBJS): one per member who received/read it.
       const target = findMessageByExt(p?.id);
       if (!target?.outgoing) return;
-      const status = STATUS_FOR_ACK[Number(p.ack)];
-      if (status && (status === 'failed' || statusRank(status) > statusRank(target.status))) emitMessage(updateMessage(target.id, { status }));
+      const ack = Number(p.ack);
+      const status = STATUS_FOR_ACK[ack];
+      if (!status) return;
+      if (status === 'failed') return emitMessage(updateMessage(target.id, { status }));
+      if (ack >= 2) {
+        const conv = getConversation(target.conversation_id)!;
+        const who = conv.kind === 'group' ? await resolve(p.participant) : conv.wa_id;
+        if (who && !self.isWa(who)) {
+          const next = recordReceipt(target, keyFor(who), ack >= 3 ? 'read' : 'delivered', Date.now());
+          if (next !== target.status && statusRank(next) >= statusRank(target.status)) emitMessage(updateMessage(target.id, { status: next }));
+          else broadcast({ type: 'receipt', messageId: target.id });
+          return;
+        }
+      }
+      // A group ack without a member, or "reached the server": move the ticks forward only.
+      if (statusRank(status) > statusRank(target.status) && (getConversation(target.conversation_id)!.kind !== 'group' || status === 'sent')) {
+        emitMessage(updateMessage(target.id, { status }));
+      }
       return;
     }
     case 'message.revoked': {
-      const id = p?.revokedMessageId ?? p?.before?.id ?? p?.after?.id;
+      // WEBJS sends the deletion notice ("after") and the deleted message ("before"); we want the latter.
+      const id = p?.revokedMessageId ?? p?.before?.id;
       const target = findMessageByExt(id);
       if (!target) return;
       emitMessage(updateMessage(target.id, { deleted: 1, body: null, ranges: null, attachments: null, reactions: null, preview: null }));
@@ -853,6 +873,15 @@ export async function deleteWa(conv: ConversationRow, m: MessageRow) {
 export async function markReadWa(conv: ConversationRow, unread: MessageRow[]) {
   const ids = unread.filter((m) => !m.outgoing && m.ext_id).map((m) => m.ext_id!);
   await waha.seen(conv.wa_id!, ids.slice(-50));
+}
+
+const presenceSubscribed = new Map<string, number>();
+/** WEBJS only reports "typing…" for chats you subscribe to, like WhatsApp Web does when you open one. */
+export async function subscribePresenceWa(conv: ConversationRow) {
+  const last = presenceSubscribed.get(conv.wa_id!) ?? 0;
+  if (Date.now() - last < 10 * 60_000) return;
+  presenceSubscribed.set(conv.wa_id!, Date.now());
+  await waha.subscribePresence(conv.wa_id!).catch(() => presenceSubscribed.delete(conv.wa_id!));
 }
 
 export async function typingWa(conv: ConversationRow, on: boolean) {

@@ -1,4 +1,34 @@
-import { type ReactNode, useEffect, useId, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+
+let closeOpenMenu: (() => void) | null = null;
+
+/**
+ * A pop-up menu's open state. Only one menu is open at a time; it closes on a click outside `ref`
+ * (put it on the element holding the button and the menu) and on Escape.
+ */
+export function useMenu<T extends HTMLElement = HTMLDivElement>() {
+  const [open, setOpenState] = useState(false);
+  const ref = useRef<T>(null);
+  const close = useRef(() => setOpenState(false)).current;
+  useEffect(() => {
+    if (!open) return;
+    if (closeOpenMenu && closeOpenMenu !== close) closeOpenMenu();
+    closeOpenMenu = close;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      if (closeOpenMenu === close) closeOpenMenu = null;
+    };
+  }, [open, close]);
+  const setOpen = (v: boolean | ((o: boolean) => boolean)) => setOpenState(v);
+  return [open, setOpen, ref] as const;
+}
 import { hueFor, initials } from '../util';
 
 const PATHS: Record<string, ReactNode> = {

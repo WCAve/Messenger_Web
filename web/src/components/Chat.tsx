@@ -13,7 +13,7 @@ import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor,
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { PollDialog, PollView } from './Extras';
 import { ChatRowMenu } from './Sidebar';
-import { Avatar, Icon, StatusMark } from './ui';
+import { Avatar, Icon, StatusMark, useMenu } from './ui';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
 const PAGE = 50;
@@ -54,7 +54,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const connected = useNetworkReady(conversation.network);
   const multiNetwork = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const panel = useStore((s) => s.panel?.kind ?? null);
-  const [chatMenu, setChatMenu] = useState(false);
+  const [chatMenu, setChatMenu, chatMenuRef] = useMenu();
   const hasNewer = useStore((s) => s.hasNewer[id] ?? false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [reactTo, setReactTo] = useState<Message | null>(null);
@@ -74,6 +74,11 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
       .messages(id, undefined, PAGE)
       .then((list) => upsertMessages(id, list, { hasMore: list.length === PAGE }))
       .catch((e) => setLoadError(e.message));
+  }, [id]);
+
+  // Tell the server (WhatsApp then starts sending "typing…" for this chat).
+  useEffect(() => {
+    api.opened(id).catch(() => {});
   }, [id]);
 
   // Mark read while the chat is open and the window is visible.
@@ -158,7 +163,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         >
           <Icon name="search" />
         </button>
-        <div className="menu-wrap">
+        <div className="menu-wrap" ref={chatMenuRef}>
           <button className={`icon-btn${chatMenu ? ' on' : ''}`} onClick={() => setChatMenu((v) => !v)} aria-label="Chat options" aria-expanded={chatMenu} title="Pin, mute or archive">
             <Icon name="more" />
           </button>

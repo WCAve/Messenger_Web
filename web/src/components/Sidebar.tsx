@@ -8,7 +8,7 @@ import { formatListTime } from '../util';
 import { type NotifyState, notifyState, requestNotifications } from '../notifications';
 import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
-import { Avatar, Icon, StatusMark } from './ui';
+import { Avatar, Icon, StatusMark, useMenu } from './ui';
 import { Emojified } from '../emoji/render';
 
 export function Sidebar({ onLogout }: { onLogout: () => void }) {
@@ -19,7 +19,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'list' | 'new' | 'settings' | 'archived'>('list');
   const drafts = useStore((s) => s.drafts);
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu, menuRef] = useMenu();
   const [found, setFound] = useState<SearchResult[] | null>(null);
 
   // Message search across all chats, below the matching chats.
@@ -116,12 +116,12 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         <button className="icon-btn" onClick={() => setMode('new')} title="New chat" aria-label="New chat">
           <Icon name="plus" />
         </button>
-        <div className="menu-wrap">
+        <div className="menu-wrap" ref={menuRef}>
           <button className="icon-btn" onClick={() => setMenu((m) => !m)} aria-label="Menu" aria-expanded={menu}>
             <Icon name="more" />
           </button>
           {menu && (
-            <div className="menu" role="menu" onMouseLeave={() => setMenu(false)}>
+            <div className="menu" role="menu">
               <button role="menuitem" onClick={() => (setMode('settings'), setMenu(false))}>
                 <Icon name="gear" size={18} /> Settings
               </button>
@@ -361,7 +361,7 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
     }
   }
   return (
-    <div className={`menu ${className}`} role="menu" onMouseLeave={onClose}>
+    <div className={`menu ${className}`} role="menu">
       {!c.archived && (
         <button role="menuitem" onClick={() => void set({ pinned: !c.pinnedAt })}>
           <Icon name="pin" size={18} /> {c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
@@ -412,7 +412,7 @@ interface PinDrag {
 function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: boolean; typing: boolean; draft?: string; drag?: PinDrag }) {
   const multi = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const lm = c.lastMessage;
-  const [menu, setMenu] = useState(false);
+  const [menu, setMenu, menuRef] = useMenu<HTMLSpanElement>();
   const muted = c.mutedUntil > Date.now();
   return (
     <div
@@ -478,10 +478,12 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
         </span>
       </span>
     </button>
-      <button className="icon-btn sm row-menu-btn" onClick={() => setMenu((m) => !m)} aria-label={`Options for ${c.title}`} aria-expanded={menu} title="Chat options">
-        <Icon name="chevron" size={20} />
-      </button>
-      {menu && <ChatRowMenu c={c} onClose={() => setMenu(false)} />}
+      <span className="row-menu-anchor" ref={menuRef}>
+        <button className="icon-btn sm row-menu-btn" onClick={() => setMenu((m) => !m)} aria-label={`Options for ${c.title}`} aria-expanded={menu} title="Chat options">
+          <Icon name="chevron" size={20} />
+        </button>
+        {menu && <ChatRowMenu c={c} onClose={() => setMenu(false)} />}
+      </span>
     </div>
   );
 }

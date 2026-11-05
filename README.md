@@ -193,7 +193,7 @@ Requires Node 22.13 or newer. The server has no runtime dependencies: it uses No
 ```sh
 npm install
 npm run mock            # fake Signal API on :8080 with sample chats (no phone needed)
-node mock/mock-waha.mjs # fake WAHA on :8090 (API key test-waha-key; MOCK_WA_LINKED=1 starts linked)
+node mock/mock-waha.mjs # fake WAHA (WEBJS engine behaviour) on :8090, API key test-waha-key; MOCK_WA_LINKED=1 starts linked
 npm run dev:web         # rebuilds the UI into web/dist on change
 npm run build -w server && \
   DATA_DIR=.data APP_PASSWORD=devpassword SIGNAL_API_URL=http://localhost:8080 \

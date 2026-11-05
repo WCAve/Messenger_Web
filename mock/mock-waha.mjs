@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
  * A small fake WAHA (WhatsApp HTTP API) for development and tests. No WhatsApp involved.
+ * It answers the way WAHA's WEBJS engine does (raw ids in quotes and edits, per-member group acks,
+ * typing only for chats you subscribed to, wwebjs-shaped chats and groups).
  *
  *   node mock/mock-waha.mjs            # port 8090, API key "test-waha-key"
  *   MOCK_WA_LINKED=1 …                 # start already linked
@@ -77,14 +79,15 @@ function wsSend(socket, text) {
   socket.write(Buffer.concat([header, payload]));
 }
 function emit(event, payload) {
-  const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: 'GOWS', event, payload, me: status === 'WORKING' ? ME : null });
+  const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: 'WEBJS', event, payload, me: status === 'WORKING' ? ME : null });
   for (const s of sockets) wsSend(s, msg);
 }
 
 // ---------- messages ----------
 const rid = () => crypto.randomBytes(10).toString('hex').toUpperCase();
 function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data, ack = fromMe ? 3 : 0 }) {
-  const id = `${fromMe}_${chat}_${rid()}`;
+  const raw = rid();
+  const id = `${fromMe}_${chat}_${raw}${chat.endsWith('@g.us') && !fromMe && author ? '_' + author : ''}`;
   const group = chat.endsWith('@g.us');
   return {
     id,
@@ -98,7 +101,8 @@ function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data
     media: media ? { url: `http://localhost:3000/api/files/${SESSION}/${id}.png`, mimetype: media, filename: null } : undefined,
     ack,
     replyTo: replyTo ?? undefined,
-    _data: { notifyName: author ? Object.values(PEOPLE).find((p) => p.id === author)?.pushname : undefined, ...(data ?? {}) },
+    // wwebjs rawData: the short id, the sender's own name, the message type
+    _data: { id: { fromMe, remote: chat, id: raw, _serialized: id }, notifyName: author ? Object.values(PEOPLE).find((p) => p.id === author)?.pushname : undefined, type: media ? 'image' : 'chat', ...(data ?? {}) },
   };
 }
 function addHistory(m) {
@@ -154,17 +158,32 @@ function authed(req, url) {
   return req.headers['x-api-key'] === KEY || url.searchParams.get('x-api-key') === KEY;
 }
 
+const subscribed = new Set(); // presence: WEBJS only reports typing for chats you subscribed to
+function presence(chatId, who, state) {
+  if (subscribed.has(chatId)) emit('presence.update', { id: chatId, presences: [{ participant: who, lastKnownPresence: state }] });
+}
+
 function afterSend(chatId, m, text) {
   emit('message.any', { ...m, source: 'api' }); // WAHA echoes your own sends
-  setTimeout(() => emit('message.ack', { id: m.id, from: ME.id, to: chatId, fromMe: true, ack: 2, ackName: 'DEVICE' }), 500);
-  setTimeout(() => emit('message.ack', { id: m.id, from: ME.id, to: chatId, fromMe: true, ack: 3, ackName: 'READ' }), 1800);
-  if (String(text).includes('noreply')) return;
   const group = chatId.endsWith('@g.us');
+  const ack = (event, who, n, delay) =>
+    setTimeout(() => emit(event, { id: m.id, from: chatId, to: chatId, ...(who ? { participant: who } : {}), fromMe: true, ack: n, ackName: n === 2 ? 'DEVICE' : 'READ' }), delay);
+  if (group) {
+    // WEBJS: one message.ack.group per member; read for everyone only after both have read it
+    ack('message.ack.group', PEOPLE.jan.id, 2, 400);
+    ack('message.ack.group', PEOPLE.sanne.id, 2, 700);
+    ack('message.ack.group', PEOPLE.jan.id, 3, 1200);
+    ack('message.ack.group', PEOPLE.sanne.id, 3, 2400);
+  } else {
+    ack('message.ack', null, 2, 500);
+    ack('message.ack', null, 3, 1800);
+  }
+  if (String(text).includes('noreply')) return;
   const replier = group ? PEOPLE.jan : Object.values(PEOPLE).find((p) => p.id === chatId);
   if (!replier) return;
-  setTimeout(() => emit('presence.update', { id: chatId, presences: [{ participant: replier.id, lastKnownPresence: 'typing' }] }), 2200);
+  setTimeout(() => presence(chatId, replier.id, 'typing'), 2200);
   setTimeout(() => {
-    emit('presence.update', { id: chatId, presences: [{ participant: replier.id, lastKnownPresence: 'paused' }] });
+    presence(chatId, replier.id, 'paused');
     emit('message.any', msg({ chat: chatId, author: group ? replier.id : undefined, body: `Ontvangen: “${String(text || 'bestand').slice(0, 40)}”` }));
   }, 4000);
 }
@@ -202,9 +221,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (!authed(req, url)) return json(res, 401, { message: 'Unauthorized' });
 
-    if (p === '/api/server/version') return json(res, 200, { version: '2026.10.1-mock', engine: 'GOWS', tier: 'CORE' });
+    if (p === '/api/server/version') return json(res, 200, { version: '2026.10.1-mock', engine: 'WEBJS', tier: 'CORE' });
     if (p === `/api/sessions/${SESSION}` && m === 'GET') {
-      return json(res, 200, { name: SESSION, status, me: status === 'WORKING' ? ME : null, engine: { engine: 'GOWS' } });
+      return json(res, 200, { name: SESSION, status, me: status === 'WORKING' ? ME : null, engine: { engine: 'WEBJS' } });
     }
     if (p === '/api/sessions' && m === 'POST') return json(res, 201, { name: SESSION, status });
     if (p === `/api/sessions/${SESSION}/start`) return json(res, 201, { name: SESSION, status });
@@ -254,11 +273,13 @@ const server = http.createServer(async (req, res) => {
     }
     const parts = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)/participants/v2$`));
     if (parts) return json(res, 200, [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }]);
-    if (p === `/api/${SESSION}/groups`) return json(res, 200, [GROUP, GROUP2].map((g) => ({ JID: g.id, Name: g.name })));
+    // WEBJS: groups are wwebjs GroupChat objects
+    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name } });
+    if (p === `/api/${SESSION}/groups`) return json(res, 200, [GROUP, GROUP2].map(groupChat));
     const one = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)$`));
     if (one) {
       const g = [GROUP, GROUP2].find((x) => x.id === decodeURIComponent(one[1]));
-      return g ? json(res, 200, { JID: g.id, Name: g.name }) : json(res, 404, { message: 'not found' });
+      return g ? json(res, 200, groupChat(g)) : json(res, 404, { message: 'not found' });
     }
     const lid = p.match(new RegExp(`^/api/${SESSION}/lids/([^/]+)$`));
     if (lid) {
@@ -270,6 +291,12 @@ const server = http.createServer(async (req, res) => {
       return res.end(PHOTO);
     }
 
+    const sub = p.match(new RegExp(`^/api/${SESSION}/presence/([^/]+)/subscribe$`));
+    if (sub) {
+      subscribed.add(decodeURIComponent(sub[1]));
+      sent.push({ path: p, method: m });
+      return json(res, 201, { ok: true });
+    }
     if (m === 'POST' || m === 'PUT') {
       const b = await body(req);
       const chatId = b.chatId;

@@ -21,6 +21,7 @@ import {
   reactWa,
   refreshDirectory as refreshWaDirectory,
   restartWhatsApp,
+  subscribePresenceWa,
   typingWa,
   voteWa,
   waAvatar,
@@ -930,6 +931,13 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         }
       })();
     }
+    return { ok: true };
+  });
+
+  // The chat was opened in a browser.
+  r.post('/api/conversations/:id/open', (ctx) => {
+    const c = conv(ctx);
+    if (isWa(c) && getWaState().status === 'connected') void subscribePresenceWa(c);
     return { ok: true };
   });
 

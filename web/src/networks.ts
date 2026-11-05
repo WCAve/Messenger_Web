@@ -16,7 +16,7 @@ export interface Caps {
 
 const CAPS: Record<Network, Caps> = {
   signal: { stickers: true, timer: true, endPoll: true, groupPhoto: true, spoilers: true, receiptDetails: true, editWindowMs: 24 * 3600_000 - 60_000 },
-  whatsapp: { stickers: false, timer: false, endPoll: false, groupPhoto: false, spoilers: false, receiptDetails: false, editWindowMs: 15 * 60_000 - 30_000 },
+  whatsapp: { stickers: false, timer: false, endPoll: false, groupPhoto: false, spoilers: false, receiptDetails: true, editWindowMs: 15 * 60_000 - 30_000 },
 };
 
 export function capsFor(c: Pick<Conversation, 'network'> | undefined | null): Caps {
