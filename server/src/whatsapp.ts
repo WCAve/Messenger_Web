@@ -287,8 +287,9 @@ export function startWhatsApp(logger: Logger) {
   stopped = false;
   void check();
   dirTimer = setInterval(() => state.status === 'connected' && refreshDirectory().catch(() => {}), 6 * 3600_000);
-  // Mutes and pins change more often than names: check those every 5 minutes.
-  setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 5 * 60_000).unref();
+  // Mutes and pins change more often than names: check those every 15 minutes. (Not more often: with
+  // WEBJS every chat-list request makes WhatsApp Web look up all your groups at once.)
+  setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 15 * 60_000).unref();
 }
 
 export function stopWhatsApp() {
@@ -323,8 +324,12 @@ export async function refreshDirectory() {
     upsertWaContact({ jid, name: c.name ?? c.Name ?? null, pushName: c.pushname ?? c.pushName ?? c.PushName ?? null, number: c.number ? '+' + String(c.number).replace(/\D/g, '') : undefined });
     if (typeof c.isBlocked === 'boolean' && c.isBlocked !== waBlocked(jid)) setWaBlocked(jid, c.isBlocked);
   }
-  await refreshGroupNames().catch((e) => log.warn(`whatsapp: group names: ${(e as Error).message}`));
-  await syncMutes().catch((e) => log.warn(`whatsapp: mute status: ${(e as Error).message}`));
+  // One chat list for both (WEBJS's group list is the same list, filtered).
+  const chats = await waha.chats(2000).catch((e) => (log.warn(`whatsapp: chat list: ${(e as Error).message}`), null));
+  if (chats) {
+    await refreshGroupNames(chats.filter((c) => c?.isGroup || groupIdOf(c)?.endsWith('@g.us'))).catch((e) => log.warn(`whatsapp: group names: ${(e as Error).message}`));
+    await syncMutes(chats).catch((e) => log.warn(`whatsapp: mute status: ${(e as Error).message}`));
+  }
   for (const g of listWaGroups()) {
     if (!g.group_name) await refreshGroupName(g).catch(() => {});
     await refreshGroup(g).catch(() => {});
@@ -609,8 +614,8 @@ let muteNoticeShown = false;
  * Copy mutes and "marked as unread" from your phone. What you set here is kept unless the phone has
  * news about that chat.
  */
-async function syncMutes() {
-  const chats = await waha.chats(300);
+async function syncMutes(list?: Json[]) {
+  const chats = list ?? (await waha.chats(2000));
   let known = 0;
   let changed = 0;
   for (const c of chats ?? []) {
@@ -710,8 +715,8 @@ async function refreshGroupName(conv: ConversationRow) {
 }
 
 /** Names of all groups in one call. */
-async function refreshGroupNames() {
-  const res = await waha.groups();
+async function refreshGroupNames(groups?: Json[]) {
+  const res = groups ?? (await waha.groups());
   const list: Json[] = Array.isArray(res) ? res : res && typeof res === 'object' ? Object.values(res) : [];
   const known = new Map(listWaGroups().map((g) => [g.wa_id, g]));
   for (const g of list) {
@@ -860,16 +865,36 @@ async function handleEvent(e: Json) {
 
 // ---------- history ----------
 
+let cancelRequested = false;
+/** "Stop import" in Settings: finishes the message it's on, then stops. */
+export function cancelImportWa() {
+  if (importing) cancelRequested = true;
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Gentle on WhatsApp Web (WEBJS runs it in a headless browser, which a burst of work can crash):
+ * the plain chat list (the "overview" looks up every chat's picture at once), messages without
+ * media, then each file on its own, one chat at a time. Stops when the session goes down.
+ */
 async function importHistory(progress: (done: number, total: number) => void = () => {}): Promise<{ chats: number; messages: number }> {
   const { waHistoryChats, waHistoryMessages } = getSettings();
-  const chats = await waha.chatsOverview(waHistoryChats || 5000);
-  log.info(`whatsapp: checking ${chats?.length ?? 0} recent chats for history`);
+  cancelRequested = false;
+  const chats = (await waha.chats(waHistoryChats || 5000)) ?? [];
+  log.info(`whatsapp: checking ${chats.length} recent chats for history`);
   let total = 0;
   let touched = 0;
   let failures = 0;
+  let chatFailures = 0;
   let done = 0;
-  progress(0, chats?.length ?? 0);
-  for (const c of chats ?? []) {
+  progress(0, chats.length);
+  for (const c of chats) {
+    if (cancelRequested) {
+      log.info('whatsapp: history import stopped');
+      break;
+    }
+    if (state.status !== 'connected') throw new Error('WhatsApp disconnected during the import; what was imported so far is kept');
     progress(done++, chats.length);
     const idRaw = typeof c.id === 'string' ? c.id : c.id?._serialized;
     if (!idRaw || skipChat(idRaw)) continue;
@@ -879,19 +904,24 @@ async function importHistory(progress: (done: number, total: number) => void = (
     if (!id.endsWith('@g.us') && c.name && !waContact(id)?.name) upsertWaContact({ jid: id, pushName: c.name });
     let list: Json[] = [];
     try {
-      list = await waha.messages(idRaw, waHistoryMessages || 100_000, true);
+      list = await waha.messages(idRaw, waHistoryMessages || 100_000, false);
+      chatFailures = 0;
     } catch (e) {
       log.warn(`whatsapp: history for ${id}: ${(e as Error).message}`);
+      if (++chatFailures >= 3) throw new Error(`WAHA stopped answering (${(e as Error).message.slice(0, 120)}); what was imported so far is kept`);
+      await pause(3000);
       continue;
     }
     list = [...(list ?? [])].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
     const rows: MessageRow[] = [];
     for (const m of list) {
+      if (cancelRequested || state.status !== 'connected') break;
       const row = await ingestMessage(m, { history: true }).catch((e) => {
         if (failures++ < 3) log.warn(`whatsapp: couldn't import message ${m?.id}: ${(e as Error).message}`);
         return undefined;
       });
       if (row) rows.push(row);
+      if (row && m.hasMedia) await pause(150); // files are fetched one by one; give WhatsApp Web room
     }
     total += rows.length;
     if (rows.length) touched++;
@@ -902,6 +932,7 @@ async function importHistory(progress: (done: number, total: number) => void = (
       for (const r of incoming) updateMessage(r.id, { read: 0 });
     }
     emitConversation(conv.id);
+    await pause(250);
   }
   return { chats: touched, messages: total };
 }

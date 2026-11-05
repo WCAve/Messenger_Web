@@ -271,8 +271,13 @@ function WhatsAppSection() {
       )}
       {wa.importing && (
         <p className="setting-note">
-          <span className="spinner small" /> Importing history from WhatsApp
-          {wa.importProgress?.total ? ` (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})` : ''}…
+          <span className="spinner small" />{' '}
+          {wa.importProgress
+            ? `Importing history from WhatsApp (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})…`
+            : 'Getting the chat list from WhatsApp…'}{' '}
+          <button className="link-btn" onClick={() => void api.whatsappImportCancel().catch(() => {})}>
+            Stop
+          </button>
         </p>
       )}
       {!wa.importing && wa.lastImport && importAsked && (

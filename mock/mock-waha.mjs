@@ -257,7 +257,21 @@ const server = http.createServer(async (req, res) => {
 
     // Like WEBJS: chats carry isMuted / muteExpiration (seconds, -1 = always). Familie is muted on the phone.
     if (p === `/api/${SESSION}/chats`) {
-      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0, unreadCount: markedUnread.has(id) ? -1 : 0, pinned: pinnedOnPhone.has(id) })));
+      // wwebjs Chat objects, newest first; groups carry groupMetadata (WEBJS's group list is this list, filtered)
+      const list = [...history.entries()]
+        .sort(([, a], [, b]) => b[b.length - 1].timestamp - a[a.length - 1].timestamp)
+        .map(([id]) => ({
+          id: { _serialized: id },
+          name: id === GROUP.id ? GROUP.name : Object.values(PEOPLE).find((x) => x.id === id)?.pushname ?? null,
+          isGroup: id.endsWith('@g.us'),
+          ...(id === GROUP.id ? { groupMetadata: { subject: GROUP.name, desc: DESC[GROUP.id] } } : {}),
+          timestamp: history.get(id).at(-1).timestamp,
+          isMuted: id === GROUP.id,
+          muteExpiration: id === GROUP.id ? -1 : 0,
+          unreadCount: markedUnread.has(id) ? -1 : id === PEOPLE.jan.id ? 2 : 0,
+          pinned: pinnedOnPhone.has(id),
+        }));
+      return json(res, 200, list.slice(0, Number(url.searchParams.get('limit') ?? 100)));
     }
     const unread = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/unread$`));
     if (unread && m === 'POST') {
@@ -269,6 +283,7 @@ const server = http.createServer(async (req, res) => {
       sent.push({ path: p, method: m, contactId: url.searchParams.get('contactId') });
       return json(res, 200, { about: ABOUT[url.searchParams.get('contactId')] ?? null });
     }
+    if (p === `/api/${SESSION}/chats/overview`) sent.push({ path: p, method: m });
     if (p === `/api/${SESSION}/chats/overview`) return json(res, 200, overview().slice(0, Number(url.searchParams.get('limit') ?? 20)));
     const msgs = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/messages(?:/([^/]+))?$`));
     if (msgs && m === 'GET') {
@@ -276,7 +291,9 @@ const server = http.createServer(async (req, res) => {
       const list = history.get(chat) ?? [];
       if (msgs[2]) return json(res, 200, list.find((x) => x.id === decodeURIComponent(msgs[2])) ?? null);
       const limit = Number(url.searchParams.get('limit') ?? 10);
-      return json(res, 200, [...list].reverse().slice(0, limit));
+      // downloadMedia=false: like WAHA, no file url (fetch the single message to get it)
+      const noMedia = url.searchParams.get('downloadMedia') === 'false';
+      return json(res, 200, [...list].reverse().slice(0, limit).map((x) => (noMedia && x.media ? { ...x, media: null } : x)));
     }
     if (msgs && m === 'PUT') {
       const b = await body(req);
