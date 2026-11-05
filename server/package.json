@@ -1,9 +1,9 @@
 {
-  "name": "signal-web-server",
+  "name": "messenger-web-server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Signal Web backend. No runtime dependencies: uses Node 22's built-in node:sqlite, WebSocket and http.",
+  "description": "Messenger Web backend. No runtime dependencies: uses Node 22's built-in node:sqlite, WebSocket and http.",
   "main": "dist/index.js",
   "engines": {
     "node": ">=22.13"

@@ -22,20 +22,22 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run build
-      - name: Smoke test against the mock Signal API
+      - name: Smoke test against the mock Signal API and mock WAHA
         run: |
           MOCK_LINKED=1 node mock/mock-signal-api.mjs &
+          MOCK_WA_LINKED=1 node mock/mock-waha.mjs &
           sleep 1
           DATA_DIR=$RUNNER_TEMP/data APP_PASSWORD=ci-password SIGNAL_API_URL=http://127.0.0.1:8080 \
+            WAHA_URL=http://127.0.0.1:8090 WAHA_API_KEY=test-waha-key \
             node --no-warnings=ExperimentalWarning server/dist/index.js &
           for i in $(seq 1 20); do curl -fs localhost:3000/healthz && break; sleep 0.5; done
           curl -fs -c jar -H 'content-type: application/json' -d '{"password":"ci-password"}' localhost:3000/api/login
           for i in $(seq 1 20); do
             n=$(curl -fs -b jar localhost:3000/api/conversations | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).length))')
-            [ "$n" -ge 3 ] && echo "ok: $n conversations" && exit 0
+            [ "$n" -ge 6 ] && echo "ok: $n conversations" && exit 0
             sleep 0.5
           done
-          echo "expected 3 conversations from the mock" && exit 1
+          echo "expected 6 conversations (3 Signal, 3 WhatsApp) from the mocks" && exit 1
 
   docker:
     needs: check

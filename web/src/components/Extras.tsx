@@ -28,7 +28,7 @@ function Dialog({ title, onClose, children, label }: { title: string; onClose: (
 
 // ---------------------------------------------------------------------------
 
-export function PollView({ m }: { m: Message }) {
+export function PollView({ m, canEnd = true }: { m: Message; canEnd?: boolean }) {
   const poll = m.poll!;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +92,7 @@ export function PollView({ m }: { m: Message }) {
         <span>
           {poll.totalVoters} {poll.totalVoters === 1 ? 'person voted' : 'people voted'}
         </span>
-        {m.outgoing && !poll.closed && (
+        {m.outgoing && !poll.closed && canEnd && (
           <button className="link-btn" onClick={() => void end()}>
             End poll
           </button>

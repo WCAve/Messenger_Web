@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { SignalState } from '../types';
 
 /** Shown when no Signal account is linked yet: the QR code to scan from the phone. */
-export function LinkScreen() {
+export function LinkScreen({ onClose }: { onClose?: () => void } = {}) {
   const [src, setSrc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
@@ -36,7 +36,7 @@ export function LinkScreen() {
     <main className="gate">
       <section className="gate-card link-card">
         <div className="link-copy">
-          <h1>Link your phone</h1>
+          <h1>Link Signal</h1>
           <ol>
             <li>Open Signal on your phone.</li>
             <li>
@@ -47,8 +47,13 @@ export function LinkScreen() {
             </li>
           </ol>
           <p className="muted">
-            Signal Web becomes a linked device, like Signal Desktop. Messages from before linking stay on your phone; new ones show up here.
+            Messenger Web becomes a linked device, like Signal Desktop. Messages from before linking stay on your phone; new ones show up here.
           </p>
+          {onClose && (
+            <button className="btn" onClick={onClose}>
+              Back to chats
+            </button>
+          )}
         </div>
         <div className="qr-frame" aria-live="polite">
           {src ? <img src={src} alt="Signal device-link QR code" width={232} height={232} /> : <div className="qr-placeholder">{error ? '' : 'Getting a code…'}</div>}

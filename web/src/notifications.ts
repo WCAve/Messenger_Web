@@ -24,6 +24,6 @@ export async function requestNotifications(): Promise<NotifyState> {
 }
 
 export function testNotification() {
-  const n = new Notification('Signal Web', { body: 'Notifications are working.', icon: '/icon.svg', tag: 'signal-web-test' });
+  const n = new Notification('Messenger Web', { body: 'Notifications are working.', icon: '/icon.svg', tag: 'messenger-web-test' });
   setTimeout(() => n.close(), 6000);
 }

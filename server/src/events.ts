@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export type ServerEvent =
   | { type: 'state'; state: unknown }
+  | { type: 'wastate'; state: unknown } // WhatsApp connection
   | { type: 'conversation'; conversation: unknown }
   | { type: 'message'; message: unknown }
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }

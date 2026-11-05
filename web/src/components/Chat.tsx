@@ -5,7 +5,8 @@ import { type ComposerMention, composerToRich, messageToComposer, pieces } from 
 import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertMessages, useStore } from '../store';
-import type { Attachment, Conversation, LinkPreview, Message } from '../types';
+import type { Attachment, Conversation, LinkPreview, Message, Network } from '../types';
+import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { PollDialog, PollView } from './Extras';
@@ -26,7 +27,7 @@ export interface LightboxItem {
 const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal allows edits for 24 hours
 
 /** Your own sent text message, less than 24 hours old (Signal's edit rules). */
-export function canEdit(m: Message) {
+export function canEdit(m: Message, network: Network = 'signal') {
   return (
     m.outgoing &&
     m.kind === 'message' &&
@@ -34,7 +35,7 @@ export function canEdit(m: Message) {
     !!m.body &&
     !m.attachments.length &&
     (m.status === 'sent' || m.status === 'delivered' || m.status === 'read') &&
-    Date.now() - m.sentAt < EDIT_WINDOW_MS
+    Date.now() - m.sentAt < (network === 'whatsapp' ? capsFor({ network }).editWindowMs : EDIT_WINDOW_MS)
   );
 }
 
@@ -48,7 +49,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const messages = useStore((s) => s.messages[id]);
   const hasMore = useStore((s) => s.hasMore[id] ?? true);
   const typing = useStore((s) => s.typing[id] ?? NO_TYPING);
-  const connected = useStore((s) => s.signal.status === 'connected');
+  const connected = useNetworkReady(conversation.network);
+  const multiNetwork = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const panel = useStore((s) => s.panel?.kind ?? null);
   const [chatMenu, setChatMenu] = useState(false);
   const hasNewer = useStore((s) => s.hasNewer[id] ?? false);
@@ -125,7 +127,14 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           <Icon name="back" />
         </button>
         <button className="chat-head-main" onClick={openInfo} title={conversation.kind === 'group' ? 'Group info' : 'Contact info'}>
-          <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={conversation.kind === 'group'} size={40} src={conversation.avatar} />
+          <Avatar
+            name={conversation.title}
+            seed={String(conversation.number ?? conversation.title)}
+            group={conversation.kind === 'group'}
+            size={40}
+            src={conversation.avatar}
+            network={multiNetwork ? conversation.network : undefined}
+          />
           <span className="chat-head-text">
             <h2>
               {conversation.title}
@@ -376,6 +385,7 @@ function MessageList({
         key={m.id}
         m={m}
         group={conversation.kind === 'group'}
+        network={conversation.network}
         continued={continued}
         selected={selected === m.id}
         onSelect={() => setSelected((s) => (s === m.id ? null : m.id))}
@@ -395,7 +405,7 @@ function MessageList({
         <div className="messages-inner">
           {!hasMore && (
             <p className="history-start">
-              {messages.length ? 'Start of the history on Signal Web. Earlier messages are on your phone.' : 'No messages yet. Say hi.'}
+              {messages.length ? 'Start of the history on Messenger Web. Earlier messages are on your phone.' : 'No messages yet. Say hi.'}
             </p>
           )}
           {items}
@@ -512,6 +522,7 @@ function GifVideo({ a, onLoad }: { a: Attachment; onLoad?: () => void }) {
 const MessageItem = memo(function MessageItem({
   m,
   group,
+  network,
   continued,
   selected,
   onSelect,
@@ -524,6 +535,7 @@ const MessageItem = memo(function MessageItem({
 }: {
   m: Message;
   group: boolean;
+  network: Network;
   continued: boolean;
   selected: boolean;
   onSelect: () => void;
@@ -625,7 +637,7 @@ const MessageItem = memo(function MessageItem({
             <em>Sticker</em>
           </p>
         ) : m.kind === 'poll' && m.poll ? (
-          <PollView m={m} />
+          <PollView m={m} canEnd={capsFor({ network }).endPoll} />
         ) : (
           m.body && (
             <p className="body">
@@ -683,7 +695,7 @@ const MessageItem = memo(function MessageItem({
               <Icon name="reply" size={18} />
             </button>
           )}
-          {canEdit(m) && (
+          {canEdit(m, network) && (
             <button className="icon-btn sm" onClick={() => onEdit(m)} aria-label="Edit" title="Edit (↑ in an empty message box edits your last message)">
               <Icon name="pencil" size={17} />
             </button>
@@ -1195,7 +1207,7 @@ function Composer({
       // Like Signal Desktop/Slack: ↑ in an empty box edits your last message.
       const list = getState().messages[id] ?? [];
       const last = [...list].reverse().find((m) => m.outgoing && !m.deleted && m.kind !== 'system');
-      if (last && canEdit(last)) {
+      if (last && canEdit(last, conversation.network)) {
         e.preventDefault();
         clearReply();
         setEditing(last);
@@ -1236,6 +1248,7 @@ function Composer({
           tab={reactTo ? 'emoji' : panel}
           onTab={setPanel}
           allowGif={!reactTo}
+          allowStickers={capsFor(conversation).stickers}
           title={reactTo ? 'React' : undefined}
           onEmoji={(e) => (reactTo ? void react(e) : insertAtCaret(e))}
           onGif={sendGif}
@@ -1383,7 +1396,7 @@ function Composer({
           ref={area}
           rows={1}
           value={text}
-          placeholder={disabled ? 'Waiting for Signal…' : 'Message'}
+          placeholder={disabled ? `Waiting for ${NETWORK_LABEL[conversation.network]}…` : 'Message'}
           title="*bold*  _italic_  ~strike~  `code`  ||spoiler||"
           spellCheck
           onChange={(e) => onChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}

@@ -46,6 +46,8 @@ export interface ConversationRow {
   expire_timer: number;
   pinned_at: number | null;
   muted_until: number;
+  network: 'signal' | 'whatsapp';
+  wa_id: string | null;
 }
 
 export interface Poll {
@@ -111,6 +113,7 @@ export interface MessageRow {
   expires_in: number;
   expires_at: number | null;
   poll: string | null;
+  ext_id: string | null;
 }
 
 /** Hooks other modules plug into (avoids import cycles). */
@@ -136,6 +139,18 @@ export const self = {
   },
   is(uuid?: string | null, number?: string | null): boolean {
     return (!!uuid && uuid === this.uuid) || (!!number && number === this.number);
+  },
+  /** Your own WhatsApp ids (phone-number id and lid). */
+  get waIds(): string[] {
+    return (kvGet('wa_me') ?? '').split(',').filter(Boolean);
+  },
+  set waIds(v: string[]) {
+    kvSet('wa_me', v.filter(Boolean).join(','));
+  },
+  isWa(jid?: string | null): boolean {
+    if (!jid) return false;
+    const bare = jid.replace(/:\d+@/, '@').replace('@s.whatsapp.net', '@c.us');
+    return this.waIds.includes(bare);
   },
 };
 
@@ -231,7 +246,50 @@ export function contactByKeyOrId(key: string): ContactRow | undefined {
   return contactByKey.get(key) ?? findContact(key, key);
 }
 
+// ---------- WhatsApp people ----------
+
+export interface WaContactRow {
+  jid: string;
+  number: string | null;
+  name: string | null;
+  push_name: string | null;
+}
+
+const waByJid = db.prepare<[string], WaContactRow>('SELECT * FROM wa_contacts WHERE jid = ?');
+
+/** "31612345678@c.us" → "+31612345678"; lids and groups have no number. */
+export function waNumberOf(jid: string): string | null {
+  const m = /^(\d{6,15})@(c\.us|s\.whatsapp\.net)$/.exec(jid);
+  return m ? '+' + m[1] : null;
+}
+
+export function upsertWaContact(c: { jid: string; name?: string | null; pushName?: string | null; number?: string | null }) {
+  if (!c.jid || c.jid.endsWith('@g.us')) return;
+  const cur = waByJid.get(c.jid);
+  db.prepare(
+    `INSERT INTO wa_contacts (jid, number, name, push_name, updated_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(jid) DO UPDATE SET number = excluded.number, name = excluded.name, push_name = excluded.push_name, updated_at = excluded.updated_at`,
+  ).run(
+    c.jid,
+    c.number ?? cur?.number ?? waNumberOf(c.jid),
+    c.name !== undefined ? c.name || null : cur?.name ?? null,
+    c.pushName !== undefined ? c.pushName || cur?.push_name || null : cur?.push_name ?? null,
+    Date.now(),
+  );
+}
+
+export function waContactName(jid: string): string {
+  if (self.isWa(jid)) return 'You';
+  const c = waByJid.get(jid);
+  return c?.name || c?.push_name || c?.number || waNumberOf(jid) || 'Unknown';
+}
+
+export function waContact(jid: string) {
+  return waByJid.get(jid);
+}
+
 export function avatarUrlForKey(key: string): string | null {
+  if (key.startsWith('wa:')) return `/api/avatars/wa/${encodeURIComponent(key.slice(3))}`;
   const c = contactByKeyOrId(key);
   const id = c?.uuid || c?.number;
   return c?.has_avatar && id ? `/api/avatars/contact/${encodeURIComponent(c.key)}?v=${avatarRev('profile', id)}` : null;
@@ -239,6 +297,7 @@ export function avatarUrlForKey(key: string): string | null {
 
 export function nameForKey(key: string): string {
   if (key === 'self') return 'You';
+  if (key.startsWith('wa:')) return waContactName(key.slice(3));
   const c = contactByKey.get(key) ?? findContact(key, key);
   return contactName(c, key);
 }
@@ -356,11 +415,17 @@ export function pinnedCount(): number {
 }
 
 export function recipientFor(conv: ConversationRow): string {
+  if (conv.network === 'whatsapp') return conv.wa_id!;
   if (conv.kind === 'group') return groupRecipientId(conv.group_id!);
   return conv.peer_number || conv.peer_uuid!;
 }
 
 export function conversationTitle(conv: ConversationRow): string {
+  if (conv.network === 'whatsapp') {
+    if (conv.kind === 'group') return conv.group_name || 'WhatsApp group';
+    if (self.isWa(conv.wa_id)) return 'Message yourself';
+    return waContactName(conv.wa_id!);
+  }
   if (conv.kind === 'group') return conv.group_name || 'Unnamed group';
   if (self.is(conv.peer_uuid, conv.peer_number)) return 'Note to Self';
   return contactName(findContact(conv.peer_uuid, conv.peer_number), conv.peer_number || conv.peer_uuid);
@@ -433,8 +498,9 @@ export function conversationDto(row: ConversationRow) {
   return {
     id: conv.id,
     kind: conv.kind,
+    network: conv.network,
     title: conversationTitle(conv),
-    number: conv.kind === 'direct' ? conv.peer_number : null,
+    number: conv.kind !== 'direct' ? null : conv.network === 'whatsapp' ? waContact(conv.wa_id!)?.number ?? waNumberOf(conv.wa_id!) : conv.peer_number,
     username: peer?.username ?? null,
     avatar: conversationAvatarUrl(conv, peer),
     members,
@@ -457,6 +523,7 @@ export function conversationDto(row: ConversationRow) {
 export type ConversationDto = ReturnType<typeof conversationDto>;
 
 function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string | null {
+  if (conv.network === 'whatsapp') return `/api/avatars/wa/${encodeURIComponent(conv.wa_id!)}`;
   // Groups: always offered; it 404s (and that is cached) when the group has no picture.
   if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}?v=${avatarRev('group', groupRecipientId(conv.group_id!))}`;
   const id = conv.peer_uuid || conv.peer_number;
@@ -476,6 +543,7 @@ export interface GroupMember {
 /** Group members: "You" first, then admins, then everyone else alphabetically; unknown people last. */
 export function groupMembers(conv: ConversationRow): GroupMember[] {
   if (!conv.group_members) return [];
+  if (conv.network === 'whatsapp') return waGroupMembers(conv);
   const ids: string[] = JSON.parse(conv.group_members);
   const admins = new Set<string>(conv.group_admins ? JSON.parse(conv.group_admins) : []);
   const seen = new Set<string>();
@@ -499,6 +567,80 @@ export function groupMembers(conv: ConversationRow): GroupMember[] {
   }
   const rank = (m: GroupMember) => (m.key === 'self' ? 0 : m.name === 'Unknown' ? 3 : m.admin ? 1 : 2);
   return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+function waGroupMembers(conv: ConversationRow): GroupMember[] {
+  const keys: string[] = JSON.parse(conv.group_members!);
+  const admins = new Set<string>(conv.group_admins ? JSON.parse(conv.group_admins) : []);
+  const list = keys.map((key) => {
+    const jid = key.slice(3);
+    const isSelf = key === 'self';
+    const c = isSelf ? undefined : waContact(jid);
+    return {
+      key,
+      name: isSelf ? 'You' : waContactName(jid),
+      number: isSelf ? null : c?.number ?? waNumberOf(jid),
+      username: null,
+      about: null,
+      admin: admins.has(key),
+      avatar: isSelf ? null : avatarUrlForKey(key),
+    };
+  });
+  const rank = (m: GroupMember) => (m.key === 'self' ? 0 : m.name === 'Unknown' ? 3 : m.admin ? 1 : 2);
+  return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+}
+
+/** WhatsApp people with a name, for the "new chat" picker. */
+export function listWaContacts() {
+  return db
+    .prepare<[], WaContactRow>('SELECT * FROM wa_contacts WHERE name IS NOT NULL OR push_name IS NOT NULL')
+    .all()
+    .filter((c) => !self.isWa(c.jid))
+    .map((c) => ({ jid: c.jid, name: c.name || c.push_name || c.number || 'Unknown', number: c.number ?? waNumberOf(c.jid) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A WhatsApp chat by its id, created on first sight. */
+export function getOrCreateWaChat(jid: string, name?: string | null): ConversationRow {
+  const group = jid.endsWith('@g.us');
+  const existing = db.prepare<[string], ConversationRow>('SELECT * FROM conversations WHERE wa_id = ?').get(jid);
+  if (existing) {
+    if (group && name && name !== existing.group_name) {
+      db.prepare('UPDATE conversations SET group_name = ? WHERE id = ?').run(name, existing.id);
+      return convById.get(existing.id)!;
+    }
+    return existing;
+  }
+  const info = db
+    .prepare("INSERT INTO conversations (kind, network, wa_id, group_name, created_at) VALUES (?, 'whatsapp', ?, ?, ?)")
+    .run(group ? 'group' : 'direct', jid, group ? name || null : null, Date.now());
+  return convById.get(Number(info.lastInsertRowid))!;
+}
+
+export function setWaGroupMembers(conversationId: number, members: string[], admins: string[]) {
+  db.prepare('UPDATE conversations SET group_members = ?, group_admins = ? WHERE id = ?').run(JSON.stringify(members), JSON.stringify(admins), conversationId);
+}
+
+export function listWaGroups(): ConversationRow[] {
+  return db.prepare<[], ConversationRow>("SELECT * FROM conversations WHERE network = 'whatsapp' AND kind = 'group'").all();
+}
+
+/** A WhatsApp message by id. Engines sometimes report only the last part ("ABCDEF") of "false_123@c.us_ABCDEF". */
+export function findMessageByExt(id: string | null | undefined): MessageRow | undefined {
+  if (!id) return undefined;
+  const exact = db.prepare<[string], MessageRow>('SELECT * FROM messages WHERE ext_id = ?').get(id);
+  if (exact) return exact;
+  const raw = id.split('_').pop()!;
+  if (!/^[A-Za-z0-9]{6,}$/.test(raw)) return undefined;
+  return db.prepare<[string], MessageRow>("SELECT * FROM messages WHERE ext_id LIKE '%\\_' || ? ESCAPE '\\'").get(raw);
+}
+
+/** WhatsApp timestamps are whole seconds: nudge by a millisecond until (chat, time, author) is free. */
+export function freeTimestamp(conversationId: number, ts: number, author: string): number {
+  const taken = db.prepare<[number, number, string], { id: number }>('SELECT id FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ?');
+  let t = ts;
+  while (taken.get(conversationId, t, author)) t++;
+  return t;
 }
 
 /** Everything the info panel shows about a chat. */
@@ -600,6 +742,7 @@ export function recordReceipt(m: MessageRow, recipient: string, kind: 'delivered
 /** Per-recipient delivery state of an outgoing message, for the "message info" view. */
 export function messageReceipts(m: MessageRow) {
   const conv = convById.get(m.conversation_id)!;
+  if (conv.network === 'whatsapp') return []; // WhatsApp only reports the overall ticks
   const rows = db
     .prepare<[number], { recipient: string; delivered_at: number | null; read_at: number | null }>(
       'SELECT recipient, delivered_at, read_at FROM message_receipts WHERE message_id = ?',
@@ -632,7 +775,7 @@ export function listGroups() {
   return db
     .prepare<[], ConversationRow>("SELECT * FROM conversations WHERE kind = 'group' ORDER BY group_name COLLATE NOCASE")
     .all()
-    .map((c) => ({ id: c.id, title: conversationTitle(c) }));
+    .map((c) => ({ id: c.id, title: conversationTitle(c), network: c.network }));
 }
 
 // ---------- messages ----------
@@ -685,13 +828,14 @@ export function insertMessage(m: {
   expiresIn?: number;
   expiresAt?: number | null;
   poll?: Poll | null;
+  extId?: string | null;
 }): MessageRow | undefined {
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO messages
         (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
-         ranges, preview, expires_in, expires_at, poll)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ranges, preview, expires_in, expires_at, poll, ext_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -713,6 +857,7 @@ export function insertMessage(m: {
       m.expiresIn ?? 0,
       m.expiresAt ?? null,
       m.poll ? JSON.stringify(m.poll) : null,
+      m.extId ?? null,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
@@ -722,7 +867,7 @@ export function insertMessage(m: {
 
 export function updateMessage(
   id: number,
-  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll'>>,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id'>>,
 ) {
   const keys = Object.keys(fields);
   if (!keys.length) return msgById.get(id);

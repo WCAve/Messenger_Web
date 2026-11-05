@@ -19,7 +19,8 @@ export type SignalStatus =
   | 'wrong_mode' // Signal API isn't in json-rpc mode
   | 'unlinked' // no account linked yet → show QR code
   | 'connecting'
-  | 'connected';
+  | 'connected'
+  | 'disabled'; // SIGNAL_API_URL=off: WhatsApp only
 
 export interface SignalState {
   status: SignalStatus;
@@ -178,6 +179,10 @@ export async function refreshDirectory() {
 
 export function startSignal(logger: Logger) {
   log = logger;
+  if (!config.signalEnabled) {
+    setState({ status: 'disabled' });
+    return;
+  }
   ingestHooks.log = (m, err) => log.warn(`ingest: ${m}${err ? ': ' + (err as Error).message : ''}`);
   ingestHooks.debug = (m) => log.debug?.(`ingest: ${m}`);
   ingestHooks.onGroupChanged = () => {

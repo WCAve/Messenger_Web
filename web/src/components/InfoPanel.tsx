@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import { jumpToMessage } from '../jump';
+import { NETWORK_LABEL, capsFor } from '../networks';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
 import { TIMER_OPTIONS, durationLabel, formatDay, formatListTime, formatSize, formatTime, squareAvatar } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
@@ -86,19 +87,19 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
       <PanelHead title={group ? 'Group info' : 'Contact info'} />
       <div className="panel-body">
         <section className="panel-hero">
-          {group ? (
+          {group && capsFor(conversation).groupPhoto ? (
             <button className="profile-photo" onClick={() => photoInput.current?.click()} title="Change group picture" aria-label="Change group picture" disabled={photoBusy}>
               <Avatar key={conversation.avatar ?? ''} name={conversation.title} seed={String(conversation.title)} group size={120} src={conversation.avatar} />
               <span className="photo-overlay">{photoBusy ? <span className="spinner small" /> : <Icon name="camera" size={26} />}</span>
             </button>
           ) : (
-            <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} size={120} src={conversation.avatar} />
+            <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={group} size={120} src={conversation.avatar} />
           )}
           <input ref={photoInput} type="file" accept="image/*" hidden onChange={(e) => (void changeGroupPhoto(e.target.files?.[0]), (e.target.value = ''))} />
           <h3>{conversation.title}</h3>
           <p className="muted">
             {group
-              ? `Group · ${info?.memberCount ?? conversation.members?.length ?? 0} members`
+              ? `${conversation.network === 'whatsapp' ? 'WhatsApp group' : 'Group'} · ${info?.memberCount ?? conversation.members?.length ?? 0} members`
               : [conversation.number, conversation.username ? '@' + conversation.username : null].filter(Boolean).join('  ')}
           </p>
         </section>
@@ -117,7 +118,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
           </section>
         )}
 
-        <DisappearingSection conversation={conversation} />
+        {capsFor(conversation).timer && <DisappearingSection conversation={conversation} />}
 
         <section className="panel-section">
           <div className="media-tabs" role="tablist">
@@ -311,7 +312,7 @@ export function SearchPanel({ conversation }: { conversation: Conversation }) {
         </div>
         {error && <p className="form-error pad">{error}</p>}
         {results && !results.length && <p className="muted panel-empty">No messages found.</p>}
-        {!results && <p className="muted panel-empty">Search the messages Signal Web has for this chat.</p>}
+        {!results && <p className="muted panel-empty">Search the messages Messenger Web has for this chat.</p>}
         <ul className="search-results">
           {results?.map((r) => (
             <li key={r.id}>
@@ -370,6 +371,7 @@ export function MessageInfoPanel({ messageId }: { messageId: number }) {
   const delivered = data?.recipients.filter((r) => !r.readAt && r.deliveredAt) ?? [];
   const waiting = data?.recipients.filter((r) => !r.readAt && !r.deliveredAt) ?? [];
   const m = data?.message;
+  const conv = useStore((s) => (m ? s.conversations[m.conversationId] : undefined));
 
   const list = (title: string, people: Recipient[], time: (r: Recipient) => number | null) =>
     people.length > 0 && (
@@ -413,7 +415,11 @@ export function MessageInfoPanel({ messageId }: { messageId: number }) {
         {list('Read by', read, (r) => r.readAt)}
         {list('Delivered to', delivered, (r) => r.deliveredAt)}
         {list(m?.status === 'pending' ? 'Sending to' : 'Not delivered yet', waiting, () => null)}
-        {data && !data.recipients.length && <p className="muted panel-empty">No delivery information yet.</p>}
+        {data && !data.recipients.length && (
+          <p className="muted panel-empty">
+            {conv?.network === 'whatsapp' ? 'WhatsApp only reports whether everyone has received or read it, shown by the ticks.' : 'No delivery information yet.'}
+          </p>
+        )}
         <p className="muted panel-note">
           People who turned off read receipts in Signal never show up under “Read by”.
         </p>

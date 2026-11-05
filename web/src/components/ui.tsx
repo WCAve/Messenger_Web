@@ -63,7 +63,30 @@ export function Icon({ name, size = 22, title }: { name: keyof typeof PATHS | st
 
 const failedAvatars = new Set<string>(); // URLs that 404'd this session: don't retry on every render
 
-export function Avatar({ name, seed, group, size = 44, src }: { name: string; seed: string; group?: boolean; size?: number; src?: string | null }) {
+/** Small mark on an avatar saying which network the chat is on. */
+export function NetworkBadge({ network }: { network: 'signal' | 'whatsapp' }) {
+  return (
+    <span className={`net-badge net-${network}`} title={network === 'whatsapp' ? 'WhatsApp' : 'Signal'} aria-label={network === 'whatsapp' ? 'WhatsApp' : 'Signal'}>
+      {network === 'whatsapp' ? 'W' : 'S'}
+    </span>
+  );
+}
+
+export function Avatar({
+  name,
+  seed,
+  group,
+  size = 44,
+  src,
+  network,
+}: {
+  name: string;
+  seed: string;
+  group?: boolean;
+  size?: number;
+  src?: string | null;
+  network?: 'signal' | 'whatsapp';
+}) {
   const hue = hueFor(seed);
   const [failed, setFailed] = useState(() => !src || failedAvatars.has(src));
   useEffect(() => setFailed(!src || failedAvatars.has(src)), [src]);
@@ -84,6 +107,7 @@ export function Avatar({ name, seed, group, size = 44, src }: { name: string; se
       ) : (
         initials(name)
       )}
+      {network && <NetworkBadge network={network} />}
     </span>
   );
 }

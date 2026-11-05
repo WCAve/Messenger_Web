@@ -1,6 +1,6 @@
 /** App state in one small external store (useSyncExternalStore), fed by the API and the event stream. */
 import { useSyncExternalStore } from 'react';
-import type { Conversation, Message, ServerEvent, SignalState } from './types';
+import type { Conversation, Message, ServerEvent, SignalState, WaState } from './types';
 
 export interface Typing {
   author: string;
@@ -24,6 +24,7 @@ function loadDrafts(): Record<number, Draft> {
 
 export interface State {
   signal: SignalState;
+  whatsapp: WaState;
   live: boolean; // event stream connected
   conversations: Record<number, Conversation>;
   messages: Record<number, Message[]>; // by conversation, sorted by sentAt
@@ -46,6 +47,7 @@ export interface State {
 
 let state: State = {
   signal: { status: 'starting' },
+  whatsapp: { status: 'disabled' },
   live: false,
   conversations: {},
   messages: {},
@@ -142,6 +144,9 @@ export function applyEvent(e: ServerEvent) {
   switch (e.type) {
     case 'state':
       setState({ signal: e.state });
+      break;
+    case 'wastate':
+      setState({ whatsapp: e.state });
       break;
     case 'conversation':
       upsertConversation(e.conversation);

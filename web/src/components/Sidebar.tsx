@@ -1,7 +1,7 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
-import type { Conversation, DirectoryContact, SearchResult } from '../types';
+import type { Conversation, SearchResult } from '../types';
 import { jumpToMessage } from '../jump';
 import { Highlight } from './InfoPanel';
 import { formatListTime } from '../util';
@@ -14,7 +14,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const conversations = useStore((s) => s.conversations);
   const activeId = useStore((s) => s.activeId);
   const typing = useStore((s) => s.typing);
-  const account = useStore((s) => s.signal.account);
+  const account = useStore((s) => [s.signal.account, s.whatsapp.me].filter(Boolean).join(" · "));
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'list' | 'new' | 'settings' | 'archived'>('list');
   const drafts = useStore((s) => s.drafts);
@@ -71,7 +71,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           </button>
           <h2>Archived</h2>
         </header>
-        <p className="muted archived-note">Archived chats come back when a new message arrives, unless they're muted. Archiving only applies to Signal Web.</p>
+        <p className="muted archived-note">Archived chats come back when a new message arrives, unless they're muted. Archiving only applies to Messenger Web.</p>
         <nav className="chat-list" aria-label="Archived chats">
           {list.map((c) => (
             <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
@@ -87,7 +87,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         <div className="me">
           <img src="/icon.svg" alt="" width={30} height={30} />
           <div>
-            <strong>Signal Web</strong>
+            <strong>Messenger Web</strong>
             <span>{account}</span>
           </div>
         </div>
@@ -328,13 +328,14 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
 }
 
 function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolean; typing: boolean; draft?: string }) {
+  const multi = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const lm = c.lastMessage;
   const [menu, setMenu] = useState(false);
   const muted = c.mutedUntil > Date.now();
   return (
     <div className={`chat-row-wrap${menu ? ' menu-open' : ''}${active ? ' active' : ''}`}>
     <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
-      <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} />
+      <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} network={multi ? c.network : undefined} />
       <span className="chat-row-main">
         <span className="chat-row-top">
           <span className="chat-title">{c.title}</span>
@@ -374,17 +375,20 @@ function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolea
 }
 
 function NewChat({ onClose }: { onClose: () => void }) {
-  const [dir, setDir] = useState<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] } | null>(null);
+  const [dir, setDir] = useState<Awaited<ReturnType<typeof api.directory>> | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const signalOn = useStore((s) => s.signal.status !== 'disabled');
+  const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
+  const multi = signalOn && waOn;
 
   useEffect(() => {
     api.directory().then(setDir).catch((e) => setError(e.message));
     input.current?.focus();
   }, []);
 
-  async function open(b: { number?: string; uuid?: string }) {
+  async function open(b: Parameters<typeof api.startChat>[0]) {
     try {
       const c = await api.startChat(b);
       upsertConversation(c);
@@ -397,14 +401,21 @@ function NewChat({ onClose }: { onClose: () => void }) {
 
   const query = q.trim().toLowerCase();
   const looksLikeNumber = /^\+?[\d\s()-]{7,}$/.test(q.trim());
-  const contacts = (dir?.contacts ?? []).filter((c) => !query || c.name.toLowerCase().includes(query) || c.number?.includes(query.replace(/\s/g, '')));
+  const typed = q.trim().startsWith('+') ? q.trim() : '+' + q.trim();
+  const digits = query.replace(/[\s()+-]/g, '');
+  const matches = (name: string, number: string | null) => !query || name.toLowerCase().includes(query) || (!!digits && !!number?.replace(/\D/g, '').includes(digits));
+  const contacts = signalOn ? (dir?.contacts ?? []).filter((c) => matches(c.name, c.number)) : [];
+  const waContacts = waOn ? (dir?.waContacts ?? []).filter((c) => matches(c.name, c.number)) : [];
   const groups = (dir?.groups ?? []).filter((g) => !query || g.title.toLowerCase().includes(query));
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (looksLikeNumber) open({ number: q.trim().startsWith('+') ? q.trim() : '+' + q.trim() });
+    if (looksLikeNumber) open(signalOn ? { number: typed } : { number: typed, network: 'whatsapp' });
     else if (contacts[0]) open({ uuid: contacts[0].uuid ?? undefined, number: contacts[0].number ?? undefined });
+    else if (waContacts[0]) open({ network: 'whatsapp', jid: waContacts[0].jid });
   }
+
+  const empty = dir && !contacts.length && !waContacts.length && !groups.length && !looksLikeNumber;
 
   return (
     <aside className="sidebar">
@@ -420,34 +431,52 @@ function NewChat({ onClose }: { onClose: () => void }) {
       </form>
       {error && <p className="form-error pad">{error}</p>}
       <nav className="chat-list">
-        {looksLikeNumber && (
-          <button className="chat-row" onClick={submit}>
-            <Avatar name="#" seed={q} />
+        {looksLikeNumber && signalOn && (
+          <button className="chat-row" onClick={() => open({ number: typed })}>
+            <Avatar name="#" seed={q} network={multi ? 'signal' : undefined} />
             <span className="chat-row-main">
-              <span className="chat-title">Message {q.trim()}</span>
+              <span className="chat-title">Message {typed}{multi ? ' on Signal' : ''}</span>
+            </span>
+          </button>
+        )}
+        {looksLikeNumber && waOn && (
+          <button className="chat-row" onClick={() => open({ number: typed, network: 'whatsapp' })}>
+            <Avatar name="#" seed={q + 'wa'} network={multi ? 'whatsapp' : undefined} />
+            <span className="chat-row-main">
+              <span className="chat-title">Message {typed}{multi ? ' on WhatsApp' : ''}</span>
             </span>
           </button>
         )}
         {groups.length > 0 && <h3 className="list-heading">Groups</h3>}
         {groups.map((g) => (
           <button key={g.id} className="chat-row" onClick={() => (setState({ activeId: g.id }), onClose())}>
-            <Avatar name={g.title} seed={g.title} group />
+            <Avatar name={g.title} seed={g.title} group network={multi ? g.network : undefined} />
             <span className="chat-row-main">
               <span className="chat-title">{g.title}</span>
             </span>
           </button>
         ))}
-        {contacts.length > 0 && <h3 className="list-heading">Contacts</h3>}
+        {contacts.length > 0 && <h3 className="list-heading">{multi ? 'Signal contacts' : 'Contacts'}</h3>}
         {contacts.map((c) => (
           <button key={c.key} className="chat-row" onClick={() => open({ uuid: c.uuid ?? undefined, number: c.number ?? undefined })}>
-            <Avatar name={c.name} seed={String(c.number ?? c.name)} />
+            <Avatar name={c.name} seed={String(c.number ?? c.name)} network={multi ? 'signal' : undefined} />
             <span className="chat-row-main">
               <span className="chat-title">{c.name}</span>
               <span className="preview">{c.number ?? (c.username ? '@' + c.username : '')}</span>
             </span>
           </button>
         ))}
-        {dir && !contacts.length && !groups.length && !looksLikeNumber && (
+        {waContacts.length > 0 && <h3 className="list-heading">{multi ? 'WhatsApp contacts' : 'Contacts'}</h3>}
+        {waContacts.map((c) => (
+          <button key={c.jid} className="chat-row" onClick={() => open({ network: 'whatsapp', jid: c.jid })}>
+            <Avatar name={c.name} seed={String(c.number ?? c.name)} network={multi ? 'whatsapp' : undefined} src={`/api/avatars/wa/${encodeURIComponent(c.jid)}`} />
+            <span className="chat-row-main">
+              <span className="chat-title">{c.name}</span>
+              <span className="preview">{c.number ?? ''}</span>
+            </span>
+          </button>
+        ))}
+        {empty && (
           <div className="empty-list">
             <p>{query ? 'No contacts match. Type a full phone number to message someone new.' : 'Contacts appear here once your phone has synced them. This can take a few minutes after linking.'}</p>
           </div>

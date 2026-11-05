@@ -1,6 +1,7 @@
 # Plain Docker / Compose setup (on Unraid, use the templates in unraid/ instead).
-#   APP_PASSWORD=choose-a-long-password docker compose up -d
-# then open http://<host>:3000 and scan the QR code with your phone.
+#   APP_PASSWORD=choose-a-long-password WAHA_API_KEY=choose-a-key docker compose up -d
+# then open http://<host>:3000, link Signal with the QR code, and link WhatsApp in Settings.
+# Remove a service (and its URL below) if you only want one of the two networks.
 services:
   signal-api:
     image: bbernhard/signal-cli-rest-api:latest
@@ -8,24 +9,37 @@ services:
     restart: unless-stopped
     environment:
       - MODE=json-rpc-native
-      - JSON_RPC_RECEIVE_MODE=manual # keep messages queued on Signal's servers while Signal Web is down
+      - JSON_RPC_RECEIVE_MODE=manual # keep messages queued on Signal's servers while Messenger Web is down
     volumes:
       - ./data/signal-api:/home/.local/share/signal-cli
-    # No ports published: only Signal Web talks to it.
+    # No ports published: only Messenger Web talks to it.
 
-  signal-web:
-    image: ghcr.io/wcave/signal_web:latest
-    container_name: signal-web
+  waha:
+    image: devlikeapro/waha:latest
+    container_name: waha
     restart: unless-stopped
-    depends_on: [signal-api]
+    environment:
+      - WAHA_API_KEY=${WAHA_API_KEY:?set WAHA_API_KEY}
+      - WHATSAPP_DEFAULT_ENGINE=GOWS
+    volumes:
+      - ./data/waha:/app/.sessions
+    # No ports published: only Messenger Web talks to it.
+
+  messenger-web:
+    image: ghcr.io/wcave/messenger_web:latest
+    container_name: messenger-web
+    restart: unless-stopped
+    depends_on: [signal-api, waha]
     environment:
       - APP_PASSWORD=${APP_PASSWORD:?set APP_PASSWORD}
-      - SIGNAL_API_URL=http://signal-api:8080
+      - SIGNAL_API_URL=http://signal-api:8080 # or "off" for WhatsApp only
+      - WAHA_URL=http://waha:3000 # leave empty for Signal only
+      - WAHA_API_KEY=${WAHA_API_KEY}
       - GIPHY_API_KEY=${GIPHY_API_KEY:-} # optional, enables the GIF picker
       - PUID=1000
       - PGID=1000
       - TZ=Europe/Amsterdam
     volumes:
-      - ./data/signal-web:/data
+      - ./data/messenger-web:/data
     ports:
       - "3000:3000"

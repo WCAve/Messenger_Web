@@ -162,6 +162,21 @@ const MIGRATIONS: string[] = [
   ALTER TABLE conversations ADD COLUMN pinned_at INTEGER;
   ALTER TABLE conversations ADD COLUMN muted_until INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  -- WhatsApp (through WAHA). People are keyed "wa:<jid>" in messages, so they never mix with Signal contacts.
+  ALTER TABLE conversations ADD COLUMN network TEXT NOT NULL DEFAULT 'signal';
+  ALTER TABLE conversations ADD COLUMN wa_id TEXT;  -- chat id: …@c.us, …@g.us or …@lid
+  CREATE UNIQUE INDEX conversations_wa_id ON conversations(wa_id) WHERE wa_id IS NOT NULL;
+  ALTER TABLE messages ADD COLUMN ext_id TEXT;  -- WhatsApp message id
+  CREATE INDEX messages_ext_id ON messages(ext_id) WHERE ext_id IS NOT NULL;
+  CREATE TABLE wa_contacts (
+    jid TEXT PRIMARY KEY,
+    number TEXT,
+    name TEXT,        -- name in your address book
+    push_name TEXT,   -- name they set themselves
+    updated_at INTEGER
+  );
+  `,
 ];
 
 function migrate() {

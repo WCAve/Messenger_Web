@@ -1,4 +1,4 @@
-/* Signal Web — ink, porcelain, ultramarine. */
+/* Messenger Web — ink, porcelain, ultramarine. */
 :root {
   --ink: #1b1f3b;
   --ink-2: #4c5272;
@@ -2683,4 +2683,56 @@ body.resizing * {
 }
 .msg.out .poll-foot .link-btn {
   color: var(--out-text);
+}
+
+/* ---------- networks ---------- */
+.avatar {
+  position: relative;
+  overflow: visible;
+}
+.avatar > img {
+  border-radius: 50%;
+}
+.net-badge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 9.5px/1 var(--font);
+  color: #fff;
+  border: 2px solid var(--sidebar);
+  box-sizing: content-box;
+}
+.net-signal {
+  background: #3a76f0;
+}
+.net-whatsapp {
+  background: #1fa855;
+}
+.wa-link {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding: 0 16px;
+}
+.wa-link ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.wa-qr {
+  background: #fff;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--mist);
+}
+.banner .link-btn {
+  color: inherit;
+  text-decoration: underline;
+  margin-left: 6px;
 }

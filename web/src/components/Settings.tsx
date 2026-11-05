@@ -4,6 +4,7 @@ import { type NotifyState, notifyState, requestNotifications, testNotification }
 import { squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
 import { Avatar, Icon } from './ui';
+import { useStore } from '../store';
 
 /** Why notifications can't work on plain http://, and how to fix it. */
 export function InsecureHelp() {
@@ -11,7 +12,7 @@ export function InsecureHelp() {
   return (
     <div className="setting-note insecure-help">
       <p>
-        <strong>Browsers only allow notifications on HTTPS pages.</strong> You opened Signal Web over plain http ({location.origin}), so the browser
+        <strong>Browsers only allow notifications on HTTPS pages.</strong> You opened Messenger Web over plain http ({location.origin}), so the browser
         blocks them without asking.
       </p>
       <p>Ways to fix it:</p>
@@ -114,7 +115,7 @@ function ProfileSection() {
   const fullName = [givenName, profile?.familyName].filter(Boolean).join(' ') || 'You';
 
   return (
-    <Section title="Profile">
+    <Section title="Signal profile">
       <div className="profile-edit">
         <button className="profile-photo" onClick={() => fileInput.current?.click()} title="Change profile picture" aria-label="Change profile picture">
           <Avatar key={shown ?? 'none'} name={fullName} seed="self" size={88} src={shown} />
@@ -156,6 +157,108 @@ function ProfileSection() {
   );
 }
 
+/** Linking and status of WhatsApp (through WAHA). */
+function WhatsAppSection() {
+  const wa = useStore((s) => s.whatsapp);
+  const [nonce, setNonce] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // QR codes expire after about 20 seconds: fetch a fresh one.
+  useEffect(() => {
+    if (wa.status !== 'scan_qr') return;
+    const t = setInterval(() => setNonce((n) => n + 1), 18_000);
+    return () => clearInterval(t);
+  }, [wa.status]);
+
+  async function run(fn: () => Promise<unknown>, done?: string) {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await fn();
+      if (done) setNotice(done);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (wa.status === 'disabled') {
+    return (
+      <Section title="WhatsApp">
+        <p className="muted setting-note">
+          Not set up. Run WAHA next to Messenger Web and set <code>WAHA_URL</code> and <code>WAHA_API_KEY</code> on the Messenger Web container.
+        </p>
+      </Section>
+    );
+  }
+  return (
+    <Section title="WhatsApp">
+      {wa.status === 'connected' && (
+        <dl className="setting-facts">
+          <dt>Linked number</dt>
+          <dd>
+            {wa.me ?? '…'}
+            {wa.name ? ` (${wa.name})` : ''}
+          </dd>
+          <dt>WAHA</dt>
+          <dd>{[wa.version, wa.engine].filter(Boolean).join(', ') || '…'}</dd>
+        </dl>
+      )}
+      {wa.importing && <p className="setting-note">Importing recent chats from WhatsApp…</p>}
+      {wa.status === 'scan_qr' && (
+        <div className="wa-link">
+          <ol>
+            <li>Open WhatsApp on your phone.</li>
+            <li>
+              Go to <strong>Settings → Linked devices</strong>.
+            </li>
+            <li>
+              Tap <strong>Link a device</strong> and scan this code.
+            </li>
+          </ol>
+          <img className="wa-qr" src={`/api/whatsapp/qr?n=${nonce}`} alt="WhatsApp link QR code" width={220} height={220} />
+          <p className="muted setting-note">
+            Using an unofficial client is against WhatsApp's terms. Personal use rarely causes problems, but your account could be banned.
+          </p>
+        </div>
+      )}
+      {(wa.status === 'starting' || wa.status === 'stopped') && (
+        <p className="setting-note">
+          <span className="spinner small" /> Starting the WhatsApp session…
+        </p>
+      )}
+      {(wa.status === 'unreachable' || wa.status === 'failed') && <p className="form-error setting-note">{wa.error}</p>}
+      {error && <p className="form-error setting-note">{error}</p>}
+      {notice && <p className="muted setting-note">{notice}</p>}
+      <div className="setting-actions">
+        {wa.status === 'connected' && (
+          <button className="btn" disabled={busy} onClick={() => void run(() => api.whatsappRefresh(), 'Contacts and groups updated.')}>
+            Refresh contacts and groups
+          </button>
+        )}
+        {wa.status === 'failed' && (
+          <button className="btn" disabled={busy} onClick={() => void run(() => api.whatsappRestart())}>
+            Restart session
+          </button>
+        )}
+        {wa.status === 'connected' && (
+          <button
+            className="btn danger"
+            disabled={busy}
+            onClick={() => confirm('Unlink WhatsApp? Messenger Web stops receiving WhatsApp messages until you link again.') && void run(() => api.whatsappLogout())}
+          >
+            Unlink WhatsApp
+          </button>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 const THEMES: { value: Prefs['theme']; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
@@ -169,6 +272,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotifyState>(notifyState);
+  const signalOn = useStore((s) => s.signal.status !== 'disabled');
 
   useEffect(() => {
     api.settings().then(setServer, (e) => setError(e.message));
@@ -206,7 +310,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   }
 
   async function logoutAll() {
-    if (!confirm('Sign out of Signal Web in every browser, including this one?')) return;
+    if (!confirm('Sign out of Messenger Web in every browser, including this one?')) return;
     await api.logoutAll().catch(() => {});
     location.reload();
   }
@@ -224,7 +328,9 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
       <div className="settings-body">
         {error && <p className="form-error pad">{error}</p>}
 
-        <ProfileSection />
+        {signalOn && <ProfileSection />}
+
+        <WhatsAppSection />
 
         <Section title="Appearance">
           <div className="setting-row">
@@ -263,7 +369,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
                 hint={
                   blocked
                     ? 'Blocked for this site. Click the lock or site-settings icon left of the address, allow notifications, and reload.'
-                    : 'For new messages while a Signal Web tab is open in the background.'
+                    : 'For new messages while a Messenger Web tab is open in the background.'
                 }
                 checked={prefs.notifications && permission === 'granted'}
                 disabled={blocked}
@@ -290,7 +396,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
         <Section title="Privacy">
           <Toggle
             label="Send read receipts"
-            hint="Others see when you've read their messages in Signal Web. Applies to every browser."
+            hint="Others see when you've read their messages in Messenger Web. Applies to every browser."
             checked={!!server?.sendReadReceipts}
             disabled={!server}
             onChange={(v) => void saveServer({ sendReadReceipts: v })}
@@ -304,7 +410,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
           />
           <Toggle
             label="Send link previews"
-            hint="When you type a link, the Signal Web server fetches that page to show its title and picture, like Signal Desktop does. The site sees your server's address."
+            hint="When you type a link, the Messenger Web server fetches that page to show its title and picture, like Signal Desktop does. The site sees your server's address."
             checked={!!server?.sendLinkPreviews}
             disabled={!server}
             onChange={(v) => void saveServer({ sendLinkPreviews: v })}

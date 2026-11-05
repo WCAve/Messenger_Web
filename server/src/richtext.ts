@@ -234,3 +234,134 @@ export function toApiMarkup(text: string, styles: StyleRange[]): { message: stri
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// WhatsApp formatting lives in the text itself: *bold* _italic_ ~strike~ ```mono``` `mono`.
+
+const WA_MARKERS: { mark: string; style: Style }[] = [
+  { mark: '```', style: 'MONOSPACE' },
+  { mark: '*', style: 'BOLD' },
+  { mark: '_', style: 'ITALIC' },
+  { mark: '~', style: 'STRIKETHROUGH' },
+  { mark: '`', style: 'MONOSPACE' },
+];
+const WORD = /[\p{L}\p{N}]/u;
+const SPACE = /\s/;
+
+function waOpener(s: string, i: number, end: number) {
+  const before = s[i - 1];
+  if (before !== undefined && WORD.test(before)) return null;
+  for (const m of WA_MARKERS) {
+    if (!s.startsWith(m.mark, i)) continue;
+    const next = s[i + m.mark.length];
+    if (i + m.mark.length >= end || SPACE.test(next) || next === m.mark[0]) return null;
+    return m;
+  }
+  return null;
+}
+
+function waCloser(s: string, from: number, end: number, m: { mark: string }) {
+  for (let j = from + 1; j + m.mark.length <= end; j++) {
+    const c = s[j - 1];
+    if (c === '\n' && m.mark !== '```') return -1;
+    if (!s.startsWith(m.mark, j) || SPACE.test(c)) continue;
+    const after = s[j + m.mark.length];
+    if (after !== undefined && (WORD.test(after) || after === m.mark[0])) continue;
+    return j;
+  }
+  return -1;
+}
+
+/** WhatsApp text → plain text with style ranges. */
+export function parseWaMarkup(input: string): { text: string; styles: StyleRange[] } {
+  let out = '';
+  const styles: StyleRange[] = [];
+  const walk = (start: number, end: number) => {
+    let i = start;
+    while (i < end) {
+      const m = waOpener(input, i, end);
+      if (m) {
+        const close = waCloser(input, i + m.mark.length, end, m);
+        if (close > 0) {
+          const s0 = out.length;
+          if (m.style === 'MONOSPACE') out += input.slice(i + m.mark.length, close);
+          else walk(i + m.mark.length, close);
+          if (out.length > s0) styles.push({ start: s0, length: out.length - s0, style: m.style });
+          i = close + m.mark.length;
+          continue;
+        }
+      }
+      out += input[i];
+      i++;
+    }
+  };
+  walk(0, input.length);
+  return { text: out, styles };
+}
+
+/**
+ * Turn ranges of the text into mentions: each range becomes one U+FFFC and the styles move along.
+ * Used for WhatsApp, where a mention is "@<number>" in the text.
+ */
+export function placeMentions(text: string, styles: StyleRange[], found: { start: number; end: number; key: string }[]): { body: string; ranges: Ranges | null } {
+  const sorted = [...found].sort((a, b) => a.start - b.start).filter((f, i, arr) => i === 0 || f.start >= arr[i - 1].end);
+  let out = '';
+  let pos = 0;
+  const mentions: MentionRange[] = [];
+  for (const f of sorted) {
+    out += text.slice(pos, f.start);
+    mentions.push({ start: out.length, length: 1, key: f.key });
+    out += PLACEHOLDER;
+    pos = f.end;
+  }
+  out += text.slice(pos);
+  const map = (p: number, isEnd: boolean) => {
+    let d = 0;
+    for (const f of sorted) {
+      if (p <= f.start) break;
+      if (p >= f.end) {
+        d += f.end - f.start - 1;
+        continue;
+      }
+      return f.start - d + (isEnd ? 1 : 0);
+    }
+    return p - d;
+  };
+  const moved = styles
+    .map((s) => ({ start: map(s.start, false), length: map(s.start + s.length, true) - map(s.start, false), style: s.style }))
+    .filter((s) => s.length > 0);
+  return { body: out, ranges: cleanRanges(out, { mentions, styles: moved }) };
+}
+
+const WA_OUT: Partial<Record<Style, string>> = { BOLD: '*', ITALIC: '_', STRIKETHROUGH: '~', MONOSPACE: '```' };
+
+/**
+ * Stored text (U+FFFC mentions + ranges) → what WhatsApp expects: "@<number>" for each mention, with
+ * the mentioned ids listed separately, and formatting as markers. Spoilers don't exist on WhatsApp.
+ */
+export function toWaText(text: string, ranges: Ranges | null, jidFor: (key: string) => string | null): { text: string; mentions: string[] } {
+  const replace = new Map<number, string>();
+  const mentioned: string[] = [];
+  for (const m of ranges?.mentions ?? []) {
+    const jid = jidFor(m.key);
+    if (!jid) continue;
+    replace.set(m.start, '@' + jid.split('@')[0]);
+    mentioned.push(jid);
+  }
+  const styles = (ranges?.styles ?? []).filter((s) => WA_OUT[s.style]);
+  const opens = new Map<number, StyleRange[]>();
+  const closes = new Map<number, StyleRange[]>();
+  for (const s of [...styles].sort((a, b) => a.start - b.start || b.length - a.length)) {
+    (opens.get(s.start) ?? opens.set(s.start, []).get(s.start)!).push(s);
+    const end = s.start + s.length;
+    (closes.get(end) ?? closes.set(end, []).get(end)!).unshift(s);
+  }
+  const mark = (s: StyleRange) => (s.style === 'MONOSPACE' && !text.slice(s.start, s.start + s.length).includes('\n') ? '`' : WA_OUT[s.style]!);
+  let out = '';
+  for (let i = 0; i <= text.length; i++) {
+    for (const s of closes.get(i) ?? []) out += mark(s);
+    for (const s of opens.get(i) ?? []) out += mark(s);
+    if (i < text.length) out += replace.get(i) ?? text[i];
+  }
+  return { text: out, mentions: [...new Set(mentioned)] };
+}

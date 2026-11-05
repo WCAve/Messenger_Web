@@ -1,4 +1,16 @@
-export type SignalStatus = 'starting' | 'unreachable' | 'wrong_mode' | 'unlinked' | 'connecting' | 'connected';
+export type SignalStatus = 'starting' | 'unreachable' | 'wrong_mode' | 'unlinked' | 'connecting' | 'connected' | 'disabled';
+
+export type Network = 'signal' | 'whatsapp';
+
+export interface WaState {
+  status: 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
+  me?: string;
+  name?: string;
+  engine?: string;
+  version?: string;
+  error?: string;
+  importing?: boolean;
+}
 
 export interface SignalState {
   status: SignalStatus;
@@ -9,6 +21,7 @@ export interface SignalState {
 
 export interface Conversation {
   id: number;
+  network: Network;
   kind: 'direct' | 'group';
   title: string;
   number: string | null;
@@ -149,6 +162,12 @@ export interface SearchResult {
   snippet: string;
 }
 
+export interface WaContact {
+  jid: string;
+  name: string;
+  number: string | null;
+}
+
 export interface DirectoryContact {
   key: string;
   uuid: string | null;
@@ -159,6 +178,7 @@ export interface DirectoryContact {
 
 export type ServerEvent =
   | { type: 'state'; state: SignalState }
+  | { type: 'wastate'; state: WaState }
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'message'; message: Message }
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }

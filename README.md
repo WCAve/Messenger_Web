@@ -1,18 +1,23 @@
 # Caution: 100% Vibe Code. No Guarantees. Do not expose to the internet. Internal use only
 
-# Signal Web
+# Messenger Web
 
-A WhatsApp-Web-style browser client for [Signal](https://signal.org), self-hosted on Unraid (or any Docker host).
-It links to your phone as a Signal device, just like Signal Desktop, and gives you your chats in any browser.
+One self-hosted, WhatsApp-Web-style browser interface for [Signal](https://signal.org) **and WhatsApp**, on Unraid or any Docker host.
+It links to your phone on each network as a linked device, like Signal Desktop and WhatsApp Web, and shows all your chats in one list.
+It started as a fork of [Signal Web](https://github.com/WCAve/Signal_Web).
 
 ![Chat view](docs/chat.png)
 
-Under the hood it talks to [bbernhard/signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api), which wraps [signal-cli](https://github.com/AsamK/signal-cli).
+```
+                         ┌─ REST + WebSocket ─▶ signal-api (signal-cli-rest-api) ─▶ Signal
+Browser ──HTTPS/SSE──▶ messenger-web
+                (UI, auth, history DB)
+                         └─ REST + WebSocket ─▶ WAHA (WhatsApp HTTP API) ──────────▶ WhatsApp
+```
 
-```
-Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  signal-api  ──▶  Signal servers
-                         (UI, auth, history DB)              (signal-cli, keys)
-```
+Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave `WAHA_URL` empty for Signal only.
+
+> **WhatsApp warning.** WAHA is an unofficial WhatsApp client. Using it is against WhatsApp's terms, and accounts can be banned, mostly ones that send in bulk. Normal personal use rarely has problems, but you take that risk.
 
 ## What works
 
@@ -23,12 +28,12 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 - Text, links, replies (quotes), reactions (quick bar plus every emoji)
 - @mentions: type `@` in a group to pick someone; mentions of you are highlighted
 - Text formatting, both ways: `*bold*`, `_italic_`, `~strikethrough~`, `` `monospace` ``, `||spoiler||` (click to reveal). Ctrl+B, Ctrl+I, Ctrl+Shift+X and Ctrl+Shift+M wrap the selection
-- Link previews, both ways: when you type an https link, Signal Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
+- Link previews, both ways: when you type an https link, Messenger Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
 - Polls: vote, create (📊 button next to the paperclip) and end your own polls
 - Forward messages (text, files, stickers) to up to 5 chats
-- Pin (up to 4), mute and archive chats from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. These stay in Signal Web; your phone keeps its own
+- Pin (up to 4), mute and archive chats from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. These stay in Messenger Web; your phone keeps its own
 - Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat
-- Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Signal Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
+- Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Messenger Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
 - Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link
@@ -45,96 +50,99 @@ Browser  ──HTTPS/SSE──▶  signal-web  ──REST + WebSocket──▶  
 
 In a group, the ticks turn into two outlined circles once anyone has received the message, and fill in once every member has read it. Message info (ⓘ on your own messages) shows exactly who has received and read it. People who switched off read receipts never count as read, so with such a member in the group the ticks stay outlined.
 
+### WhatsApp
+
+WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S** on each avatar when both are set up.
+
+- Recent chats and messages are imported once after linking (40 chats × 40 messages by default; see [Settings](#settings))
+- Text with WhatsApp formatting, replies, @mentions with suggestions, reactions, photos/videos/files both ways, voice notes and GIFs that others send
+- Edit (15 minutes, WhatsApp's limit) and delete for everyone, typing indicators, read receipts, ticks
+- Polls: see and vote, and create new ones
+- Search, pin/mute/archive, drafts and forwarding work across both networks; you can forward a Signal message to a WhatsApp chat and the other way round
+- Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls, per-person read lists and changing group pictures (do those on your phone)
+
 **Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), view-once media.
 
 Stickers are downloaded from Signal's CDN (`cdn.signal.org`) by the signal-web container and decrypted there, like Signal Desktop does, so that container needs outbound internet access.
 
 ## Install on Unraid
 
-### 1. Create the Docker network
+This assumes the setup used during development: all containers in **bridge** mode, talking to each other through the Unraid host's IP.
+In bridge mode the Signal API and WAHA ports are reachable by anything on your LAN; WAHA is protected by its API key, the Signal API has no login. Use this only on a network you trust.
 
-Both containers talk over a private network, so the Signal API is never exposed to your LAN.
+### 1. Signal API (skip for WhatsApp only)
 
-1. **Settings → Docker**: stop Docker, switch to *Advanced view*, set **Preserve user defined networks** to *Yes*, start Docker.
-2. Open the Unraid terminal and run:
+Install **Signal-API** from Community Applications and change its defaults before the first start:
 
-   ```sh
-   docker network create signal
-   # signal-api runs as uid 1000 and can't fix folder ownership itself
-   mkdir -p /mnt/user/appdata/signal-api && chown -R 1000:1000 /mnt/user/appdata/signal-api
-   ```
-
-### 2. Add the templates
-
-In the Unraid terminal:
-
-```sh
-cd /boot/config/plugins/dockerMan/templates-user
-wget -O my-signal-api.xml https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-api.xml
-wget -O my-signal-web.xml https://raw.githubusercontent.com/WCAve/Signal_Web/main/unraid/signal-web.xml
-```
-
-If the repository is private, download the two files from GitHub and copy them into that folder instead.
-
-### 3. Create the containers
-
-**Docker → Add Container**, pick the template, review, **Apply**. Do them in this order:
-
-1. **signal-api**: the defaults are right (`MODE=json-rpc-native`, `JSON_RPC_RECEIVE_MODE=manual`, network `signal`). Use `MODE=json-rpc` instead if you prefer stability over memory use: it runs signal-cli on a regular Java runtime instead of the GraalVM-compiled binary. Both use the same data, so you can switch any time.
-
-2. **signal-web**: set a **Password** (8+ characters, longer is better). Leave the Signal API URL at `http://signal-api:8080`.
-
-If the GitHub repository is private, its container image is private too, and Unraid can't pull it.
-Either make the package public (GitHub → your profile → Packages → signal_web → Package settings → Change visibility), or log in once from the Unraid terminal with a personal access token that has `read:packages`:
-
-```sh
-docker login ghcr.io -u WCAve
-```
-
-### Alternative: the Community Applications "Signal-API" template, in bridge mode
-
-You can use the existing **Signal-API** app from Community Applications instead of `unraid/signal-api.xml`, with both containers on the default bridge network. Its defaults don't work with Signal Web, so change them before the first start:
-
-1. **Mode**: set to `json-rpc` (or `json-rpc-native`). `normal` and `native` don't work with Signal Web.
-2. **Receive Schedule**: click **Remove**. Clearing the value isn't enough: in json-rpc mode signal-api refuses to start while the `AUTO_RECEIVE_SCHEDULE` variable exists, even when it's empty. It would also pull messages behind Signal Web's back.
-3. **Add another Path, Port, Variable…** → Config Type *Variable*, Key `JSON_RPC_RECEIVE_MODE`, Value `manual`.
-4. **Apply**, then fix the folder ownership in the Unraid terminal (use the path shown under *AppData*) and start the container again:
+1. **Mode**: `json-rpc` (or `json-rpc-native`).
+2. **Receive Schedule**: click **Remove** (in json-rpc mode the container refuses to start while `AUTO_RECEIVE_SCHEDULE` exists, even empty).
+3. **Add another Path, Port, Variable…** → Variable `JSON_RPC_RECEIVE_MODE` = `manual`.
+4. **Apply**, then fix the folder ownership in the Unraid terminal and start it again:
 
    ```sh
    chown -R 1000:1000 /mnt/cache/appdata/signal-api
    ```
 
-   Without this, the log repeats `Couldn't persist jsonrpc2.yaml: … permission denied`.
-5. In **signal-web**, set the network to *bridge* and the Signal API URL to the host IP and the template's port, which defaults to **8739**: `http://<unraid-ip>:8739`.
+Note the host port (the template's default is **8739**).
 
-In bridge mode the Signal API's port is reachable by anything that can reach your server, and it has no login of its own. Use this only on a network you trust; the private `signal` network above avoids it.
+### 2. WAHA (skip for Signal only)
 
-### 4. Link your phone
+Install **WAHA** (`devlikeapro/waha`). Set:
 
-Open `http://<unraid-ip>:3000`, sign in, and scan the QR code from your phone: **Signal → Settings → Linked devices → Link new device**.
-Contacts and groups sync from your phone over the next few minutes.
+- `WAHA_API_KEY`: a long random key (or use the one WAHA prints in its log on first start).
+- `WHATSAPP_DEFAULT_ENGINE`: `GOWS` is light and stable; `WEBJS` or `WPP` run a real WhatsApp Web in a headless browser (more RAM).
+- Keep its sessions folder (`/app/.sessions`) on appdata so the link survives updates.
+
+Note the host port you gave it (for example **6523**). You don't need to link WhatsApp in WAHA's own dashboard: Messenger Web creates the session and shows the QR code.
+
+### 3. Messenger Web
+
+In the Unraid terminal:
+
+```sh
+cd /boot/config/plugins/dockerMan/templates-user
+wget -O my-messenger-web.xml https://raw.githubusercontent.com/WCAve/Messenger_Web/main/unraid/messenger-web.xml
+```
+
+**Docker → Add Container** → *messenger-web*, then set:
+
+- **Password**: 8+ characters, longer is better.
+- **Signal API URL**: `http://<unraid-ip>:8739`, or `off`.
+- **WAHA URL**: `http://<unraid-ip>:6523`, and **WAHA API key**: the key from step 2. Leave the URL empty for Signal only.
+
+If the GitHub repository is private, its image is private too: make the package public (GitHub → Packages → messenger_web → Package settings), or `docker login ghcr.io -u WCAve` on Unraid with a token that has `read:packages`.
+
+### 4. Link your phones
+
+Open `http://<unraid-ip>:3000` and sign in.
+
+- **Signal:** scan the QR code (Signal → Settings → Linked devices → Link new device). With WhatsApp set up too, the app opens right away and a banner offers *Link Signal*.
+- **WhatsApp:** open **⋮ → Settings → WhatsApp** and scan the code (WhatsApp → Settings → Linked devices → Link a device). Recent chats are imported within a minute.
+
+Coming from Signal Web? **Stop the signal-web container first**: two apps reading from the same Signal API would each get only some of your messages. To keep your Signal history, copy `/mnt/user/appdata/signal-web` to `/mnt/user/appdata/messenger-web` before Messenger Web's first start. The Signal link itself lives in signal-api, so there's nothing to re-link.
 
 ### HTTPS (needed for notifications)
 
-Browsers only allow desktop notifications on HTTPS pages (or `localhost`). Over plain `http://<unraid-ip>:3000` everything else works, but notifications stay off and Signal Web explains why. Options:
+Browsers only allow desktop notifications on HTTPS pages (or `localhost`). Over plain `http://<unraid-ip>:3000` everything else works, but notifications stay off and Messenger Web explains why. Options:
 
-- **Tailscale (Unraid 7):** edit signal-web, turn on **Use Tailscale**, give it a hostname, enable **Serve**, and apply. Approve it with the link in the container log, then open the `https://…ts.net` address from any device on your tailnet.
+- **Tailscale (Unraid 7):** edit messenger-web, turn on **Use Tailscale**, give it a hostname, enable **Serve**, and apply. Approve it with the link in the container log, then open the `https://…ts.net` address from any device on your tailnet.
 - **Reverse proxy** with a certificate: Nginx Proxy Manager, SWAG or Caddy in front of port 3000. Set `SECURE_COOKIES=true`.
-- **Certificate in signal-web itself:** mount a PEM certificate and key and set `TLS_CERT_FILE` and `TLS_KEY_FILE`. Signal Web then serves HTTPS on its port.
+- **Certificate in messenger-web itself:** mount a PEM certificate and key and set `TLS_CERT_FILE` and `TLS_KEY_FILE`. Messenger Web then serves HTTPS on its port.
 - **Only for one browser on your LAN:** Firefox `about:config` → add the server's IP to `dom.securecontext.allowlist`; Chrome/Edge `chrome://flags/#unsafely-treat-insecure-origin-as-secure` → add `http://<unraid-ip>:3000`. Restart the browser.
 
-Notifications appear while a Signal Web tab is open (it may be in the background); there are no push notifications when the browser is closed.
+Notifications appear while a Messenger Web tab is open (it may be in the background); there are no push notifications when the browser is closed.
 
 ### Updating
 
-Unraid shows "update ready" for both containers as new images are published. Keep **signal-api** reasonably current: Signal stops accepting old signal-cli versions after a few months.
+Unraid shows "update ready" as new images are published. Keep **signal-api** and **WAHA** reasonably current: Signal stops accepting old signal-cli versions after a few months, and WhatsApp protocol changes need a new WAHA.
 
 ### Backups
 
 Back up both appdata folders:
 
 - `/mnt/user/appdata/signal-api` holds your Signal keys. Losing it means re-linking.
-- `/mnt/user/appdata/signal-web` holds chat history and attachments.
+- `/mnt/user/appdata/messenger-web` holds chat history and attachments.
+- WAHA's sessions folder holds your WhatsApp link. Losing it means linking again.
 
 ## Security notes
 
@@ -148,7 +156,11 @@ Back up both appdata folders:
 | Variable | Default | |
 |---|---|---|
 | `APP_PASSWORD` | (required) | Web UI password, 8+ characters |
-| `SIGNAL_API_URL` | `http://signal-api:8080` | Where the signal-api container is |
+| `SIGNAL_API_URL` | `http://signal-api:8080` | Where the signal-api container is; `off` = no Signal |
+| `WAHA_URL` | (none) | WAHA's address; empty = no WhatsApp |
+| `WAHA_API_KEY` | (none) | WAHA's API key |
+| `WAHA_SESSION` | `default` | WAHA session to use (created if missing) |
+| `WAHA_HISTORY_CHATS` / `WAHA_HISTORY_MESSAGES` | `40` / `40` | How much WhatsApp history to import once after linking |
 | `SIGNAL_NUMBER` | first linked account | Only if signal-api holds several accounts |
 | `GIPHY_API_KEY` | (none) | Enables the GIF picker. Free: [developers.giphy.com](https://developers.giphy.com/dashboard/) → Create an App → API. The browser talks to Giphy directly, as Giphy's terms require |
 | `GIPHY_RATING` | `pg-13` | Content rating for GIF results: `g`, `pg`, `pg-13`, `r` |
@@ -168,7 +180,7 @@ Back up both appdata folders:
 
 ```sh
 mkdir -p data/signal-api && sudo chown 1000:1000 data/signal-api   # signal-api runs as uid 1000
-APP_PASSWORD='a long password' docker compose up -d
+APP_PASSWORD='a long password' WAHA_API_KEY='a long random key' docker compose up -d
 ```
 
 See [docker-compose.yml](docker-compose.yml).
@@ -180,9 +192,11 @@ Requires Node 22.13 or newer. The server has no runtime dependencies: it uses No
 ```sh
 npm install
 npm run mock            # fake Signal API on :8080 with sample chats (no phone needed)
+node mock/mock-waha.mjs # fake WAHA on :8090 (API key test-waha-key; MOCK_WA_LINKED=1 starts linked)
 npm run dev:web         # rebuilds the UI into web/dist on change
 npm run build -w server && \
-  DATA_DIR=.data APP_PASSWORD=devpassword SIGNAL_API_URL=http://localhost:8080 npm start -w server
+  DATA_DIR=.data APP_PASSWORD=devpassword SIGNAL_API_URL=http://localhost:8080 \
+  WAHA_URL=http://localhost:8090 WAHA_API_KEY=test-waha-key npm start -w server
 ```
 
 Add `SIGNAL_STICKER_CDN=http://localhost:8080` so stickers come from the mock's fake CDN.
@@ -204,14 +218,17 @@ server/src
   settings.ts     server-wide settings (env defaults, overridable from the UI)
   store.ts        SQLite access and the JSON shapes sent to the browser
   signal-api.ts   signal-cli-rest-api client
+  whatsapp.ts     WhatsApp through WAHA: session/linking, events, history import, sending
+  waha-api.ts     WAHA client
+  richtext.ts     mentions and formatting (Signal ranges, WhatsApp markers)
 web/src
   App.tsx         session, live event stream, notifications
   components/     Sidebar, Chat (messages + composer), InfoPanel, Picker (emoji/GIF), Login, Setup
   emoji/          emoji data: curated.ts (shortcodes, keywords) + extra.ts (generated, see web/scripts)
-mock/             fake signal-cli-rest-api for development and CI
+mock/             fake signal-cli-rest-api and fake WAHA for development and CI
 unraid/           Unraid templates
 ```
 
-Images are built by GitHub Actions and published to `ghcr.io/wcave/signal_web`.
+Images are built by GitHub Actions and published to `ghcr.io/wcave/messenger_web`.
 
 <p align="center"><img src="docs/mobile-dark.png" width="300" alt="Phone layout, dark mode"></p>

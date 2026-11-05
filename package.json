@@ -1,5 +1,5 @@
 {
-  "name": "signal-web",
+  "name": "messenger-web",
   "version": "0.1.0",
   "private": true,
   "description": "WhatsApp-Web-style browser client for Signal, built on bbernhard/signal-cli-rest-api",

@@ -26,6 +26,7 @@ export function Picker({
   onClose,
   title,
   allowGif = true,
+  allowStickers = true,
 }: {
   tab: PickerTab;
   onTab: (t: PickerTab) => void;
@@ -35,6 +36,7 @@ export function Picker({
   onClose: () => void;
   title?: string;
   allowGif?: boolean; // false = emoji only (choosing a reaction)
+  allowStickers?: boolean; // Signal sticker packs (not for WhatsApp chats)
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -56,7 +58,7 @@ export function Picker({
             GIF
           </button>
         )}
-        {allowGif && (
+        {allowGif && allowStickers && (
           <button className={tab === 'sticker' ? 'on' : undefined} onClick={() => onTab('sticker')}>
             Stickers
           </button>
@@ -65,7 +67,7 @@ export function Picker({
           <Icon name="close" size={18} />
         </button>
       </div>
-      {tab === 'emoji' || !allowGif ? (
+      {tab === 'emoji' || !allowGif || (tab === 'sticker' && !allowStickers) ? (
         <EmojiGrid
           onPick={(e) => {
             rememberEmoji(e);

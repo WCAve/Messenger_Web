@@ -11,6 +11,7 @@ import { buildRouter } from './routes.js';
 import { recomputeGroupReadStatuses } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
+import { startWhatsApp, stopWhatsApp } from './whatsapp.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 const minLevel = LEVELS[(config.logLevel as keyof typeof LEVELS) ?? 'info'] ?? 20;
@@ -114,6 +115,12 @@ setTimeout(() => {
 
 startExpiry((m) => log('info', m));
 
+startWhatsApp({
+  info: (m) => log('info', m),
+  warn: (m) => log('warn', m),
+  debug: (m) => log('debug', m),
+});
+
 startSignal({
   info: (m) => log('info', m),
   warn: (m) => log('warn', m),
@@ -122,13 +129,14 @@ startSignal({
 });
 
 server.listen(config.port, config.host, () =>
-  log('info', `Signal Web listening on ${tls ? 'https' : 'http'}://${config.host}:${config.port}`),
+  log('info', `Messenger Web listening on ${tls ? 'https' : 'http'}://${config.host}:${config.port}`),
 );
 
 const shutdown = () => {
   log('info', 'shutting down');
   stopSignal();
   stopExpiry();
+  stopWhatsApp();
   server.close();
   server.closeAllConnections();
   db.close();

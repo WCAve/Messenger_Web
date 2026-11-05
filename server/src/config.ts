@@ -12,6 +12,15 @@ export const config = {
   host: process.env.HOST ?? '0.0.0.0',
   /** Base URL of the signal-cli-rest-api container (must run in json-rpc / json-rpc-native mode). */
   signalApiUrl: (process.env.SIGNAL_API_URL ?? 'http://signal-api:8080').replace(/\/+$/, ''),
+  /** Signal can be switched off (SIGNAL_API_URL=off) to use only WhatsApp. */
+  signalEnabled: !['', 'off', 'none', 'false'].includes((process.env.SIGNAL_API_URL ?? 'x').trim().toLowerCase()),
+  /** WAHA (WhatsApp HTTP API). Leave WAHA_URL empty to run without WhatsApp. */
+  wahaUrl: (process.env.WAHA_URL ?? '').trim().replace(/\/+$/, ''),
+  wahaApiKey: process.env.WAHA_API_KEY?.trim() ?? '',
+  wahaSession: process.env.WAHA_SESSION?.trim() || 'default',
+  /** How many recent chats (and messages per chat) to import from WhatsApp when it's first linked. */
+  wahaHistoryChats: Number(process.env.WAHA_HISTORY_CHATS ?? 40),
+  wahaHistoryMessages: Number(process.env.WAHA_HISTORY_MESSAGES ?? 40),
   /** Optional: which account to use when the Signal API holds more than one. */
   signalNumber: process.env.SIGNAL_NUMBER?.trim() || undefined,
   /** Password for the web UI. Required. */
@@ -19,7 +28,7 @@ export const config = {
   dataDir,
   dbPath: path.join(dataDir, 'signal-web.db'),
   attachmentsDir: path.join(dataDir, 'attachments'),
-  deviceName: process.env.DEVICE_NAME ?? 'Signal Web',
+  deviceName: process.env.DEVICE_NAME ?? 'Messenger Web',
   /** Serve HTTPS directly: paths to a PEM certificate (chain) and private key. */
   tlsCertFile: process.env.TLS_CERT_FILE?.trim() || null,
   tlsKeyFile: process.env.TLS_KEY_FILE?.trim() || null,

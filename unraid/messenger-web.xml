@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>messenger-web</Name>
+  <Repository>ghcr.io/wcave/messenger_web:latest</Repository>
+  <Registry>https://github.com/WCAve/Messenger_Web/pkgs/container/messenger_web</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/WCAve/Messenger_Web/issues</Support>
+  <Project>https://github.com/WCAve/Messenger_Web</Project>
+  <Overview>One web interface for Signal and WhatsApp. Links to your phone as a linked device on each network (through the signal-api container for Signal and WAHA for WhatsApp), stores your chat history locally, and serves a password-protected web UI.&#xD;
+&#xD;
+Needs signal-cli-rest-api (MODE=json-rpc or json-rpc-native) and/or WAHA (devlikeapro/waha). Set SIGNAL_API_URL to off to use WhatsApp only, or leave WAHA URL empty for Signal only. See the project README.</Overview>
+  <Category>Network:Messenger Productivity:</Category>
+  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/WCAve/Messenger_Web/main/unraid/messenger-web.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/WCAve/Messenger_Web/main/unraid/icon.png</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires>signal-cli-rest-api and/or WAHA, reachable from this container (for example on the host's IP in bridge mode).</Requires>
+  <Config Name="Web UI port" Target="3000" Default="3000" Mode="tcp" Description="Port for the web interface." Type="Port" Display="always" Required="true" Mask="false">3000</Config>
+  <Config Name="Password" Target="APP_PASSWORD" Default="" Mode="" Description="Password for the web interface. At least 8 characters; use a long one." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/messenger-web" Mode="rw" Description="Chat history database and attachments." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/messenger-web</Config>
+  <Config Name="Signal API URL" Target="SIGNAL_API_URL" Default="http://signal-api:8080" Mode="" Description="Address of the signal-api container, e.g. http://192.168.1.10:8739 in bridge mode. Set to off to run without Signal." Type="Variable" Display="always" Required="true" Mask="false">http://signal-api:8080</Config>
+  <Config Name="WAHA URL" Target="WAHA_URL" Default="" Mode="" Description="Address of your WAHA container, e.g. http://192.168.1.10:6523. Leave empty to run without WhatsApp." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="WAHA API key" Target="WAHA_API_KEY" Default="" Mode="" Description="WAHA's API key (WAHA_API_KEY in the WAHA container, or the key printed in its log on first start)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="WAHA session" Target="WAHA_SESSION" Default="default" Mode="" Description="WAHA session name. Messenger Web creates it if it doesn't exist." Type="Variable" Display="advanced" Required="false" Mask="false">default</Config>
+  <Config Name="WhatsApp history: chats" Target="WAHA_HISTORY_CHATS" Default="40" Mode="" Description="How many recent WhatsApp chats to import once after linking." Type="Variable" Display="advanced" Required="false" Mask="false">40</Config>
+  <Config Name="WhatsApp history: messages per chat" Target="WAHA_HISTORY_MESSAGES" Default="40" Mode="" Description="How many recent messages to import per chat." Type="Variable" Display="advanced" Required="false" Mask="false">40</Config>
+  <Config Name="Giphy API key" Target="GIPHY_API_KEY" Default="" Mode="" Description="Enables the GIF picker. Create a free key at developers.giphy.com (Create an App, choose API)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Giphy rating" Target="GIPHY_RATING" Default="pg-13|g|pg|r" Mode="" Description="Content rating for GIF search results." Type="Variable" Display="advanced" Required="false" Mask="false">pg-13</Config>
+  <Config Name="Send read receipts" Target="SEND_READ_RECEIPTS" Default="true|false" Mode="" Description="Tell senders when you've read their messages in Messenger Web." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Send typing indicators" Target="SEND_TYPING_INDICATORS" Default="true|false" Mode="" Description="Show others when you're typing." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Send link previews" Target="SEND_LINK_PREVIEWS" Default="true|false" Mode="" Description="When you type a link, fetch the page to send a preview (the site sees your server's address)." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="TLS certificate file" Target="TLS_CERT_FILE" Default="" Mode="" Description="Optional: path inside the container to a PEM certificate (chain), e.g. /data/tls/cert.pem. With the key below, Messenger Web serves HTTPS, which browsers require for notifications." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="TLS key file" Target="TLS_KEY_FILE" Default="" Mode="" Description="Optional: path inside the container to the PEM private key, e.g. /data/tls/key.pem." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Secure cookies (HTTPS)" Target="SECURE_COOKIES" Default="false|true" Mode="" Description="Set to true when you reach Messenger Web over HTTPS (e.g. via a reverse proxy)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Signal number" Target="SIGNAL_NUMBER" Default="" Mode="" Description="Only needed if the signal-api container holds more than one account." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Max upload (MB)" Target="MAX_UPLOAD_MB" Default="100" Mode="" Description="Largest attachment you can send." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Session length (days)" Target="SESSION_DAYS" Default="30" Mode="" Description="How long a browser stays signed in." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User ID that owns the files in /data." Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group ID that owns the files in /data." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Timezone" Target="TZ" Default="Europe/Amsterdam" Mode="" Description="Timezone for log timestamps." Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Amsterdam</Config>
+</Container>

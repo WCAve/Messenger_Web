@@ -28,6 +28,8 @@ export function App() {
 
 function Main({ onLogout }: { onLogout: () => void }) {
   const signal = useStore((s) => s.signal);
+  const waStatus = useStore((s) => s.whatsapp.status);
+  const [linkingSignal, setLinkingSignal] = useState(false);
   const live = useStore((s) => s.live);
   const activeId = useStore((s) => s.activeId);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
@@ -47,7 +49,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
 
   // Unread count in the tab title
   useEffect(() => {
-    document.title = totalUnread ? `(${totalUnread}) Signal Web` : 'Signal Web';
+    document.title = totalUnread ? `(${totalUnread}) Messenger Web` : 'Messenger Web';
   }, [totalUnread]);
 
   // A chat picked from "new chat" may not be in the list yet
@@ -65,10 +67,22 @@ function Main({ onLogout }: { onLogout: () => void }) {
     if (activeId && window.matchMedia('(max-width: 760px)').matches) history.pushState({ chat: activeId }, '');
   }, [activeId]);
 
-  if (signal.status === 'unlinked') return <LinkScreen />;
-  if (signal.status === 'starting' || signal.status === 'unreachable' || signal.status === 'wrong_mode') {
+  // With only Signal set up, nothing works until it's linked and reachable. With WhatsApp as well, the
+  // app opens anyway and a banner offers to link Signal.
+  const waOn = waStatus !== 'disabled';
+  if (linkingSignal && signal.status === 'unlinked') return <LinkScreen onClose={() => setLinkingSignal(false)} />;
+  if (!waOn && signal.status === 'unlinked') return <LinkScreen />;
+  if (!waOn && (signal.status === 'starting' || signal.status === 'unreachable' || signal.status === 'wrong_mode')) {
     return <StatusScreen state={signal} />;
   }
+  const signalProblem =
+    waOn && signal.status !== 'connected' && signal.status !== 'disabled' && signal.status !== 'connecting' && signal.status !== 'starting'
+      ? signal.status === 'unlinked'
+        ? 'Signal is not linked yet.'
+        : signal.status === 'wrong_mode'
+          ? 'The Signal API needs json-rpc mode.'
+          : signal.error ?? "Can't reach the Signal API."
+      : null;
 
   return (
     <div
@@ -78,7 +92,17 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <SidebarResizer />
       {(!live || signal.status === 'connecting') && (
         <div className="banner" role="status">
-          {!live ? 'Reconnecting to Signal Web…' : signal.error ?? 'Connecting to Signal…'}
+          {!live ? 'Reconnecting to Messenger Web…' : signal.error ?? 'Connecting to Signal…'}
+        </div>
+      )}
+      {live && signalProblem && (
+        <div className="banner" role="status">
+          {signalProblem}{' '}
+          {signal.status === 'unlinked' && (
+            <button className="link-btn" onClick={() => setLinkingSignal(true)}>
+              Link Signal
+            </button>
+          )}
         </div>
       )}
       <Sidebar onLogout={onLogout} />
@@ -88,7 +112,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
         <section className="chat chat-placeholder">
           <div>
             <img src="/icon.svg" alt="" width={72} height={72} />
-            <h2>Signal Web</h2>
+            <h2>Messenger Web</h2>
             <p>Pick a chat on the left, or start a new one with the + button. Messages stay end-to-end encrypted between Signal and this server.</p>
           </div>
         </section>
@@ -114,6 +138,7 @@ function useLiveEvents() {
       try {
         const list = await api.conversations();
         setState((s) => ({ conversations: Object.fromEntries(list.map((c) => [c.id, c])), messages: { ...s.messages } }));
+        api.whatsapp().then((w) => setState({ whatsapp: w })).catch(() => {});
         // Refresh the newest page of every chat we have open in memory.
         for (const id of Object.keys(getState().messages).map(Number)) {
           if (getState().hasNewer[id]) continue; // looking at older history; newer ones load on scroll

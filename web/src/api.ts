@@ -1,3 +1,4 @@
+import type { WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -41,8 +42,13 @@ export const api = {
   info: (id: number) => call<ConversationInfo>('GET', `/api/conversations/${id}/info`),
   messageInfo: (id: number) => call<{ message: Message; recipients: Recipient[] }>('GET', `/api/messages/${id}/info`),
   config: () => call<{ giphyApiKey: string | null; giphyRating: string }>('GET', '/api/config'),
-  startChat: (b: { number?: string; uuid?: string }) => call<Conversation>('POST', '/api/conversations', b),
-  directory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('GET', '/api/directory'),
+  startChat: (b: { number?: string; uuid?: string; network?: 'whatsapp'; jid?: string }) => call<Conversation>('POST', '/api/conversations', b),
+  directory: () =>
+    call<{ contacts: DirectoryContact[]; groups: { id: number; title: string; network: 'signal' | 'whatsapp' }[]; waContacts: WaContact[] }>('GET', '/api/directory'),
+  whatsapp: () => call<WaState>('GET', '/api/whatsapp'),
+  whatsappLogout: () => call<WaState>('POST', '/api/whatsapp/logout'),
+  whatsappRestart: () => call<WaState>('POST', '/api/whatsapp/restart'),
+  whatsappRefresh: () => call<{ ok: true }>('POST', '/api/whatsapp/refresh'),
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>
     call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),

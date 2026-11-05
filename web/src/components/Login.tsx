@@ -23,7 +23,7 @@ export function Login({ onDone }: { onDone: () => void }) {
     <main className="gate">
       <form className="gate-card" onSubmit={submit}>
         <img src="/icon.svg" alt="" width={56} height={56} />
-        <h1>Signal Web</h1>
+        <h1>Messenger Web</h1>
         <p className="muted">Enter the password set in your container settings.</p>
         <label className="field">
           <span>Password</span>

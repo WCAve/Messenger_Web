@@ -7,6 +7,23 @@ import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refre
 import { applyPendingReceipts, humanDuration } from './ingest.js';
 import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
+import { waha } from './waha-api.js';
+import {
+  createPollWa,
+  deleteWa,
+  deliverWa,
+  editWa,
+  getWaState,
+  logoutWhatsApp,
+  markReadWa,
+  reactWa,
+  refreshDirectory as refreshWaDirectory,
+  restartWhatsApp,
+  typingWa,
+  voteWa,
+  waAvatar,
+  waChatForNumber,
+} from './whatsapp.js';
 import {
   SESSION_COOKIE,
   clearLoginFailures,
@@ -31,6 +48,8 @@ import {
   type Poll,
   pinnedCount,
   setConversationFlags,
+  getOrCreateWaChat,
+  listWaContacts,
   type Reaction,
   addressForKey,
   contactByKeyOrId,
@@ -84,6 +103,28 @@ function emitConversation(conv: ConversationRow) {
   broadcast({ type: 'conversation', conversation: conversationDto(conv) });
 }
 
+/** Run a WhatsApp action, turning its errors into HTTP errors. */
+async function wa<T>(fn: () => Promise<T> | T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const err = e as Error & { httpStatus?: number };
+    if (err instanceof HttpError) throw err;
+    throw new HttpError(err.httpStatus ?? 502, err.message.replace(/^WhatsApp API .*? failed \(\d+\): /, 'WhatsApp: '));
+  }
+}
+
+const isWa = (c: ConversationRow) => c.network === 'whatsapp';
+
+/** The Signal account, or (for a WhatsApp chat) a check that WhatsApp is connected. */
+function accountFor(c: ConversationRow): string {
+  if (isWa(c)) {
+    if (getWaState().status !== 'connected') throw new HttpError(503, 'WhatsApp is not connected');
+    return '';
+  }
+  return requireAccount();
+}
+
 function requireAccount(): string {
   const st = getState();
   if (st.status !== 'connected' && st.status !== 'connecting') throw new HttpError(503, 'Signal is not connected');
@@ -122,7 +163,7 @@ function richInput(body: Json): { text: string; ranges: Ranges | null } {
   const ranges = cleanRanges(text, { mentions: shift(body?.mentions), styles: shift(body?.styles) });
   if (ranges?.mentions) {
     for (const m of ranges.mentions) {
-      if (m.key !== 'self' && !contactByKeyOrId(m.key)) throw new HttpError(400, 'Unknown person in a mention');
+      if (m.key !== 'self' && !m.key.startsWith('wa:') && !contactByKeyOrId(m.key)) throw new HttpError(400, 'Unknown person in a mention');
     }
   }
   return { text, ranges };
@@ -141,6 +182,14 @@ function apiText(text: string, ranges: Ranges | null) {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Json = any;
+
+function sniffImage(file: string): string {
+  const b = fs.readFileSync(file).subarray(0, 12);
+  if (b[0] === 0xff && b[1] === 0xd8) return 'image/jpeg';
+  if (b[0] === 0x89 && b[1] === 0x50) return 'image/png';
+  if (b.subarray(8, 12).toString() === 'WEBP') return 'image/webp';
+  return 'application/octet-stream';
+}
 
 /** The API wants an https URL that appears in the message, and a title. */
 function apiPreview(p: LinkPreview | null | undefined, message: string) {
@@ -230,6 +279,16 @@ async function deliver(
   },
   log: (m: string) => void,
 ) {
+  if (isWa(c)) {
+    try {
+      await deliverWa(c, messageId, payload);
+    } catch (e) {
+      log(`whatsapp send failed: ${(e as Error).message}`);
+      emitMessageRow(messageId, { status: 'failed', error: (e as Error).message.replace(/^WhatsApp API .*? failed \(\d+\): /, '') });
+    }
+    emitConversation(getConversation(c.id)!);
+    return;
+  }
   try {
     const text = apiText(payload.text, payload.ranges ?? null);
     const res = await signalApi.send({
@@ -313,10 +372,40 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   // ---------- authenticated ----------
 
   r.get('/api/events', (ctx) => {
-    addClient(ctx.req, ctx.res, [{ type: 'state', state: getState() }]);
+    addClient(ctx.req, ctx.res, [
+      { type: 'state', state: getState() },
+      { type: 'wastate', state: getWaState() },
+    ]);
   });
 
   r.get('/api/state', () => getState());
+
+  // ---------- WhatsApp (WAHA) ----------
+
+  r.get('/api/whatsapp', () => getWaState());
+  r.get('/api/whatsapp/qr', async (ctx) => {
+    if (getWaState().status !== 'scan_qr') throw new HttpError(409, 'WhatsApp is not waiting for a QR scan');
+    const png = await wa(() => waha.qr());
+    ctx.res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
+    ctx.res.end(png);
+  });
+  r.post('/api/whatsapp/logout', async () => {
+    await wa(() => logoutWhatsApp());
+    return getWaState();
+  });
+  r.post('/api/whatsapp/restart', async () => {
+    await wa(() => restartWhatsApp());
+    return getWaState();
+  });
+  r.post('/api/whatsapp/refresh', async () => {
+    await wa(() => refreshWaDirectory());
+    return { ok: true };
+  });
+  r.get('/api/avatars/wa/:jid', async (ctx) => {
+    const file = await waAvatar(ctx.params.jid);
+    if (!file) throw new HttpError(404, 'No picture');
+    return sendFile(ctx.res, file, { 'content-type': sniffImage(file), 'cache-control': 'private, max-age=86400' }, ctx.req.method === 'HEAD');
+  });
 
   // ---------- your Signal profile ----------
   const selfAvatarId = () => self.uuid || self.number!;
@@ -363,8 +452,9 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Change (base64) or remove (null) a group's picture. Signal decides who may (usually admins).
   r.post('/api/conversations/:id/avatar', async (ctx) => {
-    const account = requireAccount();
     const c = conv(ctx);
+    if (isWa(c)) throw new HttpError(400, 'Change WhatsApp group pictures on your phone');
+    const account = requireAccount();
     if (c.kind !== 'group') throw new HttpError(400, "You can only change a group's picture here");
     const data = ctx.body?.avatar;
     if (typeof data !== 'string' || !data) throw new HttpError(400, 'Choose a picture');
@@ -478,11 +568,17 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (number && !/^\+[1-9]\d{6,14}$/.test(number)) {
       throw new HttpError(400, 'Enter the number in international format, e.g. +31612345678');
     }
+    if (ctx.body?.network === 'whatsapp') {
+      const jid = typeof ctx.body?.jid === 'string' ? ctx.body.jid : null;
+      if (jid && /^[\w.:-]+@(c\.us|lid|g\.us)$/.test(jid)) return conversationDto(getOrCreateWaChat(jid));
+      if (!number) throw new HttpError(400, 'number required');
+      return conversationDto(waChatForNumber(number));
+    }
     if (!number && !uuid) throw new HttpError(400, 'number or uuid required');
     return conversationDto(getOrCreateDirect(uuid ?? null, number ?? null));
   });
 
-  r.get('/api/directory', () => ({ contacts: listContacts(), groups: listGroups() }));
+  r.get('/api/directory', () => ({ contacts: listContacts(), groups: listGroups(), waContacts: listWaContacts() }));
 
   r.post('/api/directory/refresh', async () => {
     await refreshDirectory();
@@ -509,8 +605,9 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Disappearing messages timer for a chat. The API can't switch it off (a 0 gets dropped).
   r.post('/api/conversations/:id/timer', async (ctx) => {
-    const account = requireAccount();
     const c = conv(ctx);
+    if (isWa(c)) throw new HttpError(400, 'Set disappearing messages for WhatsApp chats on your phone');
+    const account = requireAccount();
     const seconds = Number(ctx.body?.seconds);
     if (!Number.isInteger(seconds) || seconds < 1 || seconds > 365 * 86400) throw new HttpError(400, 'Choose a timer');
     try {
@@ -538,8 +635,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Send a message. Returns immediately with a "pending" message; delivery status follows over /api/events.
   r.post('/api/conversations/:id/messages', async (ctx) => {
-    const account = requireAccount();
     const c = conv(ctx);
+    const account = accountFor(c);
     const { text, ranges } = richInput(ctx.body);
     const files: { name?: string; type?: string; data: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
     const rawSticker = ctx.body?.sticker;
@@ -549,6 +646,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         : null;
     if (rawSticker && !sticker) throw new HttpError(400, 'Invalid sticker');
     if (sticker && (text || files.length)) throw new HttpError(400, 'A sticker is sent on its own');
+    if (sticker && isWa(c)) throw new HttpError(400, "Signal stickers can't be sent to WhatsApp");
     if (!text && !files.length && !sticker) throw new HttpError(400, 'Empty message');
 
     const attachments: Attachment[] = [];
@@ -581,13 +679,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Forward a message (text, files, sticker) to other chats. Quotes are left behind, like Signal.
   r.post('/api/messages/:id/forward', (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
     if (m.deleted || m.kind === 'system' || m.kind === 'poll') throw new HttpError(400, "This message can't be forwarded");
     const ids: number[] = Array.isArray(ctx.body?.conversationIds) ? ctx.body.conversationIds.map(Number) : [];
     if (!ids.length || ids.length > 5) throw new HttpError(400, 'Pick up to 5 chats');
     const targets = ids.map((id) => getConversation(id));
     if (targets.some((t) => !t)) throw new HttpError(404, 'Conversation not found');
+    if (m.sticker && targets.some((t) => isWa(t!))) throw new HttpError(400, "Signal stickers can't be forwarded to WhatsApp");
+    const accounts = targets.map((t) => accountFor(t!));
     const attachments: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
     let base64: string[];
     try {
@@ -598,8 +697,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const ranges: Ranges | null = m.ranges ? JSON.parse(m.ranges) : null;
     const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const preview: LinkPreview | null = m.preview ? JSON.parse(m.preview) : null;
-    const sent = targets.map((t) =>
-      queueOutgoing(account, t!, { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview }, (msg) => log('warn', msg)),
+    const sent = targets.map((t, i) =>
+      queueOutgoing(accounts[i], t!, { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview }, (msg) => log('warn', msg)),
     );
     return { messages: sent };
   });
@@ -607,14 +706,22 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   // ---------- polls ----------
 
   r.post('/api/conversations/:id/polls', async (ctx) => {
-    const account = requireAccount();
     const c = conv(ctx);
+    const account = accountFor(c);
     const question = String(ctx.body?.question ?? '').trim();
     const options: string[] = (Array.isArray(ctx.body?.options) ? ctx.body.options : []).map((o: unknown) => String(o ?? '').trim()).filter(Boolean);
     const multiple = !!ctx.body?.multiple;
     if (!question || question.length > 200) throw new HttpError(400, 'Ask a question (up to 200 characters)');
     if (options.length < 2 || options.length > 10) throw new HttpError(400, 'A poll needs 2 to 10 options');
     if (new Set(options).size !== options.length) throw new HttpError(400, 'Options must be different');
+    if (isWa(c)) {
+      const row = await wa(() => createPollWa(c, question, options, multiple));
+      if (!row) throw new HttpError(409, 'Duplicate poll');
+      const dto = messageDto(row);
+      broadcast({ type: 'message', message: dto });
+      emitConversation(getConversation(c.id)!);
+      return dto;
+    }
     let res: { timestamp?: string | number };
     try {
       res = await signalApi.createPoll(account, { recipient: recipientFor(c), question, answers: options, allow_multiple_selections: multiple });
@@ -644,8 +751,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   r.post('/api/messages/:id/vote', async (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
+    const account = accountFor(getConversation(m.conversation_id)!);
     if (!m.poll || m.deleted) throw new HttpError(400, 'Not a poll');
     const poll: Poll = JSON.parse(m.poll);
     if (poll.closed) throw new HttpError(400, 'This poll has ended');
@@ -655,7 +762,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!picked.length) throw new HttpError(400, 'Pick an option');
     if (!poll.multiple && picked.length > 1) throw new HttpError(400, 'This poll allows one answer');
     const c = getConversation(m.conversation_id)!;
-    await signalApi.votePoll(account, {
+    if (isWa(c)) await wa(() => voteWa(c, m, poll, picked));
+    else await signalApi.votePoll(account, {
       recipient: recipientFor(c),
       poll_author: addressForKey(m.author),
       poll_timestamp: String(m.sent_ts),
@@ -666,8 +774,9 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   r.delete('/api/messages/:id/poll', async (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
+    if (isWa(getConversation(m.conversation_id)!)) throw new HttpError(400, "WhatsApp polls can't be ended");
+    const account = requireAccount();
     if (!m.poll || !m.outgoing) throw new HttpError(400, 'Only the person who made a poll can end it');
     const poll: Poll = JSON.parse(m.poll);
     if (!poll.closed) {
@@ -695,10 +804,10 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   r.post('/api/messages/:id/retry', (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
     if (!m.outgoing || m.status !== 'failed') throw new HttpError(400, 'Nothing to retry');
     const c = getConversation(m.conversation_id)!;
+    const account = accountFor(c);
     const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
     const base64 = atts.map(readBase64);
     const quote = m.quote ? JSON.parse(m.quote) : null;
@@ -711,19 +820,23 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Edit one of your own text messages (Signal allows this for 24 hours).
   r.post('/api/messages/:id/edit', async (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
+    const account = accountFor(getConversation(m.conversation_id)!);
     const { text, ranges } = richInput(ctx.body);
     if (!m.outgoing || m.deleted || m.kind !== 'message' || m.attachments) throw new HttpError(400, 'Only your own text messages can be edited');
     if (m.status === 'pending' || m.status === 'failed') throw new HttpError(400, 'This message has not been sent yet');
     if (!m.ts_confirmed) throw new HttpError(400, "This message was sent before editing was supported and can't be edited");
-    if (Date.now() - m.sent_ts > EDIT_WINDOW_MS) throw new HttpError(400, 'Messages can only be edited for 24 hours after sending');
+    const waChat = isWa(getConversation(m.conversation_id)!);
+    if (Date.now() - m.sent_ts > (waChat ? 15 * 60_000 - 30_000 : EDIT_WINDOW_MS)) {
+      throw new HttpError(400, waChat ? 'WhatsApp messages can only be edited for 15 minutes' : 'Messages can only be edited for 24 hours after sending');
+    }
     if (!text) throw new HttpError(400, 'A message can’t be empty. Delete it instead.');
     const rangesJson = ranges ? JSON.stringify(ranges) : null;
     if (text === m.body && rangesJson === m.ranges) return messageDto(m);
     const c = getConversation(m.conversation_id)!;
     const quote = m.quote ? (JSON.parse(m.quote) as { sentTs: number; author: string; text?: string | null }) : null;
-    await signalApi.send({
+    if (isWa(c)) await wa(() => editWa(c, m, text, ranges));
+    else await signalApi.send({
       number: account,
       recipients: [recipientFor(c)],
       ...apiText(text, ranges),
@@ -739,8 +852,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // React (toggles: sending the same emoji again removes it)
   r.post('/api/messages/:id/reactions', async (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
+    const account = accountFor(getConversation(m.conversation_id)!);
     if (m.deleted) throw new HttpError(400, 'Message was deleted');
     if (m.status === 'pending' || m.status === 'failed') throw new HttpError(400, 'Message has not been sent yet');
     const emoji = String(ctx.body?.emoji ?? '');
@@ -750,7 +863,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const mine = reactions.find((x) => x.author === 'self');
     const removing = mine?.emoji === emoji;
     const body = { recipient: recipientFor(c), reaction: removing ? mine!.emoji : emoji, target_author: addressForKey(m.author), timestamp: m.sent_ts };
-    if (removing) await signalApi.unreact(account, body);
+    if (isWa(c)) await wa(() => reactWa(m, removing ? '' : emoji));
+    else if (removing) await signalApi.unreact(account, body);
     else await signalApi.react(account, body);
     reactions = reactions.filter((x) => x.author !== 'self');
     if (!removing) reactions.push({ emoji, author: 'self' });
@@ -759,11 +873,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Delete for everyone
   r.delete('/api/messages/:id', async (ctx) => {
-    const account = requireAccount();
     const m = message(ctx);
     if (!m.outgoing) throw new HttpError(400, 'You can only delete your own messages');
     const c = getConversation(m.conversation_id)!;
-    if (m.status !== 'failed' && m.status !== 'pending') await signalApi.remoteDelete(account, recipientFor(c), m.sent_ts);
+    const account = accountFor(c);
+    if (m.status !== 'failed' && m.status !== 'pending') {
+      if (isWa(c)) await wa(() => deleteWa(c, m));
+      else await signalApi.remoteDelete(account, recipientFor(c), m.sent_ts);
+    }
     const updated = emitMessageRow(m.id, { deleted: 1, body: null, attachments: null, reactions: null })!;
     emitConversation(c);
     return messageDto(updated);
@@ -776,6 +893,10 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!unread.length) return { ok: true };
     markConversationRead(c.id);
     emitConversation(c);
+    if (isWa(c)) {
+      if (getSettings().sendReadReceipts && getWaState().status === 'connected') markReadWa(c, unread).catch(() => {});
+      return { ok: true };
+    }
     const account = self.number;
     if (getSettings().sendReadReceipts && account && getState().status === 'connected') {
       void (async () => {
@@ -795,6 +916,10 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/conversations/:id/typing', (ctx) => {
     if (!getSettings().sendTypingIndicators) return { ok: true };
     const c = conv(ctx);
+    if (isWa(c)) {
+      if (getWaState().status === 'connected') typingWa(c, !!ctx.body?.typing).catch(() => {});
+      return { ok: true };
+    }
     const account = self.number;
     if (account && getState().status === 'connected') {
       signalApi.typing(account, recipientFor(c), !!ctx.body?.typing).catch(() => {});
