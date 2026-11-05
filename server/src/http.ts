@@ -27,6 +27,7 @@ interface Route {
   keys: string[];
   auth: boolean;
   handler: Handler;
+  raw?: boolean;
 }
 
 export function parseCookies(header: string | undefined): Record<string, string> {
@@ -124,7 +125,7 @@ export class Router {
     },
   ) {}
 
-  add(method: string, path: string, handler: Handler, auth = true) {
+  add(method: string, path: string, handler: Handler, auth = true, raw = false) {
     const keys: string[] = [];
     const re = new RegExp(
       '^' +
@@ -134,7 +135,14 @@ export class Router {
         }) +
         '/?$',
     );
-    this.routes.push({ method, re, keys, auth, handler });
+    this.routes.push({ method, re, keys, auth, handler, raw });
+  }
+  /**
+   * A file upload streamed to the handler (ctx.req), not read into memory. Needs the
+   * x-messenger-upload header, which other sites can't send without a CORS preflight (CSRF).
+   */
+  upload(p: string, h: Handler) {
+    this.add('POST', p, h, true, true);
   }
   get(p: string, h: Handler, auth = true) {
     this.add('GET', p, h, auth);
@@ -172,7 +180,9 @@ export class Router {
     };
     try {
       if (route.auth && !this.opts.isAuthed(ctx)) throw new HttpError(401, 'Not logged in');
-      ctx.body = await readBody(req, this.opts.bodyLimit);
+      if (route.raw) {
+        if (req.headers['x-messenger-upload'] !== '1') throw new HttpError(400, 'Missing upload header');
+      } else ctx.body = await readBody(req, this.opts.bodyLimit);
       const result = await route.handler(ctx);
       if (res.writableEnded || res.headersSent) return true;
       if (Buffer.isBuffer(result)) {

@@ -1,4 +1,4 @@
-import type { WaContact, WaState } from './types';
+import type { BackupFile, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -48,6 +48,10 @@ export const api = {
   whatsapp: () => call<WaState>('GET', '/api/whatsapp'),
   whatsappLogout: () => call<WaState>('POST', '/api/whatsapp/logout'),
   whatsappRestart: () => call<WaState>('POST', '/api/whatsapp/restart'),
+  backupInfo: () => call<{ file: BackupFile | null; folder: string }>('GET', '/api/whatsapp/backup'),
+  backupImport: (key?: string) => call<{ started: true }>('POST', '/api/whatsapp/backup/import', key ? { key } : {}),
+  backupMedia: () => call<{ started: true }>('POST', '/api/whatsapp/backup/media'),
+  backupCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/backup/cancel'),
   whatsappImportCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/import/cancel'),
   whatsappImport: () => call<{ started: true }>('POST', '/api/whatsapp/import'),
   whatsappRefresh: () => call<{ ok: true }>('POST', '/api/whatsapp/refresh'),
@@ -121,4 +125,28 @@ export interface ServerSettings {
 
 export function attachmentUrl(id: string, download?: string) {
   return `/api/attachments/${encodeURIComponent(id)}${download ? `?download=1&name=${encodeURIComponent(download)}` : ''}`;
+}
+
+/** Upload the backup file, streamed (it can be large); progress 0–1. */
+export function uploadBackup(file: File, onProgress: (p: number) => void): Promise<{ file: BackupFile | null }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/whatsapp/backup/upload');
+    xhr.setRequestHeader('content-type', 'application/octet-stream');
+    xhr.setRequestHeader('x-messenger-upload', '1');
+    xhr.setRequestHeader('x-file-name', file.name.replace(/[^\x20-\x7e]/g, '_'));
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
+    xhr.onload = () => {
+      let data: { error?: string; file?: BackupFile | null } = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        /* not json */
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve({ file: data.file ?? null });
+      else reject(new ApiError(data.error ?? `Upload failed (${xhr.status})`, xhr.status));
+    };
+    xhr.onerror = () => reject(new ApiError('Upload failed (connection lost). For very large files, copy the file into the backup folder instead.', 0));
+    xhr.send(file);
+  });
 }

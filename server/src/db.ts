@@ -206,6 +206,10 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX wa_media_state ON wa_media(state, ts);
   `,
+  `
+  -- Where the file sat on the phone (from an Android backup), to match it when you add the media folder.
+  ALTER TABLE wa_media ADD COLUMN backup_path TEXT;
+  `,
 ];
 
 function migrate() {

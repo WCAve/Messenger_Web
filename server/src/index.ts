@@ -12,6 +12,7 @@ import { backfillExtRaw, recomputeGroupReadStatuses } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
 import { startWhatsApp, stopWhatsApp } from './whatsapp.js';
+import { refreshBackupInfo, setBackupLogger } from './wabackup.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 const minLevel = LEVELS[(config.logLevel as keyof typeof LEVELS) ?? 'info'] ?? 20;
@@ -100,7 +101,7 @@ if (config.tlsCertFile || config.tlsKeyFile) {
   }
 }
 const server = tls ? https.createServer(tls, handler) : http.createServer(handler);
-server.requestTimeout = 10 * 60_000; // large uploads
+server.requestTimeout = 2 * 3600_000; // large uploads (a WhatsApp backup can be gigabytes)
 server.keepAliveTimeout = 65_000;
 
 setTimeout(() => {
@@ -133,6 +134,13 @@ startWhatsApp({
   warn: (m) => log('warn', m),
   debug: (m) => log('debug', m),
 });
+
+setBackupLogger({ info: (m) => log('info', m), warn: (m) => log('warn', m) });
+try {
+  refreshBackupInfo();
+} catch {
+  /* no backup folder */
+}
 
 startSignal({
   info: (m) => log('info', m),

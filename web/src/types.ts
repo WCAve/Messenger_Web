@@ -2,6 +2,20 @@ export type SignalStatus = 'starting' | 'unreachable' | 'wrong_mode' | 'unlinked
 
 export type Network = 'signal' | 'whatsapp';
 
+export interface BackupState {
+  stage: 'idle' | 'decrypting' | 'importing' | 'media' | 'done' | 'failed';
+  file?: BackupFile | null;
+  progress?: { done: number; total: number };
+  result?: { chats: number; messages: number; reactions: number; files: number; skipped: number; mediaFound?: number; mediaMissing?: number };
+  error?: string;
+}
+export interface BackupFile {
+  name: string;
+  size: number;
+  at: number;
+  app?: string;
+}
+
 export interface WaState {
   status: 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
   me?: string;
@@ -12,6 +26,7 @@ export interface WaState {
   importing?: boolean;
   importProgress?: { done: number; total: number; waiting?: boolean };
   lastImport?: { chats: number; messages: number; at: number; error?: string; skipped?: number };
+  backup?: BackupState;
 }
 
 export interface SignalState {

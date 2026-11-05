@@ -2960,3 +2960,40 @@ img.emoji {
   cursor: pointer;
   width: 100%;
 }
+
+/* Android backup import */
+.backup-import {
+  padding: 6px 0 10px;
+}
+.backup-import h4 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+.backup-import ol {
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.backup-import code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.backup-key {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.backup-key input {
+  flex: 1;
+  min-width: 220px;
+  font: inherit;
+  font-family: ui-monospace, monospace;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--mist);
+  background: var(--paper);
+  color: var(--ink);
+}

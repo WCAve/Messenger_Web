@@ -60,6 +60,16 @@ export interface WaState {
   importing?: boolean;
   importProgress?: { done: number; total: number; waiting?: boolean };
   lastImport?: { chats: number; messages: number; at: number; error?: string; skipped?: number };
+  backup?: BackupState;
+}
+
+/** Importing an Android backup (msgstore.db.crypt15) and its media folder; see wabackup.ts. */
+export interface BackupState {
+  stage: 'idle' | 'decrypting' | 'importing' | 'media' | 'done' | 'failed';
+  file?: { name: string; size: number; at: number; app?: string } | null;
+  progress?: { done: number; total: number };
+  result?: { chats: number; messages: number; reactions: number; files: number; skipped: number; mediaFound?: number; mediaMissing?: number };
+  error?: string;
 }
 
 type Logger = { info: (m: string) => void; warn: (m: string) => void; debug?: (m: string) => void };
@@ -85,10 +95,15 @@ function setState(next: WaState) {
   }
 }
 
-function emitMessage(m: MessageRow | undefined) {
+/** Merge into the shared WhatsApp state (shown in Settings). */
+export function updateWaState(patch: Partial<WaState>) {
+  setState({ ...state, ...patch });
+}
+
+export function emitMessage(m: MessageRow | undefined) {
   if (m) broadcast({ type: 'message', message: messageDto(m) });
 }
-function emitConversation(id: number) {
+export function emitConversation(id: number) {
   const c = getConversation(id);
   if (c) broadcast({ type: 'conversation', conversation: conversationDto(c) });
 }
@@ -96,6 +111,17 @@ function emitConversation(id: number) {
 // ---------- ids ----------
 
 const lidCache = new Map<string, string | null>();
+
+/** Privacy ids (@lid) and the phone numbers they belong to, as a backup knows them. */
+export function seedLids(pairs: [string, string][]) {
+  for (const [lid, pn] of pairs) {
+    const l = bare(lid);
+    const p = bare(pn);
+    if (!l.endsWith('@lid') || !p.endsWith('@c.us')) continue;
+    lidCache.set(l, p);
+    kvSet(`lid:${l}`, p);
+  }
+}
 
 /** Ids come as strings, or (WEBJS, some fields) as {server, user, _serialized} objects. */
 function idString(x: unknown): string | null {
@@ -109,12 +135,12 @@ function idString(x: unknown): string | null {
 }
 
 /** Strip the device part and use one spelling: "316…:12@s.whatsapp.net" → "316…@c.us". */
-function bare(jid: unknown): string {
+export function bare(jid: unknown): string {
   return (idString(jid) ?? '').replace(/:\d+@/, '@').replace('@s.whatsapp.net', '@c.us');
 }
 
 /** Prefer phone-number ids over WhatsApp's privacy ids (@lid) when WAHA knows the number. */
-async function resolve(jid: unknown): Promise<string | null> {
+export async function resolve(jid: unknown): Promise<string | null> {
   if (!idString(jid)) return null;
   const j = bare(jid);
   if (!j.endsWith('@lid')) return j;
@@ -136,11 +162,11 @@ async function resolve(jid: unknown): Promise<string | null> {
   }
 }
 
-function keyFor(jid: string): string {
+export function keyFor(jid: string): string {
   return self.isWa(jid) ? 'self' : 'wa:' + jid;
 }
 
-function skipChat(raw: unknown) {
+export function skipChat(raw: unknown) {
   const jid = idString(raw) ?? '';
   return !jid || jid.startsWith('0@') || jid === 'status@broadcast' || jid.endsWith('@newsletter') || jid.endsWith('@broadcast');
 }
@@ -610,7 +636,7 @@ const EXT: Record<string, string> = {
 };
 
 /** WhatsApp text → stored body: formatting markers become styles, "@<number>" becomes a real mention. */
-async function richFromWa(text: string | null | undefined, conv: ConversationRow): Promise<{ body: string | null; ranges: Ranges | null }> {
+export async function richFromWa(text: string | null | undefined, conv: ConversationRow): Promise<{ body: string | null; ranges: Ranges | null }> {
   if (!text) return { body: text ?? null, ranges: null };
   const { text: plain, styles } = parseWaMarkup(text);
   const found: { start: number; end: number; key: string }[] = [];

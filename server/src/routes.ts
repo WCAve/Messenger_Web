@@ -9,6 +9,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
+import { backupDir, backupFileInfo, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
   deleteWa,
@@ -415,6 +416,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
   r.post('/api/whatsapp/import', async () => wa(async () => importHistoryNow()));
   r.post('/api/whatsapp/import/cancel', () => (cancelImportWa(), { ok: true }));
+
+  // Android backup (msgstore.db.crypt15 + the 64-digit key), then optionally the media folder.
+  r.get('/api/whatsapp/backup', () => {
+    refreshBackupInfo();
+    return { file: backupFileInfo(), folder: backupDir };
+  });
+  r.upload('/api/whatsapp/backup/upload', (ctx) => receiveBackupUpload(ctx));
+  r.post('/api/whatsapp/backup/import', (ctx) => startBackupImport(typeof ctx.body?.key === 'string' ? ctx.body.key : undefined));
+  r.post('/api/whatsapp/backup/media', () => startMediaScan());
+  r.post('/api/whatsapp/backup/cancel', () => (cancelBackupImport(), { ok: true }));
   r.post('/api/whatsapp/refresh', async () => {
     await wa(() => refreshWaDirectory());
     return { ok: true };

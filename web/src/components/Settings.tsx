@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { type Profile, type ServerSettings, api } from '../api';
+import { type Profile, type ServerSettings, api, uploadBackup } from '../api';
+import type { BackupFile } from '../types';
 import { type NotifyState, notifyState, requestNotifications, testNotification } from '../notifications';
-import { squareAvatar } from '../util';
+import { formatSize, squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
 import { Avatar, Icon } from './ui';
 import { useStore } from '../store';
@@ -172,6 +173,156 @@ function ProfileSection() {
 const HISTORY_CHATS = [[40, '40 chats'], [100, '100 chats'], [250, '250 chats'], [0, 'All chats']] as const;
 const HISTORY_MESSAGES = [[40, '40 messages'], [200, '200 messages'], [1000, '1,000 messages'], [0, 'As many as possible (up to 20,000)']] as const;
 
+function plural(n: number, one: string, many?: string) {
+  if (many) return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+  return `${n.toLocaleString()} ${one}${n === 1 ? '' : 's'}`;
+}
+
+/** Full history from an Android backup (msgstore.db.crypt15 + the 64-digit key), then the media folder. */
+function BackupImport() {
+  const b = useStore((s) => s.whatsapp.backup);
+  const [open, setOpen] = useState(false);
+  const [info, setInfo] = useState<{ file: BackupFile | null; folder: string } | null>(null);
+  const [key, setKey] = useState('');
+  const [upload, setUpload] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const running = b?.stage === 'decrypting' || b?.stage === 'importing' || b?.stage === 'media';
+  useEffect(() => {
+    if (open) api.backupInfo().then(setInfo, (e) => setError(e.message));
+  }, [open, b?.stage]);
+  const file = b?.file !== undefined ? b.file : info?.file ?? null;
+  const plain = !!file && /\.db$/i.test(file.name);
+  const digits = key.replace(/[^0-9a-f]/gi, '').length;
+
+  async function pick(f: File | undefined) {
+    if (!f) return;
+    setError(null);
+    setUpload(0);
+    try {
+      const r = await uploadBackup(f, setUpload);
+      setInfo((i) => ({ folder: i?.folder ?? '', file: r.file }));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUpload(null);
+    }
+  }
+  async function run(fn: () => Promise<unknown>) {
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  if (!open) {
+    return (
+      <div className="backup-import">
+        <button className="link-btn" onClick={() => setOpen(true)}>
+          Import full history from an Android backup…
+        </button>
+      </div>
+    );
+  }
+  const pct = (p?: { done: number; total: number }) => (p && p.total ? ` ${Math.min(100, Math.round((p.done / p.total) * 100))}%` : '');
+  return (
+    <div className="backup-import">
+      <h4>Full history from an Android backup</h4>
+      <ol className="setting-note">
+        <li>
+          On your phone: WhatsApp → Settings → Chats → Chat backup → <strong>End-to-end encrypted backup</strong> → turn it on and choose <strong>Use 64-digit encryption key</strong>. Write the key down,
+          then tap <strong>Back up</strong>.
+        </li>
+        <li>
+          Copy <code>Android/media/com.whatsapp/WhatsApp/Databases/msgstore.db.crypt15</code> from the phone and upload it below. Large file or slow connection? Put it in the
+          <code>whatsapp-backup</code> folder inside Messenger Web's data folder instead (in the container: <code>{info?.folder ?? '/data/whatsapp-backup'}</code>).
+        </li>
+        <li>Enter the key and import. Messages already here are skipped.</li>
+      </ol>
+      <p className="muted setting-note">
+        Keep the key safe: it also opens your Google Drive backups, and without it you can't restore them. Messenger Web doesn't store it. The backup file and its decrypted copy are deleted after the import.
+      </p>
+
+      <div className="setting-actions">
+        <input ref={fileInput} type="file" accept=".crypt15,.db" hidden onChange={(e) => (void pick(e.target.files?.[0]), (e.target.value = ''))} />
+        <button className="btn" disabled={running || upload !== null} onClick={() => fileInput.current?.click()}>
+          {upload !== null ? `Uploading… ${Math.round(upload * 100)}%` : file ? 'Choose another file' : 'Choose backup file'}
+        </button>
+      </div>
+      {file && (
+        <p className="setting-note">
+          {file.name} · {formatSize(file.size)}
+          {file.app ? ` · WhatsApp ${file.app}` : ''}
+        </p>
+      )}
+      {file && !plain && (
+        <label className="backup-key">
+          <span>64-digit key</span>
+          <input
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            placeholder="1a2b 3c4d …"
+            aria-label="64-digit backup key"
+          />
+          <small className="muted">{digits}/64</small>
+        </label>
+      )}
+      {file && (
+        <div className="setting-actions">
+          <button className="btn primary" disabled={running || (!plain && digits !== 64)} onClick={() => void run(async () => (await api.backupImport(plain ? undefined : key), setKey('')))}>
+            Import backup
+          </button>
+        </div>
+      )}
+
+      {running && (
+        <p className="setting-note">
+          <span className="spinner small" />{' '}
+          {b?.stage === 'decrypting'
+            ? `Decrypting the backup…${pct(b.progress)}`
+            : b?.stage === 'importing'
+              ? `Importing messages…${b.progress?.total ? ` ${b.progress.done.toLocaleString()} of ${b.progress.total.toLocaleString()}` : ''}`
+              : `Matching media files…${pct(b?.progress)}`}{' '}
+          <button className="link-btn" onClick={() => void api.backupCancel().catch(() => {})}>
+            Stop
+          </button>
+        </p>
+      )}
+      {b?.stage === 'failed' && b.error && <p className="form-error setting-note">{b.error}</p>}
+      {b?.stage === 'done' && b.result && (
+        <p className="muted setting-note">
+          Imported {b.result.messages.toLocaleString()} messages from {b.result.chats} chats
+          {b.result.skipped ? ` (${plural(b.result.skipped, 'was', 'were')} here already)` : ''}
+          {b.result.reactions ? `, ${plural(b.result.reactions, 'reaction')}` : ''}.
+          {b.result.mediaFound !== undefined ? ` Media: matched ${plural(b.result.mediaFound, 'file')}${b.result.mediaMissing ? `, ${b.result.mediaMissing.toLocaleString()} not in the folder` : ''}.` : ''}
+        </p>
+      )}
+
+      {b?.result && (
+        <>
+          <h4>Photos, videos and files</h4>
+          <p className="setting-note">
+            Copy the phone's <code>Android/media/com.whatsapp/WhatsApp/Media</code> folder (or just the folders you want, like <em>WhatsApp Images</em>) into the <code>whatsapp-backup</code>
+            folder in Messenger Web's data folder (in the container: <code>{info?.folder ?? '/data/whatsapp-backup'}</code>), then:
+          </p>
+          <div className="setting-actions">
+            <button className="btn" disabled={running} onClick={() => void run(() => api.backupMedia())}>
+              Add media from the folder
+            </button>
+          </div>
+          <p className="muted setting-note">Files are copied into Messenger Web; you can delete the folder afterwards. Files not in the folder are still fetched from WhatsApp when you open them, if it has them.</p>
+        </>
+      )}
+      {error && <p className="form-error setting-note">{error}</p>}
+    </div>
+  );
+}
+
 /** How much history "Import history now" fetches (and the automatic import after linking). */
 function HistorySettings() {
   const [s, setS] = useState<ServerSettings | null>(null);
@@ -299,6 +450,7 @@ function WhatsAppSection() {
         </p>
       )}
       {wa.status === 'connected' && <HistorySettings />}
+      <BackupImport />
       {wa.status === 'scan_qr' && (
         <div className="wa-link">
           <ol>
