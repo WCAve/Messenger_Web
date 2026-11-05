@@ -5,7 +5,7 @@ import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
-import { getPrefs } from '../prefs';
+import { getPrefs, usePrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, Message, Network } from '../types';
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
@@ -78,8 +78,13 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
 
   // Tell the server (WhatsApp then starts sending "typing…" for this chat).
   useEffect(() => {
-    api.opened(id).catch(() => {});
+    api
+      .opened(id)
+      .then((r) => r.presence && setState((s) => ({ presence: { ...s.presence, [id]: r.presence! } })))
+      .catch(() => {});
   }, [id]);
+  const presence = useStore((s) => s.presence[id]);
+  const showPresence = usePrefs().showPresence;
 
   // Mark read while the chat is open and the window is visible.
   useEffect(() => {
@@ -106,6 +111,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
     const named = all.filter((m) => m.key !== 'self' && m.name !== 'Unknown').map((m) => m.name).sort((a, b) => a.localeCompare(b));
     const unknown = all.filter((m) => m.name === 'Unknown').length;
     subtitle = [...named, ...(all.some((m) => m.key === 'self') ? ['You'] : []), ...(unknown ? [`${unknown} other${unknown > 1 ? 's' : ''}`] : [])].join(', ');
+  } else if (showPresence && conversation.network === 'whatsapp' && presence && (presence.online || presence.lastSeen)) {
+    subtitle = presence.online ? 'online' : `last seen ${lastSeenLabel(presence.lastSeen!)}`;
   } else {
     subtitle = conversation.number ?? (conversation.username ? '@' + conversation.username : '');
   }
@@ -571,8 +578,10 @@ const MessageItem = memo(function MessageItem({
     );
   }
 
-  const visual = m.attachments.filter((a) => a.contentType.startsWith('image/') || isLoopingMedia(a));
-  const others = m.attachments.filter((a) => !visual.includes(a));
+  // A WhatsApp sticker is an attachment marked as one (Signal's come from sticker packs).
+  const waSticker = !m.deleted && m.kind === 'sticker' && !m.sticker ? m.attachments.find((a) => a.sticker) ?? null : null;
+  const visual = waSticker ? [] : m.attachments.filter((a) => a.contentType.startsWith('image/') || isLoopingMedia(a));
+  const others = waSticker ? [] : m.attachments.filter((a) => !visual.includes(a));
   const jumbo = !m.deleted && !m.attachments.length && !m.quote && isJumbomoji(m.body);
   const sticker = !m.deleted && m.kind === 'sticker' ? m.sticker : null;
   const canAct = !m.deleted && m.status !== 'pending' && m.status !== 'failed';
@@ -597,7 +606,7 @@ const MessageItem = memo(function MessageItem({
       onMouseLeave={() => setPicker(false)}
     >
       <div
-        className={`bubble${jumbo ? ' jumbo' : ''}${sticker ? ' sticker' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}
+        className={`bubble${jumbo ? ' jumbo' : ''}${sticker || waSticker ? ' sticker' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest('a,button,video,audio,img')) return;
           onSelect();
@@ -660,6 +669,14 @@ const MessageItem = memo(function MessageItem({
           <p className="body">
             <em>{m.outgoing ? 'You deleted this message' : 'This message was deleted'}</em>
           </p>
+        ) : waSticker ? (
+          waSticker.missing ? (
+            <MissingMedia a={waSticker} />
+          ) : waSticker.pending ? (
+            <PendingImage a={waSticker} />
+          ) : (
+            <img className="sticker-img" src={attachmentUrl(waSticker.id)} alt="Sticker" width={180} height={180} onLoad={onMediaLoad} />
+          )
         ) : sticker ? (
           <StickerImage sticker={sticker} onLoad={onMediaLoad} />
         ) : m.kind === 'sticker' ? (
@@ -952,6 +969,18 @@ function shortcodeAtCaret(text: string, caret: number): { start: number; term: s
   const m = /(^|[\s(])(:[a-z0-9_+-]{2,40})$/i.exec(text.slice(0, caret));
   if (!m) return null;
   return { start: caret - m[2].length, term: m[2].slice(1) };
+}
+
+/** "today at 14:03", "yesterday at 09:12", "3 Nov at 18:40". */
+function lastSeenLabel(ts: number) {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = new Date();
+  day.setHours(0, 0, 0, 0);
+  if (ts >= day.getTime()) return `today at ${time}`;
+  if (ts >= day.getTime() - 86400_000) return `yesterday at ${time}`;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(sameYear ? {} : { year: 'numeric' }) })} at ${time}`;
 }
 
 /** In place of the message box, like WhatsApp: you can't message someone you blocked. */
@@ -1280,6 +1309,21 @@ function Composer({
     }
   }
 
+  async function sendWaSticker(s: { id?: string; file?: File }) {
+    setPanel(null);
+    setError(null);
+    try {
+      const image = s.file ? `data:${s.file.type};base64,${await fileToBase64(s.file)}` : undefined;
+      const msg = await api.sendWaSticker(id, { id: s.id, image, quoteId: replyTo?.id });
+      upsertMessages(id, [msg]);
+      clearReply();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      area.current?.focus();
+    }
+  }
+
   async function sendSticker(s: PickedSticker) {
     setPanel(null);
     setError(null);
@@ -1400,6 +1444,7 @@ function Composer({
           onTab={setPanel}
           allowGif={!reactTo}
           allowStickers={capsFor(conversation).stickers}
+          waStickers={conversation.network === 'whatsapp' ? { onPick: (sid) => void sendWaSticker({ id: sid }), onImage: (f) => void sendWaSticker({ file: f }) } : undefined}
           title={reactTo ? 'React' : undefined}
           onEmoji={(e) => (reactTo ? void react(e) : insertAtCaret(e))}
           onGif={sendGif}

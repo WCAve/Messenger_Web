@@ -77,6 +77,7 @@ export interface Attachment {
   height?: number | null;
   voiceNote?: boolean;
   caption?: string | null;
+  sticker?: boolean; // WhatsApp sticker (a WebP image)
   gif?: boolean; // silent looping video (Signal's GIFs)
   missing?: boolean; // WhatsApp: the file couldn't be fetched any more (old media)
 }
@@ -422,7 +423,7 @@ export function touchConversation(id: number, ts: number) {
   // New messages bring an archived chat back, unless it's muted (like Signal).
   db.prepare(
     `UPDATE conversations SET last_message_at = MAX(COALESCE(last_message_at, 0), ?),
-       archived = CASE WHEN muted_until > ? THEN archived ELSE 0 END WHERE id = ?`,
+       archived = CASE WHEN network = 'whatsapp' OR muted_until > ? THEN archived ELSE 0 END WHERE id = ?`,
   ).run(ts, Date.now(), id);
 }
 

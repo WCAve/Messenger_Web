@@ -12,11 +12,13 @@ export interface Prefs {
   notifyBannerDismissed: boolean;
   /** Which emoji artwork to show. */
   emoji: EmojiStyle;
+  /** WhatsApp: "online" / "last seen …" in the chat header. */
+  showPresence: boolean;
 }
 
 export type EmojiStyle = 'noto' | 'fluent' | 'twemoji' | 'system';
 
-const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null, notifyBannerDismissed: false, emoji: 'noto' };
+const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null, notifyBannerDismissed: false, emoji: 'noto', showPresence: true };
 const KEY = 'sw-prefs';
 
 function load(): Prefs {

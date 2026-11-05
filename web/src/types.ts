@@ -66,6 +66,7 @@ export interface Attachment {
   voiceNote?: boolean;
   caption?: string | null;
   gif?: boolean;
+  sticker?: boolean; // WhatsApp sticker
   pending?: boolean; // WhatsApp history: not on the server yet, fetched when opened (can take a while)
   missing?: boolean; // WhatsApp couldn't provide it any more
 }
@@ -204,5 +205,6 @@ export type ServerEvent =
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'message'; message: Message }
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean; recording?: boolean }
+  | { type: 'presence'; conversationId: number; online: boolean; lastSeen: number | null }
   | { type: 'receipt'; messageId: number }
   | { type: 'remove'; conversationId: number; messageId: number };

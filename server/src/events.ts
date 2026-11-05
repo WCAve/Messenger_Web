@@ -7,6 +7,7 @@ export type ServerEvent =
   | { type: 'conversation'; conversation: unknown }
   | { type: 'message'; message: unknown }
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean; recording?: boolean }
+  | { type: 'presence'; conversationId: number; online: boolean; lastSeen: number | null }
   | { type: 'receipt'; messageId: number } // per-recipient receipt changed (overall status didn't)
   | { type: 'remove'; conversationId: number; messageId: number }; // disappeared
 

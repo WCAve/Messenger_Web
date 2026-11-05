@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { type Profile, type ServerSettings, api, uploadBackup } from '../api';
+import { type Profile, type ServerSettings, type WaProfile, api, uploadBackup } from '../api';
 import type { BackupFile } from '../types';
 import { type NotifyState, notifyState, requestNotifications, testNotification } from '../notifications';
 import { formatSize, squareAvatar } from '../util';
@@ -65,6 +65,104 @@ function EmojiSample({ set }: { set: 'fluent' | 'twemoji' }) {
         <img key={k} className="emoji" src={`/emoji/${set}/${k}.${ext}`} alt="" />
       ))}
     </>
+  );
+}
+
+/** Your WhatsApp profile: name, about and picture. Changes go to your phone and contacts. */
+function WaProfileSection() {
+  const [profile, setProfile] = useState<WaProfile | null>(null);
+  const [name, setName] = useState('');
+  const [about, setAbout] = useState('');
+  const [photo, setPhoto] = useState<{ data: string; preview: string } | 'remove' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [rev, setRev] = useState(0);
+  const fileInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    api.waProfile().then(
+      (p) => {
+        setProfile(p);
+        setName(p.name);
+        setAbout(p.about);
+      },
+      (e) => setError(e.message),
+    );
+  }, []);
+  async function choose(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const data = await squareAvatar(file);
+      setPhoto({ data, preview: `data:image/jpeg;base64,${data}` });
+      setSaved(false);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function save() {
+    if (!profile) return;
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const p = await api.updateWaProfile({
+        ...(name !== profile.name ? { name } : {}),
+        ...(about !== profile.about ? { about } : {}),
+        ...(photo === 'remove' ? { picture: null } : photo ? { picture: `data:image/jpeg;base64,${photo.data}` } : {}),
+      });
+      setProfile(p);
+      setPhoto(null);
+      setSaved(true);
+      setRev((r) => r + 1);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  const own = profile?.number ? `/api/avatars/wa/${encodeURIComponent(profile.number.replace(/\D/g, '') + '@c.us')}.jpg?r=${rev}` : null;
+  const shown = photo === 'remove' ? null : photo ? photo.preview : own;
+  const dirty = !!profile && (name !== profile.name || about !== profile.about || photo !== null);
+  return (
+    <Section title="WhatsApp profile">
+      <div className="profile-edit">
+        <button className="profile-photo" onClick={() => fileInput.current?.click()} title="Change profile picture" aria-label="Change WhatsApp profile picture">
+          <Avatar key={shown ?? 'none'} name={name || 'You'} seed="self-wa" size={88} src={shown} />
+          <span className="photo-overlay">
+            <Icon name="camera" size={22} />
+          </span>
+        </button>
+        <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => (void choose(e.target.files?.[0]), (e.target.value = ''))} />
+        <div className="profile-fields">
+          <label className="field">
+            <span>Name</span>
+            <input value={name} maxLength={25} onChange={(e) => (setName(e.target.value), setSaved(false))} disabled={!profile} aria-label="WhatsApp name" />
+          </label>
+          <label className="field">
+            <span>About</span>
+            <input value={about} maxLength={139} placeholder="Hey there! I am using WhatsApp." onChange={(e) => (setAbout(e.target.value), setSaved(false))} disabled={!profile} aria-label="WhatsApp about" />
+          </label>
+        </div>
+      </div>
+      {error && <p className="form-error setting-note">{error}</p>}
+      {saved && <p className="setting-note">Saved. Your phone and contacts see it within a minute.</p>}
+      <div className="setting-actions">
+        <button className="btn primary" onClick={save} disabled={busy || !dirty || !name.trim()}>
+          {busy ? 'Saving…' : 'Save WhatsApp profile'}
+        </button>
+        {photo !== 'remove' && !photo && (
+          <button className="btn" onClick={() => (setPhoto('remove'), setSaved(false))} disabled={busy || !profile}>
+            Remove picture
+          </button>
+        )}
+        {photo && (
+          <button className="btn" onClick={() => setPhoto(null)} disabled={busy}>
+            Undo picture change
+          </button>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -185,6 +283,7 @@ function BackupImport() {
   const [info, setInfo] = useState<{ file: BackupFile | null; folder: string; mediaWaiting?: number } | null>(null);
   const [key, setKey] = useState('');
   const [upload, setUpload] = useState<number | null>(null);
+  const [stickerNote, setStickerNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const running = b?.stage === 'decrypting' || b?.stage === 'importing' || b?.stage === 'media';
@@ -319,6 +418,15 @@ function BackupImport() {
               Add media from the folder
             </button>
           </div>
+          <div className="setting-actions">
+            <button className="btn" disabled={running} onClick={() => void run(async () => {
+              const r = await api.importWaStickers();
+              setStickerNote(`${r.found.toLocaleString()} stickers found, ${r.added.toLocaleString()} new. They're in the sticker tab of WhatsApp chats.`);
+            })}>
+              Import stickers from the folder
+            </button>
+          </div>
+          {stickerNote && <p className="muted setting-note">{stickerNote}</p>}
           <p className="muted setting-note">Files are copied into Messenger Web; you can delete the folder afterwards. Files not in the folder are still fetched from WhatsApp when you open them, if it has them.</p>
         </>
       )}
@@ -541,6 +649,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   const [permission, setPermission] = useState<NotifyState>(notifyState);
   const signalOn = useStore((s) => s.signal.status !== 'disabled');
   const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
+  const waConnected = useStore((s) => s.whatsapp.status === 'connected');
 
   useEffect(() => {
     api.settings().then(setServer, (e) => setError(e.message));
@@ -597,6 +706,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
         {error && <p className="form-error pad">{error}</p>}
 
         {signalOn && <ProfileSection />}
+        {waConnected && <WaProfileSection />}
 
         <WhatsAppSection />
 
@@ -705,6 +815,23 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
             disabled={!server}
             onChange={(v) => void saveServer({ sendLinkPreviews: v })}
           />
+          {waOn && (
+            <Toggle
+              label="Show when people are online"
+              hint="WhatsApp: “online” or “last seen …” under the name in a chat (if they share it). Applies to this browser."
+              checked={prefs.showPresence}
+              onChange={(v) => setPrefs({ showPresence: v })}
+            />
+          )}
+          {waOn && (
+            <Toggle
+              label="Show me as online on WhatsApp"
+              hint="While Messenger Web is open and in front in a browser. Off: you never show as online from here (your phone still does when you use it)."
+              checked={!!server?.waShowOnline}
+              disabled={!server}
+              onChange={(v) => void saveServer({ waShowOnline: v })}
+            />
+          )}
           {waOn && (
             <Toggle
               label="Forward WhatsApp messages natively"

@@ -9,7 +9,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
-import { backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
+import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
   deleteWa,
@@ -20,6 +20,17 @@ import {
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
+  archiveWa,
+  browserActive,
+  findWaChatExport as findWaChat,
+  listStickersWa,
+  presenceFor,
+  refreshPresenceWa,
+  removeStickerWa,
+  saveContactWa,
+  sendStickerWa,
+  updateWaProfile,
+  waProfile,
   linkableQuoteId,
   downloadPendingMedia,
   cancelImportWa,
@@ -871,10 +882,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // ---------- chat list: pin, archive, mute (Signal Web only; your phone keeps its own) ----------
 
-  r.post('/api/conversations/:id/flags', (ctx) => {
+  r.post('/api/conversations/:id/flags', async (ctx) => {
     const c = conv(ctx);
     const b = ctx.body ?? {};
     if (b.pinned === true && !c.pinned_at && pinnedCount() >= 10) throw new HttpError(400, 'You can pin up to 10 chats');
+    // Archiving a WhatsApp chat archives it on your phone too.
+    if (isWa(c) && typeof b.archived === 'boolean' && b.archived !== !!c.archived) await wa(() => archiveWa(c, b.archived));
     setConversationFlags(c.id, {
       pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
       archived: typeof b.archived === 'boolean' ? b.archived : undefined,
@@ -1036,8 +1049,56 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   // The chat was opened in a browser.
   r.post('/api/conversations/:id/open', (ctx) => {
     const c = conv(ctx);
-    if (isWa(c) && getWaState().status === 'connected') void subscribePresenceWa(c);
+    if (isWa(c) && getWaState().status === 'connected') {
+      void subscribePresenceWa(c);
+      void refreshPresenceWa(c).catch(() => {});
+    }
+    return { ok: true, presence: isWa(c) ? presenceFor(c) : null };
+  });
+
+  // A browser with Messenger Web open and in front (for "show me as online").
+  r.post('/api/presence', (ctx) => {
+    browserActive(ctx.body?.active === true);
     return { ok: true };
+  });
+
+  // ---------- WhatsApp: contacts, profile, stickers ----------
+
+  r.post('/api/whatsapp/contacts/:jid', async (ctx) => {
+    const jid = ctx.params.jid;
+    if (!/^\d{6,20}@c\.us$/.test(jid)) throw new HttpError(400, "Only people with a phone number can be saved as a contact");
+    const first = String(ctx.body?.firstName ?? '').trim().slice(0, 100);
+    const last = String(ctx.body?.lastName ?? '').trim().slice(0, 100);
+    if (!first) throw new HttpError(400, 'Enter a first name');
+    await wa(() => saveContactWa(jid, first, last));
+    const c = findWaChat(jid);
+    if (c) emitConversation(c);
+    return { ok: true };
+  });
+
+  r.get('/api/whatsapp/profile', async () => wa(() => waProfile()));
+  r.post('/api/whatsapp/profile', async (ctx) => {
+    const b = ctx.body ?? {};
+    const name = typeof b.name === 'string' ? b.name.trim().slice(0, 25) : undefined;
+    const about = typeof b.about === 'string' ? b.about.trim().slice(0, 139) : undefined;
+    if (name !== undefined && !name) throw new HttpError(400, "Your name can't be empty");
+    const picture = b.picture === null ? null : typeof b.picture === 'string' ? b.picture : undefined;
+    await wa(() => updateWaProfile({ name, about, picture }));
+    return wa(() => waProfile());
+  });
+
+  r.get('/api/whatsapp/stickers', () => ({ stickers: listStickersWa() }));
+  r.delete('/api/whatsapp/stickers/:id', (ctx) => (removeStickerWa(ctx.params.id), { stickers: listStickersWa() }));
+  r.post('/api/whatsapp/stickers/import', () => importStickersFromFolder());
+  r.post('/api/conversations/:id/wa-sticker', async (ctx) => {
+    const c = conv(ctx);
+    if (!isWa(c)) throw new HttpError(400, 'Not a WhatsApp chat');
+    const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
+    const quote =
+      quoted && quoted.conversation_id === c.id && !quoted.deleted ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' } : null;
+    const src = typeof ctx.body?.id === 'string' ? { id: ctx.body.id } : typeof ctx.body?.image === 'string' ? { image: ctx.body.image } : null;
+    if (!src) throw new HttpError(400, 'Pick a sticker or an image');
+    return messageDto(await wa(() => sendStickerWa(c, src, quote)));
   });
 
   r.post('/api/conversations/:id/typing', (ctx) => {

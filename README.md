@@ -66,6 +66,11 @@ WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S**
 - View-once photos and videos show as a placeholder (open them on your phone; WhatsApp Web can't either)
 - "Forwarded" and "Forwarded many times" labels; forwarding between WhatsApp chats is a real WhatsApp forward (Settings → Privacy to send copies instead)
 - Block and unblock from contact info
+- "online" / "last seen …" under the name (Settings → Privacy; can be switched off), and, if you switch it on, you show as online while Messenger Web is open and in front
+- Add someone to your WhatsApp contacts, or rename them, from contact info
+- Your WhatsApp name, about and picture in Settings
+- WhatsApp stickers: shown as stickers, sent from the sticker tab (stickers you've received, sent or imported from the backup folder), or made from any image (WhatsApp turns it into a sticker)
+- Archive syncs both ways; archived WhatsApp chats stay archived when new messages arrive, like on the phone
 - Polls: see and vote, and create new ones
 - Search, pin/mute/archive, drafts and forwarding work across both networks; you can forward a Signal message to a WhatsApp chat and the other way round
 - Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls and changing group pictures (do those on your phone)

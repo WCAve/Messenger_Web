@@ -34,6 +34,7 @@ import {
   waNumberOf,
 } from './store.js';
 import {
+  addSticker,
   type BackupState,
   bare,
   emitConversation,
@@ -546,6 +547,7 @@ async function importDatabase(file: string, progress: (done: number, total: numb
         if (m.width && m.height) Object.assign(a, { width: m.width, height: m.height });
         if (t === 2 && /ogg|opus/i.test(mime)) a.voiceNote = true;
         if (t === 13) a.gif = true;
+        if (t === 20) a.sticker = true;
         if (!fs.existsSync(localPath(id))) a.missing = !m.file_path; // no file on the phone either
         attachments.push(a);
         media = a.missing ? undefined : { id, path: m.file_path, chat: chatJid };
@@ -570,7 +572,7 @@ async function importDatabase(file: string, progress: (done: number, total: numb
         quote = { sentTs: qRow?.sent_ts ?? 0, author: qAuthor, text: text || 'Attachment' };
       }
       batch.push({
-        insert: { ...base, kind: 'message', body, ranges, attachments, quote, forwarded: m.forward_score ? (m.forward_score >= 5 ? 2 : 1) : 0 },
+        insert: { ...base, kind: t === 20 ? 'sticker' : 'message', body, ranges, attachments, quote, forwarded: m.forward_score ? (m.forward_score >= 5 ? 2 : 1) : 0 },
         backupId: m._id,
         deleted,
         media,
@@ -691,6 +693,7 @@ export function startMediaScan() {
         if (m?.attachments) {
           const atts = (JSON.parse(m.attachments) as Attachment[]).map((a) => {
             if (a.id !== r.id) return a;
+            if (a.sticker) addSticker(a.id);
             const b = { ...a, size: fs.statSync(dest).size };
             delete b.missing;
             return b;
@@ -711,4 +714,43 @@ export function startMediaScan() {
     }
   })();
   return { started: true };
+}
+
+/**
+ * Stickers from the phone: the "WhatsApp Stickers" folder in the media folder you copied over. Each
+ * one is added to the stickers you can send (Messenger Web keeps a copy).
+ */
+export async function importStickersFromFolder() {
+  if (!fs.existsSync(backupDir)) throw new HttpError(400, `Copy the phone's WhatsApp "Media" folder into ${backupDir} first`);
+  const files: string[] = [];
+  const walk = async (dir: string, depth: number, inStickers: boolean): Promise<void> => {
+    if (depth > 8) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(p, depth + 1, inStickers || /^whatsapp stickers$/i.test(e.name));
+      else if (inStickers && e.isFile() && /\.webp$/i.test(e.name)) files.push(p);
+    }
+  };
+  await walk(backupDir, 0, false);
+  if (!files.length) throw new HttpError(400, 'No "WhatsApp Stickers" folder with stickers found in the backup folder');
+  let added = 0;
+  // Oldest first, so the newest end up at the front of the list.
+  files.sort((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
+  for (const f of files) {
+    const buf = await fs.promises.readFile(f);
+    const id = 'stk-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 24) + '.webp';
+    if (!fs.existsSync(localPath(id))) {
+      await fs.promises.writeFile(localPath(id), buf);
+      added++;
+    }
+    addSticker(id);
+  }
+  log.info(`whatsapp backup: ${files.length} stickers from the media folder (${added} new)`);
+  return { found: files.length, added };
 }

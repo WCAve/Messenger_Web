@@ -16,6 +16,8 @@ const DEFAULTS = {
   waNativeForward: true,
   // Download files from imported history in the background (otherwise: when someone opens them).
   waHistoryMedia: false,
+  // WhatsApp shows you as online while Messenger Web is open in a browser (otherwise: never).
+  waShowOnline: false,
 };
 export type ServerSettings = typeof DEFAULTS;
 

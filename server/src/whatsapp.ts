@@ -199,6 +199,7 @@ async function check() {
     if (!state.version) waha.version().then((v) => setState({ ...state, version: v.version, engine: state.engine ?? v.engine })).catch(() => {});
     switch (s.status) {
       case 'WORKING': {
+        if (state.status !== 'connected') sentPresence = null; // say it again after (re)connecting
         restartAttempts = 0;
         failedSince = 0;
         const me = s.me?.id ? bare(s.me.id) : undefined;
@@ -530,6 +531,7 @@ function pendingMedia(m: Json, extId: string): Attachment {
   };
   if (mimetype.startsWith('audio/') && (d.type === 'ptt' || /ogg.*opus/i.test(String(d.mimetype ?? '')))) att.voiceNote = true;
   if (mimetype.startsWith('video/') && d.isGif) att.gif = true;
+  if (d.type === 'sticker') att.sticker = true;
   return att;
 }
 
@@ -595,6 +597,7 @@ export function fetchWaMedia(id: string): Promise<boolean> {
           if (!ok) b.missing = true;
           else {
             b.size = fs.statSync(file).size;
+            if (b.sticker) addSticker(b.id);
             if (b.contentType.startsWith('video/')) {
               const silent = isSilentVideo(id);
               if (silent) b.gif = true;
@@ -723,6 +726,14 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     const match = recent.find((r) => (r.body ?? '') === body || (!!r.body && body.includes(r.body.replace(/￼/g, ''))));
     if (match && m.source !== 'app') {
       emitMessage(updateMessage(match.id, { ext_id: extId }));
+      if (match.kind === 'sticker' && m.hasMedia && !(match.attachments ?? '').includes('image/webp')) {
+        const a = await downloadMedia(m, extId).catch(() => null);
+        if (a) {
+          a.sticker = true;
+          addSticker(a.id);
+          emitMessage(updateMessage(match.id, { attachments: JSON.stringify([a]) }));
+        }
+      }
       return;
     }
     if (m.source === 'api') return;
@@ -756,7 +767,13 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
   } else if (m.hasMedia) {
     try {
       const a = await downloadMedia(m, extId);
-      if (a) attachments.push(a);
+      if (a) {
+        if (m._data?.type === 'sticker') {
+          a.sticker = true;
+          addSticker(a.id);
+        }
+        attachments.push(a);
+      }
     } catch (e) {
       log.warn(`whatsapp: media for ${extId}: ${(e as Error).message}`);
     }
@@ -790,7 +807,7 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     sentTs: ts,
     author,
     outgoing: fromMe,
-    kind: poll ? 'poll' : 'message',
+    kind: poll ? 'poll' : attachments[0]?.sticker ? 'sticker' : 'message',
     body,
     ranges,
     attachments,
@@ -850,11 +867,21 @@ async function syncMutes(list?: Json[]) {
     if (!id || skipChat(id)) continue;
     const until = mutedUntilOf(c) ?? mutedUntilOf(c._chat);
     const unreadCount = c.unreadCount ?? c._chat?.unreadCount;
-    if (until === undefined && unreadCount === undefined && c.pinned === undefined) continue;
+    if (until === undefined && unreadCount === undefined && c.pinned === undefined && c.archived === undefined) continue;
     const jid = await resolve(id);
     if (!jid) continue;
     const conv = getOrCreateWaChat(jid, jid.endsWith('@g.us') ? c.name ?? null : null);
     if (unreadCount !== undefined) phoneUnread(conv, Number(unreadCount));
+    // Archived on the phone. Only changes are copied (archiving here is sent to the phone too).
+    const archived = typeof c.archived === 'boolean' ? c.archived : typeof c._chat?.archived === 'boolean' ? c._chat.archived : undefined;
+    if (archived !== undefined && kvGet(`wa_arch:${jid}`) !== String(archived)) {
+      kvSet(`wa_arch:${jid}`, String(archived));
+      if (!!getConversation(conv.id)!.archived !== archived) {
+        setConversationFlags(conv.id, { archived });
+        changed++;
+        emitConversation(conv.id);
+      }
+    }
     // Pinned on the phone (one way: WAHA can't pin chats). Only changes are copied.
     const pinned = typeof c.pinned === 'boolean' ? c.pinned : typeof c._chat?.pinned === 'boolean' ? c._chat.pinned : undefined;
     if (pinned !== undefined && kvGet(`wa_pin:${jid}`) !== String(pinned)) {
@@ -1030,6 +1057,10 @@ async function handleEvent(e: Json) {
         const key = keyFor(who);
         const recording = pr.lastKnownPresence === 'recording';
         const typing = pr.lastKnownPresence === 'typing' || recording;
+        if (conv.kind === 'direct' && who === chat) {
+          const online = ['online', 'typing', 'recording'].includes(String(pr.lastKnownPresence));
+          setPresenceOf(conv.id, online, pr.lastSeen ? Number(pr.lastSeen) * (Number(pr.lastSeen) > 1e12 ? 1 : 1000) : null);
+        }
         broadcast({ type: 'typing', conversationId: conv.id, author: key, authorName: nameForKey(key), started: typing, ...(recording ? { recording } : {}) });
       }
       return;
@@ -1065,6 +1096,18 @@ async function handleEvent(e: Json) {
       if (!jid) return;
       const conv = findWaChat(jid);
       if (conv) phoneUnread(conv, p.data.unreadCount, true);
+      return;
+    }
+    case 'chat.archive': {
+      const jid = await resolve(p?.id);
+      if (!jid || typeof p?.archived !== 'boolean') return;
+      const conv = findWaChat(jid);
+      if (!conv) return;
+      kvSet(`wa_arch:${jid}`, String(p.archived));
+      if (!!conv.archived !== p.archived) {
+        setConversationFlags(conv.id, { archived: p.archived });
+        emitConversation(conv.id);
+      }
       return;
     }
     case 'call.received':
@@ -1436,6 +1479,165 @@ export async function waAbout(jid: string): Promise<string | null> {
   }
 }
 
+// ---------- presence (online / last seen, and yours) ----------
+
+const presenceKnown = new Map<number, { online: boolean; lastSeen: number | null }>();
+const presenceAsked = new Map<number, number>();
+
+function setPresenceOf(conversationId: number, online: boolean, lastSeen: number | null) {
+  const prev = presenceKnown.get(conversationId);
+  const next = { online, lastSeen: lastSeen ?? (online ? null : prev?.lastSeen ?? null) };
+  if (prev && prev.online === next.online && prev.lastSeen === next.lastSeen) return;
+  presenceKnown.set(conversationId, next);
+  broadcast({ type: 'presence', conversationId, ...next });
+}
+
+export function presenceFor(conv: ConversationRow) {
+  return presenceKnown.get(conv.id) ?? null;
+}
+
+/** Ask once (per half minute) whether someone is online, when their chat is opened. */
+export async function refreshPresenceWa(conv: ConversationRow) {
+  if (conv.kind !== 'direct' || state.status !== 'connected') return;
+  if (Date.now() - (presenceAsked.get(conv.id) ?? 0) < 30_000) return;
+  presenceAsked.set(conv.id, Date.now());
+  const r = await waha.presence(conv.wa_id!).catch(() => null);
+  const pr = r?.presences?.find((x) => bare(x.participant) === conv.wa_id) ?? r?.presences?.[0];
+  if (!pr) return;
+  const seen = pr.lastSeen ? Number(pr.lastSeen) : null;
+  setPresenceOf(conv.id, ['online', 'typing', 'recording'].includes(String(pr.lastKnownPresence)), seen ? (seen > 1e12 ? seen : seen * 1000) : null);
+}
+
+// You show as online only while a browser has Messenger Web open and in front, if you switched it on.
+let lastActive = 0;
+let sentPresence: 'online' | 'offline' | null = null;
+export function browserActive(active: boolean) {
+  lastActive = active ? Date.now() : 0;
+  void applyOwnPresence();
+}
+async function applyOwnPresence() {
+  if (state.status !== 'connected') return;
+  const want = getSettings().waShowOnline && Date.now() - lastActive < 90_000 ? 'online' : 'offline';
+  if (want === sentPresence) return;
+  sentPresence = want;
+  await waha.setPresence(want).catch(() => (sentPresence = null));
+}
+setInterval(() => void applyOwnPresence(), 30_000).unref();
+setInterval(() => (sentPresence = null), 10 * 60_000).unref(); // say it again now and then: WhatsApp Web may change it
+
+// ---------- contacts and your profile ----------
+
+/** Save someone in your WhatsApp contacts (your phone's address book), or rename them there. */
+export async function saveContactWa(jid: string, firstName: string, lastName: string) {
+  requireWa();
+  await waha.upsertContact(jid, firstName, lastName);
+  upsertWaContact({ jid, name: [firstName, lastName].filter(Boolean).join(' ') || null });
+}
+
+export async function waProfile() {
+  requireWa();
+  const p = await waha.profile();
+  return { name: p?.name ?? state.name ?? '', about: p?.status ?? '', picture: p?.picture ?? null, number: state.me ?? null };
+}
+
+export async function updateWaProfile(patch: { name?: string; about?: string; picture?: string | null }) {
+  requireWa();
+  if (patch.name !== undefined) {
+    await waha.setProfileName(patch.name);
+    setState({ ...state, name: patch.name });
+  }
+  if (patch.about !== undefined) await waha.setProfileStatus(patch.about);
+  if (patch.picture === null) await waha.deleteProfilePicture();
+  else if (patch.picture) {
+    const file = parseDataUrl(patch.picture);
+    if (!file) throw Object.assign(new Error('Unreadable picture'), { httpStatus: 400 });
+    await waha.setProfilePicture(file);
+  }
+  if (patch.picture !== undefined && self.waIds[0]) {
+    // our own picture is cached like everyone else's
+    for (const f of [waAvatarCached(self.waIds[0])].filter(Boolean)) fs.rmSync(f!, { force: true });
+  }
+}
+
+export async function archiveWa(conv: ConversationRow, on: boolean) {
+  kvSet(`wa_arch:${conv.wa_id}`, String(on));
+  if (state.status === 'connected') await waha.archive(conv.wa_id!, on);
+}
+
+// ---------- stickers ----------
+
+/** Stickers you can send again: the ones you've received or sent, and imported ones. Newest first. */
+export function addSticker(id: string) {
+  const list = stickerLibrary().filter((s) => s.id !== id);
+  list.unshift({ id, at: Date.now() });
+  kvSet('wa_stickers', JSON.stringify(list.slice(0, 500)));
+}
+function stickerLibrary(): { id: string; at: number }[] {
+  try {
+    return JSON.parse(kvGet('wa_stickers') ?? '[]');
+  } catch {
+    return [];
+  }
+}
+export function listStickersWa() {
+  return stickerLibrary()
+    .filter((s) => isSafeId(s.id) && fs.existsSync(localPath(s.id)))
+    .map((s) => ({ id: s.id, url: `/api/attachments/${encodeURIComponent(s.id)}` }));
+}
+export function removeStickerWa(id: string) {
+  kvSet('wa_stickers', JSON.stringify(stickerLibrary().filter((s) => s.id !== id)));
+}
+
+/**
+ * Send a sticker: one from the library, or any image (WhatsApp Web turns it into a 512×512 sticker
+ * itself, in WAHA's browser).
+ */
+export async function sendStickerWa(conv: ConversationRow, src: { id?: string; image?: string }, quote: { sentTs: number; author: string; text?: string | null } | null) {
+  requireWa();
+  let file: WaFile;
+  let attachment: Attachment;
+  if (src.id) {
+    if (!isSafeId(src.id) || !fs.existsSync(localPath(src.id))) throw Object.assign(new Error('Sticker not found'), { httpStatus: 404 });
+    file = { mimetype: 'image/webp', data: fs.readFileSync(localPath(src.id)).toString('base64') };
+    attachment = { id: src.id, contentType: 'image/webp', sticker: true, size: fs.statSync(localPath(src.id)).size };
+  } else {
+    const f = src.image ? parseDataUrl(src.image) : null;
+    if (!f || !f.mimetype.startsWith('image/')) throw Object.assign(new Error('Pick an image'), { httpStatus: 400 });
+    file = { mimetype: f.mimetype, data: f.data };
+    const buf = Buffer.from(f.data, 'base64');
+    const id = 'out-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 24) + (EXT[f.mimetype] ?? '');
+    if (!fs.existsSync(localPath(id))) fs.writeFileSync(localPath(id), buf);
+    attachment = { id, contentType: f.mimetype, sticker: true, size: buf.length };
+  }
+  const row = insertMessage({
+    conversationId: conv.id,
+    sentTs: Date.now(),
+    author: 'self',
+    outgoing: true,
+    kind: 'sticker',
+    body: null,
+    attachments: [attachment],
+    quote,
+    status: 'pending',
+    read: true,
+  });
+  if (!row) throw Object.assign(new Error('Try again'), { httpStatus: 409 });
+  emitMessage(row);
+  emitConversation(conv.id);
+  try {
+    const q = quote ? db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ?').get(conv.id, quote.sentTs) : undefined;
+    const reply_to = q ? (await linkableQuoteId(q)) ?? undefined : undefined;
+    const res = await waha.sendSticker(conv.wa_id!, file, reply_to);
+    const ext = extIdOf(res);
+    emitMessage(updateMessage(row.id, { status: 'sent', ts_confirmed: 1, ...(ext && !findMessageByExt(ext) ? { ext_id: ext } : {}) }));
+    if (src.id) addSticker(src.id);
+  } catch (e) {
+    emitMessage(updateMessage(row.id, { status: 'failed', error: (e as Error).message.replace(/^WhatsApp API .*? failed \(\d+\): /, '') }));
+  }
+  emitConversation(conv.id);
+  return getMessage(row.id)!;
+}
+
 // ---------- group system lines ----------
 
 async function nameOfJid(raw: unknown): Promise<string> {
@@ -1726,3 +1928,5 @@ export async function blockWa(conv: ConversationRow, block: boolean) {
   await (block ? waha.block(conv.wa_id!) : waha.unblock(conv.wa_id!));
   setWaBlocked(conv.wa_id!, block);
 }
+
+export { findWaChat as findWaChatExport };

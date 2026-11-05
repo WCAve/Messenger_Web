@@ -49,6 +49,28 @@ function Main({ onLogout }: { onLogout: () => void }) {
   useLiveEvents();
   useEffect(() => void loadUsage(), []);
 
+  // Tell the server while this browser is open and in front (WhatsApp "show me as online").
+  useEffect(() => {
+    let last = false;
+    const tick = (force = false) => {
+      const active = document.visibilityState === 'visible' && document.hasFocus();
+      if (active || active !== last || force) api.presence(active).catch(() => {});
+      last = active;
+    };
+    tick(true);
+    const t = setInterval(() => tick(), 45_000);
+    const now = () => tick();
+    window.addEventListener('focus', now);
+    window.addEventListener('blur', now);
+    document.addEventListener('visibilitychange', now);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('focus', now);
+      window.removeEventListener('blur', now);
+      document.removeEventListener('visibilitychange', now);
+    };
+  }, []);
+
   // Unread count in the tab title
   useEffect(() => {
     document.title = totalUnread ? `(${totalUnread}) Messenger Web` : 'Messenger Web';

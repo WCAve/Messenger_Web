@@ -170,6 +170,8 @@ function authed(req, url) {
 }
 
 const blocked = new Set();
+const archivedOnPhone = new Set(); // POST /mock/archive {"jid":…,"archived":true}
+const profile = { name: 'Wouter', status: 'Hallo daar', picture: null };
 const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0 }; // POST /mock/config
 const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
@@ -246,6 +248,12 @@ const server = http.createServer(async (req, res) => {
         Object.assign(mockConfig, await body(req));
         return json(res, 200, mockConfig);
       }
+      if (p === '/mock/archive') {
+        const b = await body(req);
+        if (b.archived) archivedOnPhone.add(b.jid);
+        else archivedOnPhone.delete(b.jid);
+        return json(res, 200, { ok: true });
+      }
       if (p === '/mock/pin') {
         const b = await body(req);
         if (b.pinned) pinnedOnPhone.add(b.jid);
@@ -314,6 +322,7 @@ const server = http.createServer(async (req, res) => {
           muteExpiration: id === GROUP.id ? -1 : 0,
           unreadCount: markedUnread.has(id) ? -1 : id === PEOPLE.jan.id ? 2 : 0,
           pinned: pinnedOnPhone.has(id),
+          archived: archivedOnPhone.has(id),
         }));
       return json(res, 200, list.slice(0, Number(url.searchParams.get('limit') ?? 100)));
     }
@@ -397,6 +406,28 @@ const server = http.createServer(async (req, res) => {
       return res.end(PHOTO);
     }
 
+    // Jan was last seen an hour ago; Sanne hides it
+    const pres = p.match(new RegExp(`^/api/${SESSION}/presence/([^/]+)$`));
+    if (pres && m === 'GET') {
+      const chat = decodeURIComponent(pres[1]);
+      return json(res, 200, { id: chat, presences: [{ participant: chat, lastKnownPresence: 'offline', lastSeen: chat === PEOPLE.jan.id ? Math.floor(Date.now() / 1000) - 3600 : null }] });
+    }
+    if (p === `/api/${SESSION}/profile` && m === 'GET') return json(res, 200, { id: ME.id, ...profile });
+    if (p.startsWith(`/api/${SESSION}/profile/`) && (m === 'PUT' || m === 'DELETE')) {
+      const b = m === 'PUT' ? await body(req) : {};
+      sent.push({ path: p, method: m, ...b, file: b.file ? { mimetype: b.file.mimetype } : undefined });
+      if (p.endsWith('/name')) profile.name = b.name;
+      if (p.endsWith('/status')) profile.status = b.status;
+      return json(res, 200, { success: true });
+    }
+    const arch = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/(archive|unarchive)$`));
+    if (arch && m === 'POST') {
+      const id = decodeURIComponent(arch[1]);
+      if (arch[2] === 'archive') archivedOnPhone.add(id);
+      else archivedOnPhone.delete(id);
+      sent.push({ path: p, method: m });
+      return json(res, 200, { ok: true });
+    }
     const sub = p.match(new RegExp(`^/api/${SESSION}/presence/([^/]+)/subscribe$`));
     if (sub) {
       subscribed.add(decodeURIComponent(sub[1]));
@@ -409,7 +440,7 @@ const server = http.createServer(async (req, res) => {
       const record = { path: p, method: m, ...b, file: b.file ? { ...b.file, data: String(b.file.data ?? '').slice(0, 40) + '…' } : undefined, preview: b.preview ? { ...b.preview, image: b.preview.image ? { mimetype: b.preview.image.mimetype, bytes: b.preview.image.data?.length } : undefined } : undefined };
       sent.push(record);
       if (p === '/api/sendSeen') markedUnread.delete(chatId);
-      if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll'].includes(p)) {
+      if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll', '/api/sendSticker'].includes(p)) {
         if (String(b.text ?? b.caption ?? '').includes('fail')) return json(res, 500, { message: 'Mock failure' });
         const text = b.text ?? b.caption ?? '';
         const out = msg({ chat: chatId, fromMe: true, body: p === '/api/sendPoll' ? b.poll.name : text, media: b.file?.mimetype, ack: 1 });

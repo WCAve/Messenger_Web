@@ -231,6 +231,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
           </section>
         )}
 
+        {!group && conversation.network === 'whatsapp' && conversation.number && <WaContactSection conversation={conversation} />}
         {!group && conversation.network === 'whatsapp' && <BlockSection conversation={conversation} />}
       </div>
     </aside>
@@ -512,6 +513,67 @@ function BlockSection({ conversation }: { conversation: Conversation }) {
       <button className={`panel-action${conversation.blocked ? '' : ' danger'}`} disabled={busy} onClick={() => void toggle()}>
         <Icon name="block" size={20} /> {conversation.blocked ? `Unblock ${name}` : `Block ${name}`}
       </button>
+      {error && <p className="form-error">{error}</p>}
+    </section>
+  );
+}
+
+/** Save someone in your WhatsApp contacts (your phone's address book), or change the name there. */
+function WaContactSection({ conversation }: { conversation: Conversation }) {
+  const [editing, setEditing] = useState(false);
+  const [first, setFirst] = useState('');
+  const [last, setLast] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const known = !/^\+?\d[\d\s]*$/.test(conversation.title); // a name, not just the number
+  function start() {
+    const parts = known ? conversation.title.split(' ') : [];
+    setFirst(parts[0] ?? '');
+    setLast(parts.slice(1).join(' '));
+    setEditing(true);
+    setDone(false);
+  }
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.saveWaContact(conversation.number!.replace(/\D/g, '') + '@c.us', first.trim(), last.trim());
+      setEditing(false);
+      setDone(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel-section">
+      {!editing ? (
+        <button className="panel-action" onClick={start}>
+          <Icon name="pencil" size={20} /> {known ? 'Edit contact' : 'Add to contacts'}
+        </button>
+      ) : (
+        <div className="contact-edit">
+          <label className="field">
+            <span>First name</span>
+            <input value={first} onChange={(e) => setFirst(e.target.value)} maxLength={100} autoFocus aria-label="First name" />
+          </label>
+          <label className="field">
+            <span>Last name</span>
+            <input value={last} onChange={(e) => setLast(e.target.value)} maxLength={100} aria-label="Last name" />
+          </label>
+          <div className="setting-actions">
+            <button className="btn primary" onClick={() => void save()} disabled={busy || !first.trim()}>
+              {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button className="btn" onClick={() => setEditing(false)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {done && <p className="muted setting-note">Saved in your WhatsApp contacts. Your phone shows it within a minute.</p>}
       {error && <p className="form-error">{error}</p>}
     </section>
   );

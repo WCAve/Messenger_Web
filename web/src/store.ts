@@ -35,6 +35,8 @@ export interface State {
   /** Scroll to and highlight this message once it's in the list. */
   focus: { conversationId: number; sentAt: number; nonce: number } | null;
   typing: Record<number, Typing[]>;
+  /** WhatsApp: someone online, or when they were last seen (by conversation). */
+  presence: Record<number, { online: boolean; lastSeen: number | null }>;
   activeId: number | null;
   /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
   panel: { kind: 'chat' } | { kind: 'search'; date?: boolean } | { kind: 'message'; messageId: number } | null;
@@ -56,6 +58,7 @@ let state: State = {
   hasNewer: {},
   focus: null,
   typing: {},
+  presence: {},
   activeId: null,
   panel: null,
   receiptTick: 0,
@@ -171,6 +174,9 @@ export function applyEvent(e: ServerEvent) {
       break;
     case 'receipt':
       setState((s) => ({ receiptTick: s.receiptTick + 1 }));
+      break;
+    case 'presence':
+      setState((s) => ({ presence: { ...s.presence, [e.conversationId]: { online: e.online, lastSeen: e.lastSeen } } }));
       break;
     case 'typing': {
       if (!e.started) return clearTyping(e.conversationId, e.author);

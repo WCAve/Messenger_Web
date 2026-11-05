@@ -82,7 +82,7 @@ export const api = {
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
   setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
-  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia'>>) =>
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia' | 'waShowOnline'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
@@ -96,7 +96,15 @@ export const api = {
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
-  opened: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/open`),
+  opened: (id: number) => call<{ ok: true; presence?: { online: boolean; lastSeen: number | null } | null }>('POST', `/api/conversations/${id}/open`),
+  presence: (active: boolean) => call<{ ok: true }>('POST', '/api/presence', { active }),
+  saveWaContact: (jid: string, firstName: string, lastName: string) => call<{ ok: true }>('POST', `/api/whatsapp/contacts/${encodeURIComponent(jid)}`, { firstName, lastName }),
+  waProfile: () => call<WaProfile>('GET', '/api/whatsapp/profile'),
+  updateWaProfile: (p: { name?: string; about?: string; picture?: string | null }) => call<WaProfile>('POST', '/api/whatsapp/profile', p),
+  waStickers: () => call<{ stickers: { id: string; url: string }[] }>('GET', '/api/whatsapp/stickers'),
+  removeWaSticker: (id: string) => call<{ stickers: { id: string; url: string }[] }>('DELETE', `/api/whatsapp/stickers/${encodeURIComponent(id)}`),
+  importWaStickers: () => call<{ found: number; added: number }>('POST', '/api/whatsapp/stickers/import'),
+  sendWaSticker: (id: number, s: { id?: string; image?: string; quoteId?: number }) => call<Message>('POST', `/api/conversations/${id}/wa-sticker`, s),
   block: (id: number, blocked: boolean) => call<Conversation>('POST', `/api/conversations/${id}/block`, { blocked }),
   markUnread: (id: number) => call<Conversation>('POST', `/api/conversations/${id}/unread`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
@@ -119,6 +127,7 @@ export interface ServerSettings {
   waHistoryMessages: number;
   waNativeForward: boolean;
   waHistoryMedia: boolean;
+  waShowOnline: boolean;
   account: string | null;
   status: string;
   apiVersion: string | null;
@@ -153,4 +162,11 @@ export function uploadBackup(file: File, onProgress: (p: number) => void): Promi
     xhr.onerror = () => reject(new ApiError('Upload failed (connection lost). For very large files, copy the file into the backup folder instead.', 0));
     xhr.send(file);
   });
+}
+
+export interface WaProfile {
+  name: string;
+  about: string;
+  picture: string | null;
+  number: string | null;
 }

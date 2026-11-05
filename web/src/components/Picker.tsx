@@ -29,6 +29,7 @@ export function Picker({
   title,
   allowGif = true,
   allowStickers = true,
+  waStickers,
 }: {
   tab: PickerTab;
   onTab: (t: PickerTab) => void;
@@ -39,6 +40,8 @@ export function Picker({
   title?: string;
   allowGif?: boolean; // false = emoji only (choosing a reaction)
   allowStickers?: boolean; // Signal sticker packs (not for WhatsApp chats)
+  /** WhatsApp chats: your WhatsApp stickers instead of Signal's packs. */
+  waStickers?: { onPick: (id: string) => void; onImage: (file: File) => void };
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -60,7 +63,7 @@ export function Picker({
             GIF
           </button>
         )}
-        {allowGif && allowStickers && (
+        {allowGif && (allowStickers || waStickers) && (
           <button className={tab === 'sticker' ? 'on' : undefined} onClick={() => onTab('sticker')}>
             Stickers
           </button>
@@ -69,7 +72,7 @@ export function Picker({
           <Icon name="close" size={18} />
         </button>
       </div>
-      {tab === 'emoji' || !allowGif || (tab === 'sticker' && !allowStickers) ? (
+      {tab === 'emoji' || !allowGif || (tab === 'sticker' && !allowStickers && !waStickers) ? (
         <EmojiGrid
           onPick={(e) => {
             rememberEmoji(e);
@@ -78,6 +81,8 @@ export function Picker({
         />
       ) : tab === 'gif' ? (
         <GifGrid onPick={onGif} />
+      ) : waStickers ? (
+        <WaStickerGrid {...waStickers} />
       ) : (
         <StickerGrid onPick={onSticker} />
       )}
@@ -86,6 +91,45 @@ export function Picker({
 }
 
 // ---------------------------------------------------------------------------
+
+/** WhatsApp: stickers you've received, sent or imported, plus "make one from an image". */
+function WaStickerGrid({ onPick, onImage }: { onPick: (id: string) => void; onImage: (file: File) => void }) {
+  const [list, setList] = useState<{ id: string; url: string }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    api.waStickers().then((r) => setList(r.stickers), (e) => setError(e.message));
+  }, []);
+  return (
+    <div className="sticker-body">
+      <div className="sticker-grid">
+        <button className="sticker-cell sticker-make" onClick={() => input.current?.click()} title="Make a sticker from an image">
+          <Icon name="plus" size={26} />
+          <span>From an image</span>
+        </button>
+        <input ref={input} type="file" accept="image/*" hidden onChange={(e) => (e.target.files?.[0] && onImage(e.target.files[0]), (e.target.value = ''))} />
+        {list?.map((s) => (
+          <button
+            key={s.id}
+            className="sticker-cell"
+            onClick={() => onPick(s.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              if (confirm('Remove this sticker from your list?')) api.removeWaSticker(s.id).then((r) => setList(r.stickers), () => {});
+            }}
+            title="Sticker (right-click to remove from the list)"
+          >
+            <img src={s.url} alt="Sticker" loading="lazy" />
+          </button>
+        ))}
+      </div>
+      {list && !list.length && (
+        <p className="sticker-empty">Stickers you receive or send appear here. Stickers saved on your phone can be imported from Settings → WhatsApp → backup → <em>Import stickers from the folder</em>.</p>
+      )}
+      {error && <p className="form-error">{error}</p>}
+    </div>
+  );
+}
 
 const RECENT_STICKERS = 'sw-recent-stickers';
 function recentStickers(): (PickedSticker & { url: string })[] {

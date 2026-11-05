@@ -85,6 +85,18 @@ export const waha = {
   block: (contactId: string) => call<Json>('POST', '/api/contacts/block', { session: S(), contactId }, 20_000),
   unblock: (contactId: string) => call<Json>('POST', '/api/contacts/unblock', { session: S(), contactId }, 20_000),
   forward: (chatId: string, messageId: string) => call<Json>('POST', '/api/forwardMessage', { session: S(), chatId, messageId }, 120_000),
+  presence: (chatId: string) =>
+    call<{ id: string; presences: { participant: string; lastKnownPresence: string; lastSeen?: number | null }[] }>('GET', `/api/${enc(S())}/presence/${enc(chatId)}`, undefined, 15_000),
+  setPresence: (presence: 'online' | 'offline') => call<Json>('POST', `/api/${enc(S())}/presence`, { presence }, 15_000),
+  upsertContact: (chatId: string, firstName: string, lastName: string) =>
+    call<Json>('PUT', `/api/${enc(S())}/contacts/${enc(chatId)}`, { firstName, lastName }, 20_000),
+  profile: () => call<{ id?: string; name?: string | null; status?: string | null; picture?: string | null }>('GET', `/api/${enc(S())}/profile`, undefined, 20_000),
+  setProfileName: (name: string) => call<Json>('PUT', `/api/${enc(S())}/profile/name`, { name }, 20_000),
+  setProfileStatus: (status: string) => call<Json>('PUT', `/api/${enc(S())}/profile/status`, { status }, 20_000),
+  setProfilePicture: (file: WaFile) => call<Json>('PUT', `/api/${enc(S())}/profile/picture`, { file }, 60_000),
+  deleteProfilePicture: () => call<Json>('DELETE', `/api/${enc(S())}/profile/picture`, undefined, 20_000),
+  sendSticker: (chatId: string, file: WaFile, reply_to?: string) => call<Json>('POST', '/api/sendSticker', { session: S(), chatId, file, ...(reply_to ? { reply_to } : {}) }, 120_000),
+  archive: (chatId: string, on: boolean) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/${on ? 'archive' : 'unarchive'}`, undefined, 20_000),
   markUnread: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/unread`, undefined, 15_000),
   about: (contactId: string) => call<{ about?: string | null } | null>('GET', `/api/contacts/about?session=${enc(S())}&contactId=${enc(contactId)}`, undefined, 10_000),
   lidToPhone: (lid: string) => call<{ lid: string; pn?: string | null }>('GET', `/api/${enc(S())}/lids/${enc(lid)}`, undefined, 10_000),
@@ -119,7 +131,7 @@ export const waha = {
   },
 
   wsUrl(): string {
-    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected', 'engine.event'];
+    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected', 'engine.event', 'chat.archive'];
     const q = new URLSearchParams({ session: S(), events: events.join(',') });
     if (config.wahaApiKey) q.set('x-api-key', config.wahaApiKey);
     return config.wahaUrl.replace(/^http/, 'ws') + '/ws?' + q.toString();
