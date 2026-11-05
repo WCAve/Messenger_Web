@@ -114,14 +114,21 @@ setTimeout(() => {
   } catch (e) {
     log('warn', `tick fix failed: ${(e as Error).message}`);
   }
+  // One-off fixes for older data: once each (with a big history they take a while).
   try {
-    const n = backfillExtRaw();
-    if (n) log('info', `indexed ${n} WhatsApp message ids`);
+    if (kvGet('ext_raw_v1') !== 'done') {
+      const n = backfillExtRaw();
+      kvSet('ext_raw_v1', 'done');
+      if (n) log('info', `indexed ${n} WhatsApp message ids`);
+    }
   } catch (e) {
     log('warn', `id backfill failed: ${(e as Error).message}`);
   }
   try {
-    backfillGifFlags();
+    if (kvGet('gif_backfill_v1') !== 'done') {
+      backfillGifFlags();
+      kvSet('gif_backfill_v1', 'done'); // later videos get their flag when they're downloaded
+    }
   } catch (e) {
     log('warn', `GIF backfill failed: ${(e as Error).message}`);
   }
