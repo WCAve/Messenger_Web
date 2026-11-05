@@ -24,6 +24,7 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Linking via QR code, right in the web UI
 - Chat list with unread counts, typing and delivery state
 - Search: chats and messages from the chat list, or inside one chat (magnifier in the chat header); a result opens the chat at that message
+- Go to date: pick a day in the chat's search panel, or *Go to date…* in the chat menu, to jump to that day's first message
 - 1:1 and group chats, with history stored in SQLite
 - Text, links, replies (quotes), reactions (quick bar plus every emoji)
 - @mentions: type `@` in a group to pick someone; mentions of you are highlighted

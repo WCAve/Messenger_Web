@@ -3013,3 +3013,26 @@ img.emoji {
   color: var(--ink-3);
   padding: 0 8px;
 }
+
+/* Go to date (search panel) */
+.date-jump {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 4px;
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.date-jump input {
+  margin-left: auto;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--mist);
+  background: var(--paper);
+  color: var(--ink);
+  color-scheme: light dark;
+}
+aside[aria-label='Search messages'] .panel-body > .panel-empty {
+  padding: 6px 16px;
+}

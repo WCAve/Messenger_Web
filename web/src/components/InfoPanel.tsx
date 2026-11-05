@@ -287,14 +287,53 @@ function DisappearingSection({ conversation }: { conversation: Conversation }) {
 // ---------------------------------------------------------------------------
 
 /** Search inside the open chat; picking a result jumps to it. */
-export function SearchPanel({ conversation }: { conversation: Conversation }) {
+/** yyyy-mm-dd in your own time zone. */
+function dayString(ts: number) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function SearchPanel({ conversation, date = false }: { conversation: Conversation; date?: boolean }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [range, setRange] = useState<{ first: number | null; last: number | null } | null>(null);
+  const [day, setDay] = useState('');
+  const [dayNote, setDayNote] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const dateInput = useRef<HTMLInputElement>(null);
   const id = conversation.id;
 
-  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    if (!date) return input.current?.focus();
+    dateInput.current?.focus();
+    try {
+      dateInput.current?.showPicker?.();
+    } catch {
+      /* needs a click in some browsers */
+    }
+  }, [date]);
+  useEffect(() => {
+    setRange(null);
+    setDay('');
+    setDayNote(null);
+    api.messageNearDate(id).then((r) => setRange(r), () => {});
+  }, [id]);
+
+  async function goTo(value: string) {
+    setDay(value);
+    setDayNote(null);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    try {
+      const start = new Date(`${value}T00:00:00`).getTime();
+      const r = await api.messageNearDate(id, start);
+      if (r.sentAt === null) return setDayNote('No messages in this chat yet.');
+      if (dayString(r.sentAt) !== value) setDayNote(`No messages that day; showing ${formatDay(r.sentAt)}.`);
+      await jumpToMessage(id, r.sentAt);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   useEffect(() => {
     const term = q.trim();
     if (term.length < 2) return setResults(null);
@@ -319,6 +358,21 @@ export function SearchPanel({ conversation }: { conversation: Conversation }) {
           <Icon name="search" size={18} />
           <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search in ${conversation.title}`} aria-label="Search messages" />
         </div>
+        <label className="date-jump">
+          <Icon name="calendar" size={18} />
+          <span>Go to date</span>
+          <input
+            ref={dateInput}
+            type="date"
+            value={day}
+            min={range?.first ? dayString(range.first) : undefined}
+            max={range?.last ? dayString(Math.max(range.last, Date.now())) : undefined}
+            onChange={(e) => void goTo(e.target.value)}
+            aria-label="Go to date"
+          />
+        </label>
+        {dayNote && <p className="muted panel-empty">{dayNote}</p>}
+        {range?.first && !results && <p className="muted panel-empty">History here goes back to {formatDay(range.first)}.</p>}
         {error && <p className="form-error pad">{error}</p>}
         {results && !results.length && <p className="muted panel-empty">No messages found.</p>}
         {!results && <p className="muted panel-empty">Search the messages Messenger Web has for this chat.</p>}

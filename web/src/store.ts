@@ -37,7 +37,7 @@ export interface State {
   typing: Record<number, Typing[]>;
   activeId: number | null;
   /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
-  panel: { kind: 'chat' } | { kind: 'search' } | { kind: 'message'; messageId: number } | null;
+  panel: { kind: 'chat' } | { kind: 'search'; date?: boolean } | { kind: 'message'; messageId: number } | null;
   /** Unsent text per chat (this browser only). */
   drafts: Record<number, Draft>;
   /** The message being forwarded (the forward dialog is open). */

@@ -1040,6 +1040,23 @@ export function setConversationTimer(conversationId: number, seconds: number) {
   db.prepare('UPDATE conversations SET expire_timer = ? WHERE id = ?').run(seconds, conversationId);
 }
 
+/**
+ * "Go to date": the first message on or after a moment (else the last one before it), and the
+ * oldest and newest message times for the date picker's range.
+ */
+export function messageNearDate(conversationId: number, ts: number | null) {
+  const bound = (dir: 'ASC' | 'DESC') =>
+    db.prepare<[number], { t: number }>(`SELECT sent_ts AS t FROM messages WHERE conversation_id = ? ORDER BY sent_ts ${dir} LIMIT 1`).get(conversationId)?.t ?? null;
+  let sentAt: number | null = null;
+  if (ts !== null) {
+    sentAt =
+      db.prepare<[number, number], { t: number }>('SELECT sent_ts AS t FROM messages WHERE conversation_id = ? AND sent_ts >= ? ORDER BY sent_ts ASC LIMIT 1').get(conversationId, ts)?.t ??
+      db.prepare<[number, number], { t: number }>('SELECT sent_ts AS t FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC LIMIT 1').get(conversationId, ts)?.t ??
+      null;
+  }
+  return { sentAt, first: bound('ASC'), last: bound('DESC') };
+}
+
 /** Messages around a moment (for jumping to a search result or a quoted message). */
 export function listMessagesAround(conversationId: number, ts: number, limit: number) {
   const half = Math.floor(limit / 2);

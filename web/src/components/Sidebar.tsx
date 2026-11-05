@@ -416,6 +416,9 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
           <Icon name="mute" size={18} /> Mute notifications…
         </button>
       )}
+      <button role="menuitem" onClick={() => (setState({ activeId: c.id, panel: { kind: 'search', date: true } }), onClose())}>
+        <Icon name="calendar" size={18} /> Go to date…
+      </button>
       {c.unread || c.markedUnread ? (
         <button role="menuitem" onClick={() => void markRead()}>
           <Icon name="read" size={18} /> Mark as read

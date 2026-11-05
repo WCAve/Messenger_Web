@@ -123,7 +123,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
         <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt) => setLightbox({ att, authorName, sentAt })} />
       )}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
-      {active && panel?.kind === 'search' && <SearchPanel conversation={active} />}
+      {active && panel?.kind === 'search' && <SearchPanel conversation={active} date={!!panel.date} />}
       {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>

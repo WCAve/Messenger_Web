@@ -79,6 +79,7 @@ import {
   listMessages,
   listMessagesAfter,
   listMessagesAround,
+  messageNearDate,
   markConversationRead,
   renderBody,
   searchMessages,
@@ -631,6 +632,11 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/directory/refresh', async () => {
     await refreshDirectory();
     return { contacts: listContacts(), groups: listGroups() };
+  });
+
+  r.get('/api/conversations/:id/date', (ctx) => {
+    const ts = ctx.query.get('ts');
+    return messageNearDate(conv(ctx).id, ts && /^\d+$/.test(ts) ? Number(ts) : null);
   });
 
   r.get('/api/conversations/:id/messages', (ctx) => {
