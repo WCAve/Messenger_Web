@@ -225,6 +225,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (status !== 'WORKING' && p.startsWith(`/api/${SESSION}/`)) return json(res, 422, { message: 'Session status is not as expected' });
 
+    // Like WEBJS: chats carry isMuted / muteExpiration (seconds, -1 = always). Familie is muted on the phone.
+    if (p === `/api/${SESSION}/chats`) {
+      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0 })));
+    }
     if (p === `/api/${SESSION}/chats/overview`) return json(res, 200, overview().slice(0, Number(url.searchParams.get('limit') ?? 20)));
     const msgs = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/messages(?:/([^/]+))?$`));
     if (msgs && m === 'GET') {

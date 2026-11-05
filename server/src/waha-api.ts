@@ -66,6 +66,7 @@ export const waha = {
     return Buffer.from(await res.arrayBuffer());
   },
 
+  chats: (limit: number) => call<Json[]>('GET', `/api/${enc(S())}/chats?limit=${limit}&offset=0&sortBy=conversationTimestamp&sortOrder=desc`, undefined, 60_000),
   chatsOverview: (limit: number) => call<Json[]>('GET', `/api/${enc(S())}/chats/overview?limit=${limit}&offset=0`),
   messages: (chatId: string, limit: number, downloadMedia: boolean) =>
     call<Json[]>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages?limit=${limit}&downloadMedia=${downloadMedia}&sortBy=timestamp&sortOrder=desc`, undefined, 120_000),

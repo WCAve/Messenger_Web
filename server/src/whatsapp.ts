@@ -29,7 +29,9 @@ import {
   listWaGroups,
   messageDto,
   nameForKey,
+  renderBody,
   self,
+  setConversationFlags,
   setWaGroupMembers,
   statusRank,
   updateMessage,
@@ -270,6 +272,8 @@ export function startWhatsApp(logger: Logger) {
   stopped = false;
   void check();
   dirTimer = setInterval(() => state.status === 'connected' && refreshDirectory().catch(() => {}), 6 * 3600_000);
+  // Mutes change more often than names: check those every 15 minutes.
+  setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 15 * 60_000).unref();
 }
 
 export function stopWhatsApp() {
@@ -304,6 +308,7 @@ export async function refreshDirectory() {
     upsertWaContact({ jid, name: c.name ?? c.Name ?? null, pushName: c.pushname ?? c.pushName ?? c.PushName ?? null, number: c.number ? '+' + String(c.number).replace(/\D/g, '') : undefined });
   }
   await refreshGroupNames().catch((e) => log.warn(`whatsapp: group names: ${(e as Error).message}`));
+  await syncMutes().catch((e) => log.warn(`whatsapp: mute status: ${(e as Error).message}`));
   for (const g of listWaGroups()) {
     if (!g.group_name) await refreshGroupName(g).catch(() => {});
     await refreshGroup(g).catch(() => {});
@@ -510,7 +515,13 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
   if (m.replyTo) {
     const q = findMessageByExt(m.replyTo.id ?? m.replyTo.messageId);
     const qAuthor = q ? q.author : m.replyTo.participant ? keyFor((await resolve(m.replyTo.participant)) ?? '') : 'unknown';
-    quote = { sentTs: q?.sent_ts ?? 0, author: qAuthor, text: m.replyTo.body ?? (m.replyTo.hasMedia ? 'Attachment' : '') };
+    // WhatsApp sends the quoted text raw ("@2718973… be like"): use our copy, or at least resolve its mentions.
+    let text = q ? renderBody(q.body, q.ranges)?.text ?? null : null;
+    if (text === null && m.replyTo.body) {
+      const rich = await richFromWa(m.replyTo.body, conv);
+      text = renderBody(rich.body, rich.ranges ? JSON.stringify(rich.ranges) : null)?.text ?? m.replyTo.body;
+    }
+    quote = { sentTs: q?.sent_ts ?? 0, author: qAuthor, text: text || (m.replyTo.hasMedia || q?.attachments ? 'Attachment' : '') };
   }
 
   const ts = freeTimestamp(conv.id, Math.round(Number(m.timestamp) * 1000) || Date.now(), author);
@@ -535,6 +546,61 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     emitConversation(conv.id);
   }
   return row;
+}
+
+/**
+ * When the chat is muted on your phone, as far as the engine tells: WEBJS/WPP report isMuted and
+ * muteExpiration (seconds, -1 = always), NOWEB muteEndTime (ms). GOWS doesn't pass it on.
+ * Returns undefined when this engine says nothing about muting.
+ */
+function mutedUntilOf(chat: Json): number | undefined {
+  if (!chat || typeof chat !== 'object') return undefined;
+  if (typeof chat.isMuted === 'boolean' || 'muteExpiration' in chat) {
+    const exp = Number(chat.muteExpiration ?? 0);
+    if (!chat.isMuted && exp <= 0) return 0;
+    if (exp < 0) return FOREVER;
+    return exp > 1e12 ? exp : exp * 1000;
+  }
+  for (const k of ['muteEndTime', 'mutedUntil', 'MutedUntil', 'muteEnd']) {
+    if (k in chat) {
+      const v = Number(chat[k] ?? 0);
+      if (v < 0) return FOREVER;
+      return v > 1e12 ? v : v * 1000;
+    }
+  }
+  return undefined;
+}
+const FOREVER = 8.64e15;
+let muteNoticeShown = false;
+
+/** Copy mutes from your phone. Mutes you set here are kept unless the phone has news about that chat. */
+async function syncMutes() {
+  const chats = await waha.chats(300);
+  let known = 0;
+  let changed = 0;
+  for (const c of chats ?? []) {
+    const id = typeof c.id === 'string' ? c.id : c.id?._serialized;
+    if (!id || skipChat(id)) continue;
+    const until = mutedUntilOf(c) ?? mutedUntilOf(c._chat);
+    if (until === undefined) continue;
+    known++;
+    const jid = await resolve(id);
+    if (!jid) continue;
+    const conv = getOrCreateWaChat(jid, jid.endsWith('@g.us') ? c.name ?? null : null);
+    const remote = until > Date.now() ? until : 0;
+    const last = kvGet(`wa_mute:${jid}`);
+    if (String(remote) === last) continue; // nothing changed on the phone since last time
+    kvSet(`wa_mute:${jid}`, String(remote));
+    if ((conv.muted_until > Date.now() ? conv.muted_until : 0) !== remote) {
+      setConversationFlags(conv.id, { mutedUntil: remote });
+      changed++;
+      if (conv.last_message_at) emitConversation(conv.id);
+    }
+  }
+  if (!known && !muteNoticeShown) {
+    muteNoticeShown = true;
+    log.info(`whatsapp: this WAHA engine (${state.engine ?? 'unknown'}) doesn't report which chats are muted on your phone`);
+  } else if (changed) log.info(`whatsapp: copied ${changed} mute setting${changed === 1 ? '' : 's'} from your phone`);
 }
 
 /** Name from a group object, whatever the engine: GOWS {JID, Name}, NOWEB {id, subject}, WEBJS {name | groupMetadata.subject}. */
