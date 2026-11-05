@@ -10,6 +10,7 @@ import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar, SidebarResizer } from './components/Sidebar';
 import { applyEvent, getState, setState, upsertConversation, upsertMessages, useStore } from './store';
 import { getPrefs, usePrefs } from './prefs';
+import { notificationIcon } from './notifications';
 import type { ServerEvent } from './types';
 
 export function App() {
@@ -217,17 +218,27 @@ function notify(e: Extract<ServerEvent, { type: 'message' }>) {
   if (conv && conv.mutedUntil > Date.now() && !m.mentions?.some((x) => x.key === 'self')) return;
   if (Date.now() - m.sentAt > 10 * 60_000) return; // don't notify for a backlog
   notified.add(m.id);
-  const c = s.conversations[m.conversationId];
+  // The first message of a new chat can arrive just before the chat itself: wait a moment for it.
+  if (!s.conversations[m.conversationId]) return void setTimeout(() => show(m), 800);
+  show(m);
+}
+
+function show(m: Extract<ServerEvent, { type: 'message' }>['message']) {
+  const prefs = getPrefs();
+  const c = getState().conversations[m.conversationId];
   const title = c?.kind === 'group' ? `${m.authorName} in ${c.title}` : m.authorName;
   const body = !prefs.notificationPreview
     ? 'New message'
     : m.kind === 'sticker'
       ? [m.sticker?.emoji, 'Sticker'].filter(Boolean).join(' ')
       : (m.body ? hideSpoilers(m.body, m.styles) : null) ?? (m.attachments.length ? 'Sent an attachment' : 'New message');
-  const n = new Notification(title, { body, tag: `conv-${m.conversationId}`, icon: '/icon.svg' });
-  n.onclick = () => {
-    window.focus();
-    setState({ activeId: m.conversationId });
-    n.close();
-  };
+  // The chat's picture, like WhatsApp (the group's, or the person's).
+  void notificationIcon(c).then((icon) => {
+    const n = new Notification(title, { body, tag: `conv-${m.conversationId}`, icon });
+    n.onclick = () => {
+      window.focus();
+      setState({ activeId: m.conversationId });
+      n.close();
+    };
+  });
 }
