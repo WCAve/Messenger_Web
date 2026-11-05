@@ -68,8 +68,9 @@ export const waha = {
 
   chats: (limit: number) => call<Json[]>('GET', `/api/${enc(S())}/chats?limit=${limit}&offset=0&sortBy=conversationTimestamp&sortOrder=desc`, undefined, 60_000),
   chatsOverview: (limit: number) => call<Json[]>('GET', `/api/${enc(S())}/chats/overview?limit=${limit}&offset=0`),
+  // Large limits make WEBJS page back through the phone's history, which takes a while.
   messages: (chatId: string, limit: number, downloadMedia: boolean) =>
-    call<Json[]>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages?limit=${limit}&downloadMedia=${downloadMedia}&sortBy=timestamp&sortOrder=desc`, undefined, 120_000),
+    call<Json[]>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages?limit=${limit}&downloadMedia=${downloadMedia}&sortBy=timestamp&sortOrder=desc`, undefined, limit > 200 ? 30 * 60_000 : 120_000),
   message: (chatId: string, id: string) => call<Json>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(id)}?downloadMedia=true`),
   contacts: () => call<Json[]>('GET', `/api/contacts/all?session=${enc(S())}`, undefined, 60_000),
   groups: () => call<Json>('GET', `/api/${enc(S())}/groups`, undefined, 60_000),

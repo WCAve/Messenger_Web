@@ -56,7 +56,7 @@ In a group, the ticks turn into two outlined circles once anyone has received th
 
 WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S** on each avatar when both are set up.
 
-- Recent chats and messages are imported once after linking (40 chats × 40 messages by default; see [Settings](#settings))
+- Recent chats and messages are imported after linking (40 chats × 40 messages by default). Settings → WhatsApp lets you pick more, up to "as many as possible", and import again; messages you already have are skipped
 - Text with WhatsApp formatting, replies, @mentions with suggestions, reactions, photos/videos/files both ways, voice notes and GIFs that others send
 - Edit (15 minutes, WhatsApp's limit) and delete for everyone, typing and "recording audio…" indicators, read receipts, ticks, per-person read lists in groups
 - Contact info shows someone's About text; group info shows the group description
@@ -164,7 +164,7 @@ Back up both appdata folders:
 | `WAHA_URL` | (none) | WAHA's address; empty = no WhatsApp |
 | `WAHA_API_KEY` | (none) | WAHA's API key |
 | `WAHA_SESSION` | `default` | WAHA session to use (created if missing) |
-| `WAHA_HISTORY_CHATS` / `WAHA_HISTORY_MESSAGES` | `40` / `40` | How much WhatsApp history to import once after linking |
+| `WAHA_HISTORY_CHATS` / `WAHA_HISTORY_MESSAGES` | `40` / `40` | How much WhatsApp history to import (`0` = as many as possible). Can also be changed in Settings → WhatsApp, which wins |
 | `SIGNAL_NUMBER` | first linked account | Only if signal-api holds several accounts |
 | `GIPHY_API_KEY` | (none) | Enables the GIF picker. Free: [developers.giphy.com](https://developers.giphy.com/dashboard/) → Create an App → API. The browser talks to Giphy directly, as Giphy's terms require |
 | `GIPHY_RATING` | `pg-13` | Content rating for GIF results: `g`, `pg`, `pg-13`, `r` |

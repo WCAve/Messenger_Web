@@ -169,12 +169,62 @@ function ProfileSection() {
 }
 
 /** Linking and status of WhatsApp (through WAHA). */
+const HISTORY_CHATS = [[40, '40 chats'], [100, '100 chats'], [250, '250 chats'], [0, 'All chats']] as const;
+const HISTORY_MESSAGES = [[40, '40 messages'], [200, '200 messages'], [1000, '1,000 messages'], [0, 'As many as possible']] as const;
+
+/** How much history "Import history now" fetches (and the automatic import after linking). */
+function HistorySettings() {
+  const [s, setS] = useState<ServerSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.settings().then(setS, (e) => setError(e.message));
+  }, []);
+  if (!s) return error ? <p className="form-error setting-note">{error}</p> : null;
+  async function save(patch: { waHistoryChats?: number; waHistoryMessages?: number }) {
+    try {
+      setS(await api.updateSettings(patch));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  const pick = <T extends readonly (readonly [number, string])[]>(opts: T, v: number) => (opts.some(([n]) => n === v) ? opts : [...opts, [v, String(v)] as const]);
+  return (
+    <div className="history-settings">
+      <label>
+        <span>History to import</span>
+        <span className="history-pickers">
+          <select value={s.waHistoryChats} onChange={(e) => void save({ waHistoryChats: Number(e.target.value) })}>
+            {pick(HISTORY_CHATS, s.waHistoryChats).map(([n, label]) => (
+              <option key={n} value={n}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <span className="muted">×</span>
+          <select value={s.waHistoryMessages} onChange={(e) => void save({ waHistoryMessages: Number(e.target.value) })}>
+            {pick(HISTORY_MESSAGES, s.waHistoryMessages).map(([n, label]) => (
+              <option key={n} value={n}>
+                {n === 0 ? label : `${label} each`}
+              </option>
+            ))}
+          </select>
+        </span>
+      </label>
+      <p className="muted setting-note">
+        Counted from the newest. Messages you already have are skipped. Larger imports fetch older messages from your phone and can take a long time, and photos and videos in them are downloaded too.
+      </p>
+      {error && <p className="form-error setting-note">{error}</p>}
+    </div>
+  );
+}
+
 function WhatsAppSection() {
   const wa = useStore((s) => s.whatsapp);
   const [nonce, setNonce] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [importAsked, setImportAsked] = useState(false);
 
   // QR codes expire after about 20 seconds: fetch a fresh one.
   useEffect(() => {
@@ -219,7 +269,22 @@ function WhatsAppSection() {
           <dd>{[wa.version, wa.engine].filter(Boolean).join(', ') || '…'}</dd>
         </dl>
       )}
-      {wa.importing && <p className="setting-note">Importing recent chats from WhatsApp…</p>}
+      {wa.importing && (
+        <p className="setting-note">
+          <span className="spinner small" /> Importing history from WhatsApp
+          {wa.importProgress?.total ? ` (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})` : ''}…
+        </p>
+      )}
+      {!wa.importing && wa.lastImport && importAsked && (
+        <p className={wa.lastImport.error ? 'form-error setting-note' : 'muted setting-note'}>
+          {wa.lastImport.error
+            ? `Import failed: ${wa.lastImport.error}`
+            : wa.lastImport.messages
+              ? `Imported ${wa.lastImport.messages} messages from ${wa.lastImport.chats} chats.`
+              : 'No older messages found that weren’t here already.'}
+        </p>
+      )}
+      {wa.status === 'connected' && <HistorySettings />}
       {wa.status === 'scan_qr' && (
         <div className="wa-link">
           <ol>
@@ -257,12 +322,12 @@ function WhatsAppSection() {
             disabled={busy || wa.importing}
             onClick={() =>
               void run(async () => {
-                const r = await api.whatsappImport();
-                setNotice(r.messages ? `Imported ${r.messages} messages from ${r.chats} chats.` : 'No older messages found that weren’t here already.');
+                setImportAsked(true);
+                await api.whatsappImport();
               })
             }
           >
-            Import recent history
+            Import history now
           </button>
         )}
         {wa.status === 'failed' && (

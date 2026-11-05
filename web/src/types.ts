@@ -10,6 +10,8 @@ export interface WaState {
   version?: string;
   error?: string;
   importing?: boolean;
+  importProgress?: { done: number; total: number };
+  lastImport?: { chats: number; messages: number; at: number; error?: string };
 }
 
 export interface SignalState {

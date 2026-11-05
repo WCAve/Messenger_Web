@@ -404,7 +404,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     await wa(() => restartWhatsApp());
     return getWaState();
   });
-  r.post('/api/whatsapp/import', async () => wa(() => importHistoryNow()));
+  r.post('/api/whatsapp/import', async () => wa(async () => importHistoryNow()));
   r.post('/api/whatsapp/refresh', async () => {
     await wa(() => refreshWaDirectory());
     return { ok: true };

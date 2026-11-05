@@ -2844,3 +2844,27 @@ img.emoji {
 .chat-row-wrap.drop-after::after {
   bottom: -1px;
 }
+
+/* WhatsApp history import size */
+.history-settings label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0 2px;
+}
+.history-pickers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.history-pickers select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--mist);
+  background: var(--paper);
+  color: var(--ink);
+}

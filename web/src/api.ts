@@ -48,7 +48,7 @@ export const api = {
   whatsapp: () => call<WaState>('GET', '/api/whatsapp'),
   whatsappLogout: () => call<WaState>('POST', '/api/whatsapp/logout'),
   whatsappRestart: () => call<WaState>('POST', '/api/whatsapp/restart'),
-  whatsappImport: () => call<{ chats: number; messages: number }>('POST', '/api/whatsapp/import'),
+  whatsappImport: () => call<{ started: true }>('POST', '/api/whatsapp/import'),
   whatsappRefresh: () => call<{ ok: true }>('POST', '/api/whatsapp/refresh'),
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>
@@ -73,7 +73,7 @@ export const api = {
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
   setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
-  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews'>>) =>
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
@@ -105,6 +105,8 @@ export interface ServerSettings {
   sendReadReceipts: boolean;
   sendTypingIndicators: boolean;
   sendLinkPreviews: boolean;
+  waHistoryChats: number; // 0 = as many as possible
+  waHistoryMessages: number;
   account: string | null;
   status: string;
   apiVersion: string | null;

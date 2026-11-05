@@ -9,6 +9,9 @@ const DEFAULTS = {
   sendReadReceipts: config.sendReadReceipts,
   sendTypingIndicators: config.sendTypingIndicators,
   sendLinkPreviews: config.sendLinkPreviews,
+  // WhatsApp history import: how many chats, and messages per chat. 0 = as many as WhatsApp gives.
+  waHistoryChats: config.wahaHistoryChats,
+  waHistoryMessages: config.wahaHistoryMessages,
 };
 export type ServerSettings = typeof DEFAULTS;
 
@@ -16,14 +19,19 @@ export function getSettings(): ServerSettings {
   const out = { ...DEFAULTS };
   for (const k of Object.keys(DEFAULTS) as (keyof ServerSettings)[]) {
     const v = kvGet(`setting:${k}`);
-    if (v === 'true' || v === 'false') out[k] = v === 'true';
+    if (typeof DEFAULTS[k] === 'number') {
+      if (v !== undefined && /^\d+$/.test(v)) (out as Record<string, unknown>)[k] = Number(v);
+    } else if (v === 'true' || v === 'false') (out as Record<string, unknown>)[k] = v === 'true';
   }
   return out;
 }
 
 export function updateSettings(patch: Partial<Record<keyof ServerSettings, unknown>>): ServerSettings {
   for (const k of Object.keys(DEFAULTS) as (keyof ServerSettings)[]) {
-    if (typeof patch[k] === 'boolean') kvSet(`setting:${k}`, String(patch[k]));
+    const v = patch[k];
+    if (typeof DEFAULTS[k] === 'number') {
+      if (typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 100_000) kvSet(`setting:${k}`, String(v));
+    } else if (typeof v === 'boolean') kvSet(`setting:${k}`, String(v));
   }
   return getSettings();
 }

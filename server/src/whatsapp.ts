@@ -9,6 +9,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isSafeId, isSilentVideo, localPath } from './attachments.js';
 import { config } from './config.js';
+import { getSettings } from './settings.js';
 import { db, kvGet, kvSet } from './db.js';
 import { broadcast } from './events.js';
 import { type Ranges, parseWaMarkup, placeMentions, toWaText } from './richtext.js';
@@ -54,6 +55,8 @@ export interface WaState {
   version?: string;
   error?: string;
   importing?: boolean;
+  importProgress?: { done: number; total: number };
+  lastImport?: { chats: number; messages: number; at: number; error?: string };
 }
 
 type Logger = { info: (m: string) => void; warn: (m: string) => void; debug?: (m: string) => void };
@@ -249,26 +252,30 @@ let importing = false;
 export async function runHistoryImport(): Promise<{ chats: number; messages: number }> {
   if (importing) return { chats: 0, messages: 0 };
   importing = true;
-  setState({ ...state, importing: true });
+  setState({ ...state, importing: true, importProgress: undefined });
   try {
-    const r = await importHistory();
+    const r = await importHistory((done, total) => setState({ ...state, importProgress: { done, total } }));
     log.info(`whatsapp: history import: ${r.messages} new messages from ${r.chats} chats`);
     await refreshDirectory().catch(() => {});
+    setState({ ...state, lastImport: { ...r, at: Date.now() } });
     return r;
   } catch (e) {
     const msg = (e as Error).message;
     log.warn(`whatsapp: history import failed: ${msg}${/store/i.test(msg) ? ' (NOWEB engine: enable the store in the session config, or use GOWS)' : ''}`);
+    setState({ ...state, lastImport: { chats: 0, messages: 0, at: Date.now(), error: msg } });
     throw e;
   } finally {
     importing = false;
-    setState({ ...state, importing: false });
+    setState({ ...state, importing: false, importProgress: undefined });
   }
 }
 
-/** Import again now (button in Settings). */
-export async function importHistoryNow() {
+/** Import again now (button in Settings). Runs in the background: a big import takes many minutes. */
+export function importHistoryNow() {
   requireWa();
-  return runHistoryImport();
+  if (importing) throw Object.assign(new Error('An import is already running'), { httpStatus: 409 });
+  runHistoryImport().catch(() => {});
+  return { started: true };
 }
 
 export function startWhatsApp(logger: Logger) {
@@ -817,13 +824,17 @@ async function handleEvent(e: Json) {
 
 // ---------- history ----------
 
-async function importHistory(): Promise<{ chats: number; messages: number }> {
-  const chats = await waha.chatsOverview(config.wahaHistoryChats);
+async function importHistory(progress: (done: number, total: number) => void = () => {}): Promise<{ chats: number; messages: number }> {
+  const { waHistoryChats, waHistoryMessages } = getSettings();
+  const chats = await waha.chatsOverview(waHistoryChats || 5000);
   log.info(`whatsapp: checking ${chats?.length ?? 0} recent chats for history`);
   let total = 0;
   let touched = 0;
   let failures = 0;
+  let done = 0;
+  progress(0, chats?.length ?? 0);
   for (const c of chats ?? []) {
+    progress(done++, chats.length);
     const idRaw = typeof c.id === 'string' ? c.id : c.id?._serialized;
     if (!idRaw || skipChat(idRaw)) continue;
     const id = await resolve(idRaw);
@@ -832,7 +843,7 @@ async function importHistory(): Promise<{ chats: number; messages: number }> {
     if (!id.endsWith('@g.us') && c.name && !waContact(id)?.name) upsertWaContact({ jid: id, pushName: c.name });
     let list: Json[] = [];
     try {
-      list = await waha.messages(idRaw, config.wahaHistoryMessages, true);
+      list = await waha.messages(idRaw, waHistoryMessages || 100_000, true);
     } catch (e) {
       log.warn(`whatsapp: history for ${id}: ${(e as Error).message}`);
       continue;
