@@ -21,6 +21,7 @@ import {
   type Reaction,
   conversationDto,
   findMessageByExt,
+  findWaChat,
   freeTimestamp,
   getConversation,
   getMessage,
@@ -596,17 +597,7 @@ async function syncMutes() {
     const jid = await resolve(id);
     if (!jid) continue;
     const conv = getOrCreateWaChat(jid, jid.endsWith('@g.us') ? c.name ?? null : null);
-    // "Mark as unread" on the phone shows up as an unread count of -1 (WEBJS).
-    if (unreadCount !== undefined) {
-      const marked = Number(unreadCount) < 0 ? '1' : '0';
-      if (kvGet(`wa_unread:${jid}`) !== marked) {
-        kvSet(`wa_unread:${jid}`, marked);
-        if (!!conv.marked_unread !== (marked === '1')) {
-          setConversationFlags(conv.id, { markedUnread: marked === '1' });
-          if (conv.last_message_at) emitConversation(conv.id);
-        }
-      }
-    }
+    if (unreadCount !== undefined) phoneUnread(conv, Number(unreadCount));
     if (until === undefined) continue;
     known++;
     const remote = until > Date.now() ? until : 0;
@@ -623,6 +614,19 @@ async function syncMutes() {
     muteNoticeShown = true;
     log.info(`whatsapp: this WAHA engine (${state.engine ?? 'unknown'}) doesn't report which chats are muted on your phone`);
   } else if (changed) log.info(`whatsapp: copied ${changed} mute setting${changed === 1 ? '' : 's'} from your phone`);
+}
+
+/**
+ * "Mark as unread" on the phone shows up as an unread count of -1 (WEBJS). From the periodic check only
+ * changes are copied (so a mark you cleared here isn't put back); a live event always is.
+ */
+function phoneUnread(conv: ConversationRow, unreadCount: number, live = false) {
+  const marked = unreadCount < 0 ? '1' : '0';
+  if (!live && kvGet(`wa_unread:${conv.wa_id}`) === marked) return;
+  kvSet(`wa_unread:${conv.wa_id}`, marked);
+  if (!!conv.marked_unread === (marked === '1')) return;
+  setConversationFlags(conv.id, { markedUnread: marked === '1' });
+  if (conv.last_message_at) emitConversation(conv.id);
 }
 
 /** Name from a group object, whatever the engine: GOWS {JID, Name}, NOWEB {id, subject}, WEBJS {name | groupMetadata.subject}. */
@@ -645,11 +649,24 @@ function groupIdOf(g: Json): string | null {
 }
 
 const groupNameTried = new Map<string, number>();
+let descWarnings = 0;
+/** Group info was opened: fetch its name and description fresh (at most once a minute). */
+export async function refreshGroupInfoWa(conv: ConversationRow) {
+  if (state.status !== 'connected') return;
+  try {
+    await refreshGroupName(conv);
+  } catch (e) {
+    if (descWarnings++ < 5) log.warn(`whatsapp: group info for ${conv.wa_id}: ${(e as Error).message}`);
+  }
+}
 async function refreshGroupName(conv: ConversationRow) {
   const last = groupNameTried.get(conv.wa_id!) ?? 0;
   if (Date.now() - last < 60_000) return;
   groupNameTried.set(conv.wa_id!, Date.now());
   const g = await waha.group(conv.wa_id!);
+  if (descriptionOf(g) === undefined && descWarnings++ < 5) {
+    log.info(`whatsapp: group ${conv.wa_id} came without a description field (fields: ${Object.keys(g?.groupMetadata ?? g ?? {}).slice(0, 40).join(', ')})`);
+  }
   const name = groupNameOf(g);
   const desc = descriptionOf(g);
   if (desc !== undefined && desc !== conv.group_description) setGroupDescription(conv.id, desc);
@@ -761,6 +778,18 @@ async function handleEvent(e: Json) {
       if (poll.votes[voter] && poll.votes[voter].count > count) return;
       poll.votes[voter] = { options, count };
       emitMessage(updateMessage(target.id, { poll: JSON.stringify(poll) }));
+      return;
+    }
+    case 'engine.event': {
+      // WEBJS passes on whatsapp-web.js's own events; "unread_count" fires as soon as a chat's count
+      // changes, including when you mark it unread (or read it) on your phone.
+      if (p?.event !== 'unread_count') return;
+      const id = typeof p.data?.id === 'string' ? p.data.id : p.data?.id?._serialized;
+      if (!id || skipChat(id) || typeof p.data?.unreadCount !== 'number') return;
+      const jid = await resolve(id);
+      if (!jid) return;
+      const conv = findWaChat(jid);
+      if (conv) phoneUnread(conv, p.data.unreadCount, true);
       return;
     }
     case 'call.received':
@@ -921,6 +950,7 @@ export async function deleteWa(conv: ConversationRow, m: MessageRow) {
 export async function markReadWa(conv: ConversationRow, unread: MessageRow[]) {
   const ids = unread.filter((m) => !m.outgoing && m.ext_id && !m.ext_id.startsWith('call:')).map((m) => m.ext_id!);
   await waha.seen(conv.wa_id!, ids.slice(-50));
+  kvSet(`wa_unread:${conv.wa_id}`, '0'); // reading it clears "marked as unread" on the phone too
 }
 
 export async function markUnreadWa(conv: ConversationRow) {
@@ -928,17 +958,21 @@ export async function markUnreadWa(conv: ConversationRow) {
   kvSet(`wa_unread:${conv.wa_id}`, '1');
 }
 
+let aboutWarnings = 0;
 /** Someone's "about" text (cached for an hour; null when they hide it or have none). */
 export async function waAbout(jid: string): Promise<string | null> {
   const cached = waAboutCached(jid);
-  if (cached && Date.now() - cached.at < 3600_000) return cached.about;
+  // An empty answer is asked again sooner: it may have been a hiccup rather than their privacy setting.
+  if (cached && Date.now() - cached.at < (cached.about ? 3600_000 : 5 * 60_000)) return cached.about;
   if (state.status !== 'connected') return cached?.about ?? null;
   try {
     const r = await waha.about(jid);
     const about = typeof r === 'string' ? r : r?.about ?? null;
+    if (!about && aboutWarnings++ < 5) log.info(`whatsapp: no about text for ${jid} (WAHA answered ${JSON.stringify(r)?.slice(0, 200)})`);
     setWaAbout(jid, about ? String(about) : null);
     return about ? String(about) : null;
-  } catch {
+  } catch (e) {
+    if (aboutWarnings++ < 5) log.warn(`whatsapp: about for ${jid}: ${(e as Error).message}`);
     return cached?.about ?? null;
   }
 }

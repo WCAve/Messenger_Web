@@ -622,6 +622,10 @@ export function listWaContacts() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export function findWaChat(jid: string): ConversationRow | undefined {
+  return db.prepare<[string], ConversationRow>('SELECT * FROM conversations WHERE wa_id = ?').get(jid);
+}
+
 /** A WhatsApp chat by its id, created on first sight. */
 export function getOrCreateWaChat(jid: string, name?: string | null): ConversationRow {
   const group = jid.endsWith('@g.us');

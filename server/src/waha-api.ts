@@ -111,7 +111,7 @@ export const waha = {
   },
 
   wsUrl(): string {
-    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected'];
+    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected', 'engine.event'];
     const q = new URLSearchParams({ session: S(), events: events.join(',') });
     if (config.wahaApiKey) q.set('x-api-key', config.wahaApiKey);
     return config.wahaUrl.replace(/^http/, 'ws') + '/ws?' + q.toString();

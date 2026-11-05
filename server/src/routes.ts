@@ -19,6 +19,7 @@ import {
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
+  refreshGroupInfoWa,
   waAbout,
   reactWa,
   refreshDirectory as refreshWaDirectory,
@@ -509,7 +510,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.get('/api/conversations/:id', (ctx) => conversationDto(conv(ctx)));
 
   r.get('/api/conversations/:id/info', async (ctx) => {
-    const c = conv(ctx);
+    let c = conv(ctx);
+    // WhatsApp: fetch the group description fresh (it can be missing from the bulk group list).
+    if (isWa(c) && c.kind === 'group') {
+      await Promise.race([refreshGroupInfoWa(c), new Promise((r) => setTimeout(r, 6000))]);
+      c = getConversation(c.id)!;
+    }
     const info = conversationInfo(c);
     if (isWa(c) && c.kind === 'direct') info.about = await waAbout(c.wa_id!);
     return info;
