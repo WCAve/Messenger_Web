@@ -150,14 +150,15 @@ async function check() {
       } else throw e;
     }
     const engine = s.engine?.engine;
-    const base = { engine, version: state.version };
+    // The regular status check rebuilds the state; keep what the import is showing.
+    const base = { engine, version: state.version, importing: state.importing, importProgress: state.importProgress, lastImport: state.lastImport };
     if (!state.version) waha.version().then((v) => setState({ ...state, version: v.version, engine: state.engine ?? v.engine })).catch(() => {});
     switch (s.status) {
       case 'WORKING': {
         const me = s.me?.id ? bare(s.me.id) : undefined;
         if (me) self.waIds = [me, s.me?.lid ? bare(s.me.lid) : ''];
         const wasConnected = state.status === 'connected';
-        setState({ ...base, status: 'connected', me: me ? me.split('@')[0].replace(/^/, '+') : undefined, name: s.me?.pushName, importing: state.importing });
+        setState({ ...base, status: 'connected', me: me ? me.split('@')[0].replace(/^/, '+') : undefined, name: s.me?.pushName });
         connectWs();
         if (!wasConnected) void afterConnect();
         break;
