@@ -3067,3 +3067,12 @@ aside[aria-label='Search messages'] .panel-body > .panel-empty {
   display: grid;
   gap: 8px;
 }
+
+/* Sticker lists scroll inside the picker (a flex child needs min-height: 0 to shrink) */
+.picker-body,
+.sticker-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
