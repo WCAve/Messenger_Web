@@ -271,6 +271,9 @@ async function previewFor(url: unknown, text: string): Promise<LinkPreview | nul
 
 const MIME_EXT: Record<string, string> = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/gif': '.gif' };
 
+/** Picture URLs end in .jpg/.webp (so firewalls see them as files); older links don't. */
+const noExt = (s: string) => s.replace(/\.(jpg|webp)$/, '');
+
 function readBase64(a: Attachment) {
   return `data:${a.contentType};filename=${(a.filename ?? 'file').replace(/[;,\r\n/\\]/g, '_')};base64,${fs.readFileSync(localPath(a.id)).toString('base64')}`;
 }
@@ -416,7 +419,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return { ok: true };
   });
   r.get('/api/avatars/wa/:jid', async (ctx) => {
-    const file = await waAvatar(ctx.params.jid);
+    const file = await waAvatar(noExt(ctx.params.jid));
     if (!file) throw new HttpError(404, 'No picture');
     return sendFile(ctx.res, file, { 'content-type': sniffImage(file), 'cache-control': 'private, max-age=86400' }, ctx.req.method === 'HEAD');
   });
@@ -430,7 +433,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       givenName: p?.givenName ?? '',
       familyName: p?.familyName ?? '',
       about: p?.about ?? '',
-      avatar: p?.hasAvatar ? `/api/avatars/self?v=${Date.now()}` : null,
+      avatar: p?.hasAvatar ? `/api/avatars/self.jpg?v=${Date.now()}` : null,
     };
   };
   r.get('/api/profile', async () => {
@@ -439,6 +442,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return profileDto();
   });
   r.get('/api/avatars/self', (ctx) => sendAvatar(ctx, 'profile', selfAvatarId()));
+  r.get('/api/avatars/self.jpg', (ctx) => sendAvatar(ctx, 'profile', selfAvatarId()));
 
   // Body: { givenName, about, avatar }. avatar: base64 image = new picture, null = remove, absent = keep.
   r.post('/api/profile', async (ctx) => {
@@ -552,7 +556,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   r.get('/api/stickers/:packId/:stickerId', async (ctx) => {
     const account = self.number;
-    const id = Number(ctx.params.stickerId);
+    const id = Number(noExt(ctx.params.stickerId));
     let found: { file: string; type: string } | null = null;
     try {
       found = account ? await getStickerImage(account, ctx.params.packId, id) : null;
@@ -577,12 +581,13 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     sendFile(ctx.res, found.file, { 'content-type': found.type, 'cache-control': 'private, max-age=3600', 'x-content-type-options': 'nosniff' });
   };
   r.get('/api/avatars/conversation/:id', (ctx) => {
+    ctx.params.id = noExt(ctx.params.id);
     const c = conv(ctx);
     if (c.kind === 'group') return sendAvatar(ctx, 'group', groupRecipientId(c.group_id!));
     return sendAvatar(ctx, 'profile', c.peer_uuid || c.peer_number);
   });
   r.get('/api/avatars/contact/:key', (ctx) => {
-    const c = contactByKeyOrId(ctx.params.key);
+    const c = contactByKeyOrId(noExt(ctx.params.key));
     return sendAvatar(ctx, 'profile', c?.uuid || c?.number);
   });
 

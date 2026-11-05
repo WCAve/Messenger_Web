@@ -620,7 +620,7 @@ function NewChat({ onClose }: { onClose: () => void }) {
         {waContacts.length > 0 && <h3 className="list-heading">{multi ? 'WhatsApp contacts' : 'Contacts'}</h3>}
         {waContacts.map((c) => (
           <button key={c.jid} className="chat-row" onClick={() => open({ network: 'whatsapp', jid: c.jid })}>
-            <Avatar name={c.name} seed={String(c.number ?? c.name)} network={multi ? 'whatsapp' : undefined} src={`/api/avatars/wa/${encodeURIComponent(c.jid)}`} />
+            <Avatar name={c.name} seed={String(c.number ?? c.name)} network={multi ? 'whatsapp' : undefined} src={`/api/avatars/wa/${encodeURIComponent(c.jid)}.jpg`} />
             <span className="chat-row-main">
               <span className="chat-title">{c.name}</span>
               <span className="preview">{c.number ?? ''}</span>

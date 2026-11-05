@@ -97,6 +97,47 @@ export function Icon({ name, size = 22, title }: { name: keyof typeof PATHS | st
 
 const failedAvatars = new Set<string>(); // URLs that 404'd this session: don't retry on every render
 
+// Pictures load only once their avatar is (nearly) on screen, a few at a time: a chat list asking for
+// dozens at once looks like a crawler to firewalls such as CrowdSec. Ones shown before go straight in.
+const shownAvatars = new Set<string>();
+const AVATAR_SLOTS = 4;
+let avatarBusy = 0;
+const avatarQueue: (() => void)[] = [];
+function takeAvatarSlot(): Promise<void> {
+  if (avatarBusy < AVATAR_SLOTS) {
+    avatarBusy++;
+    return Promise.resolve();
+  }
+  return new Promise((r) => avatarQueue.push(() => (avatarBusy++, r())));
+}
+function releaseAvatarSlot() {
+  avatarBusy = Math.max(0, avatarBusy - 1);
+  avatarQueue.shift()?.();
+}
+let avatarObserver: IntersectionObserver | null = null;
+const avatarWatchers = new Map<Element, () => void>();
+function watchAvatar(el: Element, onVisible: () => void) {
+  if (typeof IntersectionObserver === 'undefined') return onVisible();
+  avatarObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const cb = avatarWatchers.get(e.target);
+        avatarWatchers.delete(e.target);
+        avatarObserver!.unobserve(e.target);
+        cb?.();
+      }
+    },
+    { rootMargin: '150px' },
+  );
+  avatarWatchers.set(el, onVisible);
+  avatarObserver.observe(el);
+}
+function unwatchAvatar(el: Element) {
+  avatarWatchers.delete(el);
+  avatarObserver?.unobserve(el);
+}
+
 /** Small mark on an avatar saying which network the chat is on. */
 export function NetworkBadge({ network }: { network: 'signal' | 'whatsapp' }) {
   return (
@@ -123,16 +164,48 @@ export function Avatar({
 }) {
   const hue = hueFor(seed);
   const [failed, setFailed] = useState(() => !src || failedAvatars.has(src));
-  useEffect(() => setFailed(!src || failedAvatars.has(src)), [src]);
+  const [ready, setReady] = useState(() => !!src && shownAvatars.has(src));
+  const box = useRef<HTMLSpanElement>(null);
+  const slot = useRef(false);
+  const release = () => {
+    if (slot.current) {
+      slot.current = false;
+      releaseAvatarSlot();
+    }
+  };
+  useEffect(() => {
+    setFailed(!src || failedAvatars.has(src));
+    const known = !!src && shownAvatars.has(src);
+    setReady(known);
+    if (!src || known || failedAvatars.has(src) || !box.current) return;
+    const el = box.current;
+    let cancelled = false;
+    watchAvatar(el, () => {
+      void takeAvatarSlot().then(() => {
+        if (cancelled) return releaseAvatarSlot();
+        slot.current = true;
+        setReady(true);
+      });
+    });
+    return () => {
+      cancelled = true;
+      unwatchAvatar(el);
+      release();
+    };
+  }, [src]);
   return (
-    <span className="avatar" style={{ width: size, height: size, ['--hue' as string]: hue, fontSize: size * 0.38 }} aria-hidden>
-      {!failed && src ? (
+    <span ref={box} className="avatar" style={{ width: size, height: size, ['--hue' as string]: hue, fontSize: size * 0.38 }} aria-hidden>
+      {!failed && src && ready ? (
         <img
           src={src}
           alt=""
-          loading="lazy"
+          onLoad={() => {
+            shownAvatars.add(src);
+            release();
+          }}
           onError={() => {
             failedAvatars.add(src);
+            release();
             setFailed(true);
           }}
         />

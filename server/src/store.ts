@@ -309,10 +309,10 @@ export function waContact(jid: string) {
 }
 
 export function avatarUrlForKey(key: string): string | null {
-  if (key.startsWith('wa:')) return `/api/avatars/wa/${encodeURIComponent(key.slice(3))}`;
+  if (key.startsWith('wa:')) return `/api/avatars/wa/${encodeURIComponent(key.slice(3))}.jpg`;
   const c = contactByKeyOrId(key);
   const id = c?.uuid || c?.number;
-  return c?.has_avatar && id ? `/api/avatars/contact/${encodeURIComponent(c.key)}?v=${avatarRev('profile', id)}` : null;
+  return c?.has_avatar && id ? `/api/avatars/contact/${encodeURIComponent(c.key)}.jpg?v=${avatarRev('profile', id)}` : null;
 }
 
 export function nameForKey(key: string): string {
@@ -555,11 +555,11 @@ export function conversationDto(row: ConversationRow) {
 export type ConversationDto = ReturnType<typeof conversationDto>;
 
 function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string | null {
-  if (conv.network === 'whatsapp') return `/api/avatars/wa/${encodeURIComponent(conv.wa_id!)}`;
+  if (conv.network === 'whatsapp') return `/api/avatars/wa/${encodeURIComponent(conv.wa_id!)}.jpg`;
   // Groups: always offered; it 404s (and that is cached) when the group has no picture.
-  if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}?v=${avatarRev('group', groupRecipientId(conv.group_id!))}`;
+  if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}.jpg?v=${avatarRev('group', groupRecipientId(conv.group_id!))}`;
   const id = conv.peer_uuid || conv.peer_number;
-  return peer?.has_avatar && id ? `/api/avatars/conversation/${conv.id}?v=${avatarRev('profile', id)}` : null;
+  return peer?.has_avatar && id ? `/api/avatars/conversation/${conv.id}.jpg?v=${avatarRev('profile', id)}` : null;
 }
 
 export interface GroupMember {

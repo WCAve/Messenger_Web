@@ -241,7 +241,7 @@ export function getStickerImage(account: string, packId: string, stickerId: numb
 }
 
 export function stickerUrl(packId: string, stickerId: number) {
-  return `/api/stickers/${packId}/${stickerId}`;
+  return `/api/stickers/${packId}/${stickerId}.webp`;
 }
 
 /** Every pack signal-cli knows, with its stickers. Installed packs first. */
