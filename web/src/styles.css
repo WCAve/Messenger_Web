@@ -545,6 +545,12 @@ p {
   display: grid;
   place-items: center;
 }
+.badge-dot {
+  min-width: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+}
 .typing-text {
   color: var(--ultra);
   font-style: normal;

@@ -33,10 +33,13 @@ import {
   renderBody,
   self,
   setConversationFlags,
+  setGroupDescription,
+  setWaAbout,
   setWaGroupMembers,
   statusRank,
   updateMessage,
   upsertWaContact,
+  waAboutCached,
   waContact,
 } from './store.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
@@ -492,6 +495,8 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     if (m.source === 'api') return;
   }
 
+  if (m._data?.type === 'call_log') return callLogMessage(m, conv, chatId, fromMe, !!opts.history);
+
   const poll = pollOf(m);
   let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv);
   const attachments: Attachment[] = [];
@@ -574,7 +579,10 @@ function mutedUntilOf(chat: Json): number | undefined {
 const FOREVER = 8.64e15;
 let muteNoticeShown = false;
 
-/** Copy mutes from your phone. Mutes you set here are kept unless the phone has news about that chat. */
+/**
+ * Copy mutes and "marked as unread" from your phone. What you set here is kept unless the phone has
+ * news about that chat.
+ */
 async function syncMutes() {
   const chats = await waha.chats(300);
   let known = 0;
@@ -583,11 +591,24 @@ async function syncMutes() {
     const id = typeof c.id === 'string' ? c.id : c.id?._serialized;
     if (!id || skipChat(id)) continue;
     const until = mutedUntilOf(c) ?? mutedUntilOf(c._chat);
-    if (until === undefined) continue;
-    known++;
+    const unreadCount = c.unreadCount ?? c._chat?.unreadCount;
+    if (until === undefined && unreadCount === undefined) continue;
     const jid = await resolve(id);
     if (!jid) continue;
     const conv = getOrCreateWaChat(jid, jid.endsWith('@g.us') ? c.name ?? null : null);
+    // "Mark as unread" on the phone shows up as an unread count of -1 (WEBJS).
+    if (unreadCount !== undefined) {
+      const marked = Number(unreadCount) < 0 ? '1' : '0';
+      if (kvGet(`wa_unread:${jid}`) !== marked) {
+        kvSet(`wa_unread:${jid}`, marked);
+        if (!!conv.marked_unread !== (marked === '1')) {
+          setConversationFlags(conv.id, { markedUnread: marked === '1' });
+          if (conv.last_message_at) emitConversation(conv.id);
+        }
+      }
+    }
+    if (until === undefined) continue;
+    known++;
     const remote = until > Date.now() ? until : 0;
     const last = kvGet(`wa_mute:${jid}`);
     if (String(remote) === last) continue; // nothing changed on the phone since last time
@@ -608,6 +629,16 @@ async function syncMutes() {
 function groupNameOf(g: Json): string | null {
   return g?.Name || g?.subject || g?.name || g?.groupMetadata?.subject || g?.GroupName?.Name || null;
 }
+/** Group description: WEBJS groupMetadata.desc, NOWEB desc, GOWS Topic. undefined = this object doesn't say. */
+function descriptionOf(g: Json): string | null | undefined {
+  if (!g || typeof g !== 'object') return undefined;
+  for (const src of [g.groupMetadata, g]) {
+    if (!src || typeof src !== 'object') continue;
+    for (const k of ['desc', 'description', 'Topic']) if (k in src) return src[k] ? String(src[k]) : null;
+  }
+  if (g.GroupTopic && typeof g.GroupTopic === 'object') return g.GroupTopic.Topic ? String(g.GroupTopic.Topic) : null;
+  return undefined;
+}
 function groupIdOf(g: Json): string | null {
   const id = g?.JID ?? g?.id ?? g?.groupMetadata?.id;
   return typeof id === 'string' ? id : id?._serialized ?? null;
@@ -618,11 +649,12 @@ async function refreshGroupName(conv: ConversationRow) {
   const last = groupNameTried.get(conv.wa_id!) ?? 0;
   if (Date.now() - last < 60_000) return;
   groupNameTried.set(conv.wa_id!, Date.now());
-  const name = groupNameOf(await waha.group(conv.wa_id!));
-  if (name) {
-    getOrCreateWaChat(conv.wa_id!, name);
-    emitConversation(conv.id);
-  }
+  const g = await waha.group(conv.wa_id!);
+  const name = groupNameOf(g);
+  const desc = descriptionOf(g);
+  if (desc !== undefined && desc !== conv.group_description) setGroupDescription(conv.id, desc);
+  if (name) getOrCreateWaChat(conv.wa_id!, name);
+  if (name || desc !== undefined) emitConversation(conv.id);
 }
 
 /** Names of all groups in one call. */
@@ -632,8 +664,12 @@ async function refreshGroupNames() {
   const known = new Map(listWaGroups().map((g) => [g.wa_id, g]));
   for (const g of list) {
     const id = groupIdOf(g);
+    const conv = id ? known.get(bare(id)) : undefined;
+    if (!conv) continue;
     const name = groupNameOf(g);
-    if (id && name && known.has(bare(id)) && known.get(bare(id))!.group_name !== name) getOrCreateWaChat(bare(id), name);
+    if (name && conv.group_name !== name) getOrCreateWaChat(conv.wa_id!, name);
+    const desc = descriptionOf(g);
+    if (desc !== undefined && (desc || null) !== conv.group_description) setGroupDescription(conv.id, desc);
   }
 }
 
@@ -708,8 +744,9 @@ async function handleEvent(e: Json) {
         const who = await resolve(pr.participant ?? chat);
         if (!who || self.isWa(who)) continue;
         const key = keyFor(who);
-        const typing = pr.lastKnownPresence === 'typing' || pr.lastKnownPresence === 'recording';
-        broadcast({ type: 'typing', conversationId: conv.id, author: key, authorName: nameForKey(key), started: typing });
+        const recording = pr.lastKnownPresence === 'recording';
+        const typing = pr.lastKnownPresence === 'typing' || recording;
+        broadcast({ type: 'typing', conversationId: conv.id, author: key, authorName: nameForKey(key), started: typing, ...(recording ? { recording } : {}) });
       }
       return;
     }
@@ -726,11 +763,22 @@ async function handleEvent(e: Json) {
       emitMessage(updateMessage(target.id, { poll: JSON.stringify(poll) }));
       return;
     }
+    case 'call.received':
+    case 'call.accepted':
+    case 'call.rejected': {
+      // WEBJS only tells us a call came in (not whether you picked up on your phone); other engines say more.
+      if (!p?.id || !p?.from) return;
+      const outcome = e.event === 'call.accepted' ? 'answered' : e.event === 'call.rejected' ? 'declined' : 'incoming';
+      await recordCall(p.from, String(p.id), !!p.isVideo, outcome, Number(p.timestamp) * 1000 || Date.now());
+      return;
+    }
     case 'group.v2.update':
     case 'group.v2.participants': {
       const id = p?.group?.id ?? p?.id;
       if (typeof id === 'string' && id.endsWith('@g.us')) {
         if (p?.group?.subject) getOrCreateWaChat(id, p.group.subject);
+        const desc = descriptionOf(p?.group);
+        if (desc !== undefined) setGroupDescription(getOrCreateWaChat(id).id, desc);
         refreshGroupSoon(id);
       }
       return;
@@ -871,8 +919,115 @@ export async function deleteWa(conv: ConversationRow, m: MessageRow) {
 }
 
 export async function markReadWa(conv: ConversationRow, unread: MessageRow[]) {
-  const ids = unread.filter((m) => !m.outgoing && m.ext_id).map((m) => m.ext_id!);
+  const ids = unread.filter((m) => !m.outgoing && m.ext_id && !m.ext_id.startsWith('call:')).map((m) => m.ext_id!);
   await waha.seen(conv.wa_id!, ids.slice(-50));
+}
+
+export async function markUnreadWa(conv: ConversationRow) {
+  await waha.markUnread(conv.wa_id!);
+  kvSet(`wa_unread:${conv.wa_id}`, '1');
+}
+
+/** Someone's "about" text (cached for an hour; null when they hide it or have none). */
+export async function waAbout(jid: string): Promise<string | null> {
+  const cached = waAboutCached(jid);
+  if (cached && Date.now() - cached.at < 3600_000) return cached.about;
+  if (state.status !== 'connected') return cached?.about ?? null;
+  try {
+    const r = await waha.about(jid);
+    const about = typeof r === 'string' ? r : r?.about ?? null;
+    setWaAbout(jid, about ? String(about) : null);
+    return about ? String(about) : null;
+  } catch {
+    return cached?.about ?? null;
+  }
+}
+
+// ---------- calls ----------
+
+type CallOutcome = 'incoming' | 'missed' | 'answered' | 'declined' | 'outgoing';
+
+function callText(video: boolean, outcome: CallOutcome, seconds?: number) {
+  const what = video ? 'video call' : 'voice call';
+  const icon = video ? '🎥' : '📞';
+  const dur = seconds && seconds > 0 ? ` (${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')})` : '';
+  const label = { incoming: `Incoming ${what}`, missed: `Missed ${what}`, answered: what[0].toUpperCase() + what.slice(1), declined: `Declined ${what}`, outgoing: `Outgoing ${what}` }[outcome];
+  return `${icon} ${label}${dur}`;
+}
+
+/** A line in the chat for a call. Later news about the same call updates the line. */
+async function recordCall(fromRaw: string, callId: string, video: boolean, outcome: CallOutcome, ts: number) {
+  const jid = await resolve(fromRaw);
+  if (!jid || skipChat(jid) || self.isWa(jid)) return;
+  const extId = 'call:' + callId;
+  const existing = findMessageByExt(extId);
+  if (existing) {
+    if (outcome !== 'incoming') emitMessage(updateMessage(existing.id, { body: callText(video, outcome) }));
+    return;
+  }
+  const conv = getOrCreateWaChat(jid);
+  const author = keyFor(jid);
+  const row = insertMessage({
+    conversationId: conv.id,
+    sentTs: freeTimestamp(conv.id, ts, author),
+    author,
+    outgoing: false,
+    kind: 'system',
+    body: callText(video, outcome),
+    read: outcome === 'answered',
+    extId,
+  });
+  if (row) {
+    emitMessage(row);
+    emitConversation(conv.id);
+  }
+}
+
+/** A call-log message (WhatsApp's own "Missed voice call" line), if the engine passes them on. */
+function callLogMessage(m: Json, conv: ConversationRow, chatId: string, fromMe: boolean, history: boolean): MessageRow | undefined {
+  const d = m._data ?? {};
+  const video = !!(d.isVideoCall ?? d.isVideo);
+  const seconds = Number(d.callDuration ?? 0) || 0;
+  const said = String(d.callOutcome ?? d.callResult ?? '');
+  const outcome: CallOutcome = fromMe
+    ? 'outgoing'
+    : /miss|unanswer|timeout/i.test(said)
+      ? 'missed'
+      : /reject|declin|busy/i.test(said)
+        ? 'declined'
+        : seconds > 0 || /accept|connect|complete/i.test(said)
+          ? 'answered'
+          : 'missed';
+  const ts = Math.round(Number(m.timestamp) * 1000) || Date.now();
+  const body = callText(video, outcome, seconds);
+  // The "call.received" event may already have put a line in for this call.
+  const earlier = db
+    .prepare<[number, number, number], MessageRow>(
+      "SELECT * FROM messages WHERE conversation_id = ? AND ext_id LIKE 'call:%' AND sent_ts BETWEEN ? AND ? ORDER BY sent_ts DESC",
+    )
+    .get(conv.id, ts - 10 * 60_000, ts + 60_000);
+  if (earlier) {
+    const row = updateMessage(earlier.id, { body, ext_id: String(m.id), ...(outcome === 'answered' ? { read: 1 } : {}) });
+    emitMessage(row);
+    emitConversation(conv.id);
+    return undefined;
+  }
+  const author = fromMe ? 'self' : keyFor(chatId);
+  const row = insertMessage({
+    conversationId: conv.id,
+    sentTs: freeTimestamp(conv.id, ts, author),
+    author,
+    outgoing: fromMe,
+    kind: 'system',
+    body,
+    read: fromMe || outcome === 'answered',
+    extId: String(m.id),
+  });
+  if (row && !history) {
+    emitMessage(row);
+    emitConversation(conv.id);
+  }
+  return row;
 }
 
 const presenceSubscribed = new Map<string, number>();

@@ -48,6 +48,7 @@ export interface ConversationRow {
   muted_until: number;
   network: 'signal' | 'whatsapp';
   wa_id: string | null;
+  marked_unread: number;
 }
 
 export interface Poll {
@@ -255,6 +256,16 @@ export interface WaContactRow {
   push_name: string | null;
 }
 
+/** Someone's WhatsApp "about" text, as last fetched (undefined: never fetched). */
+export function waAboutCached(jid: string): { about: string | null; at: number } | undefined {
+  const r = waByJid.get(jid) as (WaContactRow & { about: string | null; about_at: number | null }) | undefined;
+  return r?.about_at ? { about: r.about, at: r.about_at } : undefined;
+}
+export function setWaAbout(jid: string, about: string | null) {
+  if (!waByJid.get(jid)) upsertWaContact({ jid });
+  db.prepare('UPDATE wa_contacts SET about = ?, about_at = ? WHERE jid = ?').run(about, Date.now(), jid);
+}
+
 const waByJid = db.prepare<[string], WaContactRow>('SELECT * FROM wa_contacts WHERE jid = ?');
 
 /** "31612345678@c.us" → "+31612345678"; lids and groups have no number. */
@@ -401,7 +412,8 @@ export function touchConversation(id: number, ts: number) {
   ).run(ts, Date.now(), id);
 }
 
-export function setConversationFlags(id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) {
+export function setConversationFlags(id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number; markedUnread?: boolean }) {
+  if (f.markedUnread !== undefined) db.prepare('UPDATE conversations SET marked_unread = ? WHERE id = ?').run(f.markedUnread ? 1 : 0, id);
   if (f.pinned !== undefined) db.prepare('UPDATE conversations SET pinned_at = ? WHERE id = ?').run(f.pinned ? Date.now() : null, id);
   if (f.archived !== undefined) {
     db.prepare('UPDATE conversations SET archived = ? WHERE id = ?').run(f.archived ? 1 : 0, id);
@@ -523,6 +535,7 @@ export function conversationDto(row: ConversationRow) {
         }
       : null,
     unread: unreadStmt.get(conv.id)!.n,
+    markedUnread: !!conv.marked_unread,
     archived: !!conv.archived,
     pinnedAt: conv.pinned_at ?? null,
     mutedUntil: conv.muted_until > Date.now() ? conv.muted_until : 0,
@@ -624,6 +637,10 @@ export function getOrCreateWaChat(jid: string, name?: string | null): Conversati
     .prepare("INSERT INTO conversations (kind, network, wa_id, group_name, created_at) VALUES (?, 'whatsapp', ?, ?, ?)")
     .run(group ? 'group' : 'direct', jid, group ? name || null : null, Date.now());
   return convById.get(Number(info.lastInsertRowid))!;
+}
+
+export function setGroupDescription(conversationId: number, description: string | null) {
+  db.prepare('UPDATE conversations SET group_description = ? WHERE id = ?').run(description || null, conversationId);
 }
 
 export function setWaGroupMembers(conversationId: number, members: string[], admins: string[]) {

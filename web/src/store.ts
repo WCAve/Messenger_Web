@@ -6,6 +6,7 @@ export interface Typing {
   author: string;
   authorName: string;
   until: number;
+  recording?: boolean; // recording a voice message
 }
 
 export interface Draft {
@@ -175,7 +176,7 @@ export function applyEvent(e: ServerEvent) {
       if (!e.started) return clearTyping(e.conversationId, e.author);
       setState((s) => {
         const list = (s.typing[e.conversationId] ?? []).filter((t) => t.author !== e.author);
-        list.push({ author: e.author, authorName: e.authorName, until: Date.now() + 15_000 });
+        list.push({ author: e.author, authorName: e.authorName, until: Date.now() + 15_000, ...(e.recording ? { recording: true } : {}) });
         return { typing: { ...s.typing, [e.conversationId]: list } };
       });
       break;

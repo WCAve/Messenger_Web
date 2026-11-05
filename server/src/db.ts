@@ -177,6 +177,13 @@ const MIGRATIONS: string[] = [
     updated_at INTEGER
   );
   `,
+  `
+  -- "Mark as unread" on a chat (cleared when you open it).
+  ALTER TABLE conversations ADD COLUMN marked_unread INTEGER NOT NULL DEFAULT 0;
+  -- WhatsApp "about" text, fetched when you open someone's info.
+  ALTER TABLE wa_contacts ADD COLUMN about TEXT;
+  ALTER TABLE wa_contacts ADD COLUMN about_at INTEGER;
+  `,
 ];
 
 function migrate() {

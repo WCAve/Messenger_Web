@@ -83,7 +83,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
 
   // Mark read while the chat is open and the window is visible.
   useEffect(() => {
-    if (!conversation.unread) return;
+    if (!conversation.unread && !conversation.markedUnread) return;
     const mark = () => {
       if (document.visibilityState === 'visible' && document.hasFocus()) api.markRead(id).catch(() => {});
     };
@@ -94,11 +94,12 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
       window.removeEventListener('focus', mark);
       document.removeEventListener('visibilitychange', mark);
     };
-  }, [id, conversation.unread]);
+  }, [id, conversation.unread, conversation.markedUnread]);
 
   let subtitle: string;
   if (typing.length > 0) {
-    subtitle = `${conversation.kind === 'group' ? typing.map((t) => t.authorName.split(' ')[0]).join(', ') + ' ' : ''}typing…`;
+    const who = conversation.kind === 'group' ? typing.map((t) => t.authorName.split(' ')[0]).join(', ') + ' ' : '';
+    subtitle = who + (typing.every((t) => t.recording) ? 'recording audio…' : 'typing…');
   } else if (conversation.kind === 'group') {
     // WhatsApp-style: known names alphabetically, "You" last, unknown people counted.
     const all = conversation.members ?? [];

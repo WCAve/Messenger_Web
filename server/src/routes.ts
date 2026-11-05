@@ -18,6 +18,8 @@ import {
   importHistoryNow,
   logoutWhatsApp,
   markReadWa,
+  markUnreadWa,
+  waAbout,
   reactWa,
   refreshDirectory as refreshWaDirectory,
   restartWhatsApp,
@@ -506,7 +508,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   r.get('/api/conversations/:id', (ctx) => conversationDto(conv(ctx)));
 
-  r.get('/api/conversations/:id/info', (ctx) => conversationInfo(conv(ctx)));
+  r.get('/api/conversations/:id/info', async (ctx) => {
+    const c = conv(ctx);
+    const info = conversationInfo(c);
+    if (isWa(c) && c.kind === 'direct') info.about = await waAbout(c.wa_id!);
+    return info;
+  });
 
   r.get('/api/messages/:id/info', (ctx) => {
     const m = message(ctx);
@@ -911,9 +918,18 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/conversations/:id/read', (ctx) => {
     const c = conv(ctx);
     const unread = unreadMessages(c.id);
-    if (!unread.length) return { ok: true };
+    const wasMarked = !!c.marked_unread;
+    if (wasMarked) setConversationFlags(c.id, { markedUnread: false });
+    if (!unread.length) {
+      if (wasMarked) {
+        emitConversation(getConversation(c.id)!);
+        // Opening a chat you marked as unread on your phone clears the mark there too.
+        if (isWa(c) && getSettings().sendReadReceipts && getWaState().status === 'connected') markReadWa(c, []).catch(() => {});
+      }
+      return { ok: true };
+    }
     markConversationRead(c.id);
-    emitConversation(c);
+    emitConversation(getConversation(c.id)!);
     if (isWa(c)) {
       if (getSettings().sendReadReceipts && getWaState().status === 'connected') markReadWa(c, unread).catch(() => {});
       return { ok: true };
@@ -932,6 +948,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       })();
     }
     return { ok: true };
+  });
+
+  // "Mark as unread" (WhatsApp: also on your phone; Signal has no such thing, so it stays here).
+  r.post('/api/conversations/:id/unread', async (ctx) => {
+    const c = conv(ctx);
+    setConversationFlags(c.id, { markedUnread: true });
+    if (isWa(c) && getWaState().status === 'connected') await markUnreadWa(c).catch(() => {});
+    const updated = getConversation(c.id)!;
+    emitConversation(updated);
+    return conversationDto(updated);
   });
 
   // The chat was opened in a browser.

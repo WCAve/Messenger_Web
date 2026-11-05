@@ -88,6 +88,7 @@ export const api = {
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
   opened: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/open`),
+  markUnread: (id: number) => call<Conversation>('POST', `/api/conversations/${id}/unread`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };

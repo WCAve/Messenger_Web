@@ -77,6 +77,8 @@ export const waha = {
   participants: (groupId: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(groupId)}/participants/v2`),
   chatPicture: (chatId: string) => call<{ url?: string | null }>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/picture`, undefined, 20_000),
   subscribePresence: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/presence/${enc(chatId)}/subscribe`, undefined, 15_000),
+  markUnread: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/unread`, undefined, 15_000),
+  about: (contactId: string) => call<{ about?: string | null } | null>('GET', `/api/contacts/about?session=${enc(S())}&contactId=${enc(contactId)}`, undefined, 10_000),
   lidToPhone: (lid: string) => call<{ lid: string; pn?: string | null }>('GET', `/api/${enc(S())}/lids/${enc(lid)}`, undefined, 10_000),
 
   sendText: (chatId: string, text: string, opts: { reply_to?: string; mentions?: string[]; linkPreview?: boolean }) =>
@@ -109,7 +111,7 @@ export const waha = {
   },
 
   wsUrl(): string {
-    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants'];
+    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected'];
     const q = new URLSearchParams({ session: S(), events: events.join(',') });
     if (config.wahaApiKey) q.set('x-api-key', config.wahaApiKey);
     return config.wahaUrl.replace(/^http/, 'ws') + '/ws?' + q.toString();

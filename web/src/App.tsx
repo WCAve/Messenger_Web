@@ -35,7 +35,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const activeId = useStore((s) => s.activeId);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
   // Muted chats don't count towards the number in the tab title.
-  const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + (c.mutedUntil > Date.now() ? 0 : c.unread), 0));
+  const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + (c.mutedUntil > Date.now() ? 0 : c.unread || (c.markedUnread ? 1 : 0)), 0));
   const panel = useStore((s) => s.panel);
   const forwarding = useStore((s) => s.forwarding);
   const sidebarWidth = usePrefs().sidebarWidth;

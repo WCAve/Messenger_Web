@@ -398,6 +398,72 @@ function handleReadSync(list: Json[]) {
   }
 }
 
+// ---------- calls ----------
+// A linked device sees the caller's offer, and a hangup saying how it ended ("ACCEPTED" when you
+// picked up on another device). Signal never says "missed": no answer within a minute counts as one.
+
+const calls = new Map<string, { messageId: number; video: boolean; answered: boolean; timer: ReturnType<typeof setTimeout> }>();
+
+function callLine(video: boolean, outcome: 'incoming' | 'missed' | 'answered' | 'declined') {
+  const what = video ? 'video call' : 'voice call';
+  const label = { incoming: `Incoming ${what}`, missed: `Missed ${what}`, answered: what[0].toUpperCase() + what.slice(1), declined: `Declined ${what}` }[outcome];
+  return `${video ? '🎥' : '📞'} ${label}`;
+}
+
+function finishCall(id: string, outcome: 'missed' | 'answered' | 'declined') {
+  const c = calls.get(id);
+  if (!c) return;
+  clearTimeout(c.timer);
+  calls.delete(id);
+  const m = getMessage(c.messageId);
+  if (!m) return;
+  emitMessage(updateMessage(m.id, { body: callLine(c.video, outcome), ...(outcome === 'answered' ? { read: 1 } : {}) }));
+  const conv = db.prepare<[number], ConversationRow>('SELECT * FROM conversations WHERE id = ?').get(m.conversation_id);
+  if (conv) emitConversation(conv);
+}
+
+function handleCall(cm: Json, src: Address, ts: number) {
+  if (cm.offerMessage?.id !== undefined) {
+    const id = String(cm.offerMessage.id);
+    if (calls.has(id)) return;
+    const conv = getOrCreateDirect(src.uuid, src.number);
+    const video = /VIDEO/i.test(String(cm.offerMessage.type ?? ''));
+    const row = insertMessage({
+      conversationId: conv.id,
+      sentTs: ts,
+      author: contactKey(src.uuid, src.number),
+      authorNumber: src.number,
+      outgoing: false,
+      kind: 'system',
+      body: callLine(video, Date.now() - ts > 90_000 ? 'missed' : 'incoming'),
+      read: false,
+    });
+    if (!row) return;
+    emitMessage(row);
+    emitConversation(conv);
+    if (Date.now() - ts > 90_000) return; // an old offer, delivered late: it's over
+    calls.set(id, { messageId: row.id, video, answered: false, timer: setTimeout(() => finishCall(id, 'missed'), 60_000) });
+    return;
+  }
+  const hangup = cm.hangupMessage;
+  if (hangup?.id !== undefined) {
+    const id = String(hangup.id);
+    const c = calls.get(id);
+    if (!c) return;
+    const type = String(hangup.type ?? '');
+    if (type === 'ACCEPTED') {
+      c.answered = true;
+      clearTimeout(c.timer);
+      c.timer = setTimeout(() => finishCall(id, 'answered'), 4 * 3600_000); // tidy up if the end never arrives
+      const m = getMessage(c.messageId);
+      if (m) emitMessage(updateMessage(m.id, { body: callLine(c.video, 'answered'), read: 1 }));
+    } else if (type === 'DECLINED') finishCall(id, c.answered ? 'answered' : 'declined');
+    else finishCall(id, c.answered ? 'answered' : 'missed');
+    return;
+  }
+  if (cm.busyMessage?.id !== undefined) finishCall(String(cm.busyMessage.id), 'missed');
+}
+
 function handleTyping(tm: Json, src: Address) {
   const conv = tm.groupId ? getOrCreateGroup(tm.groupId) : getOrCreateDirect(src.uuid, src.number);
   const author = contactKey(src.uuid, src.number);
@@ -448,6 +514,7 @@ export function handleEnvelope(payload: Json) {
     }
     if (e.receiptMessage) handleReceipt(e.receiptMessage, src);
     if (e.typingMessage && !fromSelf) handleTyping(e.typingMessage, src);
+    if (e.callMessage && !fromSelf) handleCall(e.callMessage, src, Number(e.timestamp) || Date.now());
   } catch (err) {
     ingestHooks.log('failed to process envelope', err);
   }

@@ -11,6 +11,12 @@ import { SettingsView } from './Settings';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 import { Emojified } from '../emoji/render';
 
+type TypingKind = 'typing' | 'recording' | null;
+function typingKind(list: { recording?: boolean }[] | undefined): TypingKind {
+  if (!list?.length) return null;
+  return list.every((t) => t.recording) ? 'recording' : 'typing';
+}
+
 export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const conversations = useStore((s) => s.conversations);
   const activeId = useStore((s) => s.activeId);
@@ -53,7 +59,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         }
         return (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0);
       });
-    return { list: shown, archivedCount: archived.length, archivedUnread: archived.filter((c) => c.unread && !(c.mutedUntil > Date.now())).length };
+    return { list: shown, archivedCount: archived.length, archivedUnread: archived.filter((c) => (c.unread || c.markedUnread) && !(c.mutedUntil > Date.now())).length };
   }, [conversations, query, archivedMode]);
 
   useEffect(() => {
@@ -96,7 +102,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         <p className="muted archived-note">Archived chats come back when a new message arrives, unless they're muted. Archiving only applies to Messenger Web.</p>
         <nav className="chat-list" aria-label="Archived chats">
           {list.map((c) => (
-            <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
+            <ChatRow key={c.id} c={c} active={c.id === activeId} typing={typingKind(typing[c.id])} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
           ))}
         </nav>
       </aside>
@@ -169,7 +175,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
             key={c.id}
             c={c}
             active={c.id === activeId}
-            typing={(typing[c.id] ?? []).length > 0}
+            typing={typingKind(typing[c.id])}
             draft={c.id !== activeId ? drafts[c.id]?.text : undefined}
             drag={!query && c.pinnedAt ? drag : undefined}
           />
@@ -360,6 +366,24 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
       setError((e as Error).message);
     }
   }
+  async function markUnread() {
+    try {
+      // Close the chat first, or having it open would mark it read straight away.
+      if (getState().activeId === c.id) setState({ activeId: null });
+      upsertConversation(await api.markUnread(c.id));
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function markRead() {
+    try {
+      await api.markRead(c.id);
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <div className={`menu ${className}`} role="menu">
       {!c.archived && (
@@ -392,6 +416,15 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
           <Icon name="mute" size={18} /> Mute notifications…
         </button>
       )}
+      {c.unread || c.markedUnread ? (
+        <button role="menuitem" onClick={() => void markRead()}>
+          <Icon name="read" size={18} /> Mark as read
+        </button>
+      ) : (
+        <button role="menuitem" onClick={() => void markUnread()}>
+          <Icon name="unread" size={18} /> Mark as unread
+        </button>
+      )}
       <button role="menuitem" onClick={() => void set({ archived: !c.archived })}>
         <Icon name={c.archived ? 'unarchive' : 'archive'} size={18} /> {c.archived ? 'Unarchive' : 'Archive chat'}
       </button>
@@ -409,7 +442,7 @@ interface PinDrag {
   drop: () => void;
 }
 
-function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: boolean; typing: boolean; draft?: string; drag?: PinDrag }) {
+function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: boolean; typing: TypingKind; draft?: string; drag?: PinDrag }) {
   const multi = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const lm = c.lastMessage;
   const [menu, setMenu, menuRef] = useMenu<HTMLSpanElement>();
@@ -444,7 +477,7 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
       onDragEnd={drag ? () => drag.end() : undefined}
       title={drag ? 'Drag to reorder pinned chats' : undefined}
     >
-    <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
+    <button className={`chat-row${active ? ' active' : ''}${c.unread || c.markedUnread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
       <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} network={multi ? c.network : undefined} />
       <span className="chat-row-main">
         <span className="chat-row-top">
@@ -456,7 +489,7 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
         <span className="chat-row-bottom">
           <span className="preview">
             {typing ? (
-              <em className="typing-text">typing…</em>
+              <em className="typing-text">{typing === 'recording' ? 'recording audio…' : 'typing…'}</em>
             ) : draft ? (
               <>
                 <span className="draft-label">Draft: </span>
@@ -474,7 +507,11 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
             {muted && <Icon name="mute" size={16} title="Muted" />}
             {c.pinnedAt && <Icon name="pin" size={16} title="Pinned" />}
           </span>
-          {c.unread > 0 && <span className="badge" aria-label={`${c.unread} unread`}>{c.unread > 99 ? '99+' : c.unread}</span>}
+          {c.unread > 0 ? (
+            <span className="badge" aria-label={`${c.unread} unread`}>{c.unread > 99 ? '99+' : c.unread}</span>
+          ) : (
+            c.markedUnread && <span className="badge badge-dot" aria-label="Marked as unread" />
+          )}
         </span>
       </span>
     </button>

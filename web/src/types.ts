@@ -31,6 +31,7 @@ export interface Conversation {
   lastMessageAt: number | null;
   lastMessage: { text: string; outgoing: boolean; status: string | null; authorName: string | null } | null;
   unread: number;
+  markedUnread: boolean; // "Mark as unread"
   archived: boolean;
   expireTimer: number; // disappearing messages, seconds; 0 = off
   pinnedAt: number | null;
@@ -181,6 +182,6 @@ export type ServerEvent =
   | { type: 'wastate'; state: WaState }
   | { type: 'conversation'; conversation: Conversation }
   | { type: 'message'; message: Message }
-  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean }
+  | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean; recording?: boolean }
   | { type: 'receipt'; messageId: number }
   | { type: 'remove'; conversationId: number; messageId: number };

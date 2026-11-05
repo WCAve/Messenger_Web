@@ -31,7 +31,8 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Link previews, both ways: when you type an https link, Messenger Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
 - Polls: vote, create (📊 button next to the paperclip) and end your own polls
 - Forward messages (text, files, stickers) to up to 5 chats
-- Pin (up to 4), mute and archive chats from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. These stay in Messenger Web; your phone keeps its own
+- Pin (up to 4), mute, archive and mark as unread from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. On Signal these stay in Messenger Web; on WhatsApp, mutes and "marked as unread" are kept in step with your phone
+- Call lines in the chat: incoming, missed and answered calls (calls themselves happen on your phone)
 - Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat
 - Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Messenger Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
 - Emoji in Google's Noto style by default (or Microsoft Fluent 3D, Twemoji or your system's, in Settings → Emoji), built in so nothing loads from elsewhere
@@ -57,10 +58,12 @@ WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S**
 
 - Recent chats and messages are imported once after linking (40 chats × 40 messages by default; see [Settings](#settings))
 - Text with WhatsApp formatting, replies, @mentions with suggestions, reactions, photos/videos/files both ways, voice notes and GIFs that others send
-- Edit (15 minutes, WhatsApp's limit) and delete for everyone, typing indicators, read receipts, ticks
+- Edit (15 minutes, WhatsApp's limit) and delete for everyone, typing and "recording audio…" indicators, read receipts, ticks, per-person read lists in groups
+- Contact info shows someone's About text; group info shows the group description
 - Polls: see and vote, and create new ones
 - Search, pin/mute/archive, drafts and forwarding work across both networks; you can forward a Signal message to a WhatsApp chat and the other way round
-- Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls, per-person read lists and changing group pictures (do those on your phone)
+- Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls and changing group pictures (do those on your phone)
+- Developed against WAHA's **WEBJS** engine. With WEBJS you see that a call came in, but not whether you answered it on your phone, so call lines read "Incoming voice call" unless WhatsApp sends its own call log
 
 **Not supported**: voice/video calls, stories, message history from before linking (signal-cli doesn't support Signal's history transfer), editing messages that have attachments, changing your last name (the Signal API only sets the first name), view-once media.
 

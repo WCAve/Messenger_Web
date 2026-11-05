@@ -10,6 +10,7 @@
  *   POST /mock/incoming {"from":"alice","text":"hi"}           incoming direct message (alice|bob|carol)
  *   POST /mock/incoming {"from":"bob","text":"hi","group":true} incoming group message
  *   GET  /mock/sent                                             everything Signal Web sent
+ *   POST /mock/envelope {"from":"alice","envelope":{"callMessage":{…}}}   any other envelope content
  *   POST /mock/receipt {"from":"alice","ts":<sent ts>,"kind":"read"}  a delivery/read receipt
  *   POST /mock/incoming {..., "extra": {dataMessage fields}}    e.g. textStyles, mentions, previews, expiresInSeconds
  */
@@ -435,6 +436,13 @@ const server = http.createServer(async (req, res) => {
       const who = b.from === 'dave' ? DAVE : b.from === 'stranger' ? { number: '', uuid: STRANGER_UUID, profile: '' } : PEOPLE[b.from ?? 'alice'];
       receipt(who, Number(b.ts), b.kind ?? 'read');
       return json(res, 200, { ok: true });
+    }
+    if (p === '/mock/envelope' && m === 'POST') {
+      const b = await body(req); // {"from":"alice","envelope":{callMessage:{…}}}: any other envelope content
+      const person = b.from === 'dave' ? DAVE : PEOPLE[b.from ?? 'alice'];
+      const ts = (lastTs = Math.max(Date.now(), lastTs + 1));
+      push({ ...from(person), timestamp: ts, ...b.envelope });
+      return json(res, 200, { timestamp: ts });
     }
     if (p === '/mock/incoming' && m === 'POST') {
       const b = await body(req);

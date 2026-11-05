@@ -158,6 +158,9 @@ function authed(req, url) {
   return req.headers['x-api-key'] === KEY || url.searchParams.get('x-api-key') === KEY;
 }
 
+const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
+const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
+const DESC = { [GROUP.id]: 'De familie-app 🏡\nWees lief voor elkaar' };
 const subscribed = new Set(); // presence: WEBJS only reports typing for chats you subscribed to
 function presence(chatId, who, state) {
   if (subscribed.has(chatId)) emit('presence.update', { id: chatId, presences: [{ participant: who, lastKnownPresence: state }] });
@@ -246,7 +249,17 @@ const server = http.createServer(async (req, res) => {
 
     // Like WEBJS: chats carry isMuted / muteExpiration (seconds, -1 = always). Familie is muted on the phone.
     if (p === `/api/${SESSION}/chats`) {
-      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0 })));
+      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0, unreadCount: markedUnread.has(id) ? -1 : 0 })));
+    }
+    const unread = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/unread$`));
+    if (unread && m === 'POST') {
+      markedUnread.add(decodeURIComponent(unread[1]));
+      sent.push({ path: p, method: m });
+      return json(res, 200, { ok: true });
+    }
+    if (p === '/api/contacts/about') {
+      sent.push({ path: p, method: m, contactId: url.searchParams.get('contactId') });
+      return json(res, 200, { about: ABOUT[url.searchParams.get('contactId')] ?? null });
     }
     if (p === `/api/${SESSION}/chats/overview`) return json(res, 200, overview().slice(0, Number(url.searchParams.get('limit') ?? 20)));
     const msgs = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/messages(?:/([^/]+))?$`));
@@ -274,7 +287,7 @@ const server = http.createServer(async (req, res) => {
     const parts = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)/participants/v2$`));
     if (parts) return json(res, 200, [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }]);
     // WEBJS: groups are wwebjs GroupChat objects
-    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name } });
+    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name, desc: DESC[g.id] ?? undefined } });
     if (p === `/api/${SESSION}/groups`) return json(res, 200, [GROUP, GROUP2].map(groupChat));
     const one = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)$`));
     if (one) {
@@ -302,6 +315,7 @@ const server = http.createServer(async (req, res) => {
       const chatId = b.chatId;
       const record = { path: p, method: m, ...b, file: b.file ? { ...b.file, data: String(b.file.data ?? '').slice(0, 40) + '…' } : undefined, preview: b.preview ? { ...b.preview, image: b.preview.image ? { mimetype: b.preview.image.mimetype, bytes: b.preview.image.data?.length } : undefined } : undefined };
       sent.push(record);
+      if (p === '/api/sendSeen') markedUnread.delete(chatId);
       if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll'].includes(p)) {
         if (String(b.text ?? b.caption ?? '').includes('fail')) return json(res, 500, { message: 'Mock failure' });
         const text = b.text ?? b.caption ?? '';
