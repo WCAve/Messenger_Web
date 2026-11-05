@@ -64,6 +64,7 @@ export const api = {
   createPoll: (id: number, b: { question: string; options: string[]; multiple: boolean }) => call<Message>('POST', `/api/conversations/${id}/polls`, b),
   vote: (id: number, options: number[]) => call<Message>('POST', `/api/messages/${id}/vote`, { options }),
   closePoll: (id: number) => call<Message>('DELETE', `/api/messages/${id}/poll`),
+  pinnedOrder: (ids: number[]) => call<{ conversations: Conversation[] }>('POST', '/api/pinned/order', { ids }),
   setFlags: (id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) => call<Conversation>('POST', `/api/conversations/${id}/flags`, f),
   emojiUsage: () => call<{ usage: Record<string, { score: number; alias?: string }> }>('GET', '/api/emoji/usage'),
   emojiAlias: (emoji: string, code: string) => call<{ ok: true }>('POST', '/api/emoji/alias', { emoji, code }),

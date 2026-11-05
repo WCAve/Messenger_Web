@@ -2805,3 +2805,28 @@ img.emoji {
 .emoji-sample[data-style='system'] {
   font-family: system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 }
+
+/* ---------- reordering pinned chats ---------- */
+.chat-row-wrap[draggable='true'] .chat-row {
+  cursor: grab;
+}
+.chat-row-wrap.dragging {
+  opacity: 0.45;
+}
+.chat-row-wrap.drop-before::before,
+.chat-row-wrap.drop-after::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--ultra);
+  z-index: 3;
+}
+.chat-row-wrap.drop-before::before {
+  top: -1px;
+}
+.chat-row-wrap.drop-after::after {
+  bottom: -1px;
+}

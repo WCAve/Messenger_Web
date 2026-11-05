@@ -410,6 +410,15 @@ export function setConversationFlags(id: number, f: { pinned?: boolean; archived
   if (f.mutedUntil !== undefined) db.prepare('UPDATE conversations SET muted_until = ? WHERE id = ?').run(Math.max(0, f.mutedUntil), id);
 }
 
+/** New order of the pinned chats (top first). Small numbers, so chats pinned later still go below. */
+export function setPinnedOrder(ids: number[]) {
+  const pinned = new Set(db.prepare<[], { id: number }>('SELECT id FROM conversations WHERE pinned_at IS NOT NULL').all().map((r) => r.id));
+  const order = ids.filter((id) => pinned.has(id));
+  for (const id of pinned) if (!order.includes(id)) order.push(id); // keep any we weren't told about
+  db.transaction(() => order.forEach((id, i) => db.prepare('UPDATE conversations SET pinned_at = ? WHERE id = ?').run(i + 1, id)))();
+  return order;
+}
+
 export function pinnedCount(): number {
   return db.prepare<[], { n: number }>('SELECT count(*) AS n FROM conversations WHERE pinned_at IS NOT NULL').get()!.n;
 }

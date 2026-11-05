@@ -49,6 +49,7 @@ import {
   type LinkPreview,
   type Poll,
   pinnedCount,
+  setPinnedOrder,
   setConversationFlags,
   getOrCreateWaChat,
   listWaContacts,
@@ -811,6 +812,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const updated = getConversation(c.id)!;
     emitConversation(updated);
     return conversationDto(updated);
+  });
+
+  r.post('/api/pinned/order', (ctx) => {
+    const ids: number[] = Array.isArray(ctx.body?.ids) ? ctx.body.ids.map(Number).filter(Number.isInteger) : [];
+    const order = setPinnedOrder(ids);
+    const updated = order.map((id) => getConversation(id)!);
+    for (const c of updated) emitConversation(c);
+    return { conversations: updated.map(conversationDto) };
   });
 
   r.post('/api/messages/:id/retry', (ctx) => {

@@ -48,6 +48,7 @@ const PATHS: Record<string, ReactNode> = {
   forward: <path d="M14 9V5l7 7-7 7v-4.1c-5 0-8.5 1.6-11 5.1 1-5 4-10 11-11z" />,
   poll: <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM9 17H7v-7h2zm4 0h-2V7h2zm4 0h-2v-4h2z" />,
   chevron: <path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />,
+  up: <path d="M7.4 15.4 12 10.8l4.6 4.6L18 14l-6-6-6 6z" />,
   down: <path d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z" />,
   bell: <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11c0-3.1-1.6-5.6-4.5-6.3V4a1.5 1.5 0 0 0-3 0v.7C7.6 5.4 6 7.9 6 11v5l-2 2v1h16v-1z" />,
 };

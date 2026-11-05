@@ -1,6 +1,6 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { setState, upsertConversation, useStore } from '../store';
+import { getState, setState, upsertConversation, useStore } from '../store';
 import type { Conversation, SearchResult } from '../types';
 import { jumpToMessage } from '../jump';
 import { Highlight } from './InfoPanel';
@@ -59,6 +59,27 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   useEffect(() => {
     if (archivedMode && !archivedCount) setMode('list');
   }, [archivedMode, archivedCount]);
+
+  // Dragging a pinned chat onto another pinned chat moves it there.
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<{ id: number; after: boolean } | null>(null);
+  const drag: PinDrag = {
+    dragging,
+    over,
+    start: (id) => setDragging(id),
+    hover: (id, after) => dragging !== null && (over?.id !== id || over.after !== after) && setOver({ id, after }),
+    end: () => (setDragging(null), setOver(null)),
+    drop: () => {
+      if (dragging !== null && over && over.id !== dragging) {
+        const ids = pinnedInOrder(conversations).map((x) => x.id).filter((id) => id !== dragging);
+        const at = ids.indexOf(over.id) + (over.after ? 1 : 0);
+        ids.splice(at, 0, dragging);
+        void savePinnedOrder(ids);
+      }
+      setDragging(null);
+      setOver(null);
+    },
+  };
 
   if (mode === 'new') return <NewChat onClose={() => setMode('list')} />;
   if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
@@ -144,7 +165,14 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         )}
         {query && found && list.length > 0 && <h3 className="list-heading">Chats</h3>}
         {list.map((c) => (
-          <ChatRow key={c.id} c={c} active={c.id === activeId} typing={(typing[c.id] ?? []).length > 0} draft={c.id !== activeId ? drafts[c.id]?.text : undefined} />
+          <ChatRow
+            key={c.id}
+            c={c}
+            active={c.id === activeId}
+            typing={(typing[c.id] ?? []).length > 0}
+            draft={c.id !== activeId ? drafts[c.id]?.text : undefined}
+            drag={!query && c.pinnedAt ? drag : undefined}
+          />
         ))}
         {found && found.length > 0 && (
           <>
@@ -279,6 +307,28 @@ export function SidebarResizer() {
   );
 }
 
+/** Pinned chats in their order, top first. */
+function pinnedInOrder(conversations: Record<number, Conversation>): Conversation[] {
+  return Object.values(conversations)
+    .filter((c) => c.pinnedAt && !c.archived)
+    .sort((a, b) => a.pinnedAt! - b.pinnedAt!);
+}
+
+/** Save a new order of pinned chats; the list updates right away. */
+async function savePinnedOrder(ids: number[]) {
+  const before = getState().conversations;
+  setState((s) => {
+    const conversations = { ...s.conversations };
+    ids.forEach((id, i) => conversations[id] && (conversations[id] = { ...conversations[id], pinnedAt: i + 1 }));
+    return { conversations };
+  });
+  try {
+    for (const c of (await api.pinnedOrder(ids)).conversations) upsertConversation(c);
+  } catch {
+    setState({ conversations: before });
+  }
+}
+
 const MUTE_OPTIONS: [string, number][] = [
   ['For 8 hours', 8 * 3600_000],
   ['For 1 week', 7 * 86400_000],
@@ -286,10 +336,22 @@ const MUTE_OPTIONS: [string, number][] = [
 ];
 const FOREVER = 8.64e15; // the largest date JS can show
 
+const NO_PINS: Conversation[] = [];
+
 export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Conversation; onClose: () => void; className?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [muteOpen, setMuteOpen] = useState(false);
   const muted = c.mutedUntil > Date.now();
+  const conversations = useStore((s) => s.conversations);
+  const pinned = useMemo(() => (c.pinnedAt ? pinnedInOrder(conversations) : NO_PINS), [c.pinnedAt, conversations]);
+  const at = pinned.findIndex((x) => x.id === c.id);
+  function move(by: number) {
+    const ids = pinned.map((x) => x.id);
+    ids.splice(at, 1);
+    ids.splice(at + by, 0, c.id);
+    void savePinnedOrder(ids);
+    onClose();
+  }
   async function set(f: Parameters<typeof api.setFlags>[1]) {
     try {
       upsertConversation(await api.setFlags(c.id, f));
@@ -303,6 +365,16 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
       {!c.archived && (
         <button role="menuitem" onClick={() => void set({ pinned: !c.pinnedAt })}>
           <Icon name="pin" size={18} /> {c.pinnedAt ? 'Unpin chat' : 'Pin chat'}
+        </button>
+      )}
+      {at > 0 && (
+        <button role="menuitem" onClick={() => move(-1)}>
+          <Icon name="up" size={18} /> Move up
+        </button>
+      )}
+      {at >= 0 && at < pinned.length - 1 && (
+        <button role="menuitem" onClick={() => move(1)}>
+          <Icon name="down" size={18} /> Move down
         </button>
       )}
       {muted ? (
@@ -328,13 +400,50 @@ export function ChatRowMenu({ c, onClose, className = 'row-menu' }: { c: Convers
   );
 }
 
-function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolean; typing: boolean; draft?: string }) {
+interface PinDrag {
+  dragging: number | null;
+  over: { id: number; after: boolean } | null;
+  start: (id: number) => void;
+  hover: (id: number, after: boolean) => void;
+  end: () => void;
+  drop: () => void;
+}
+
+function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: boolean; typing: boolean; draft?: string; drag?: PinDrag }) {
   const multi = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const lm = c.lastMessage;
   const [menu, setMenu] = useState(false);
   const muted = c.mutedUntil > Date.now();
   return (
-    <div className={`chat-row-wrap${menu ? ' menu-open' : ''}${active ? ' active' : ''}`}>
+    <div
+      className={`chat-row-wrap${menu ? ' menu-open' : ''}${active ? ' active' : ''}${drag?.dragging === c.id ? ' dragging' : ''}${
+        drag?.over?.id === c.id && drag.dragging !== c.id ? (drag.over.after ? ' drop-after' : ' drop-before') : ''
+      }`}
+      draggable={!!drag}
+      onDragStart={
+        drag
+          ? (e) => {
+              e.dataTransfer.effectAllowed = 'move';
+              e.dataTransfer.setData('text/plain', c.title);
+              drag.start(c.id);
+            }
+          : undefined
+      }
+      onDragOver={
+        drag
+          ? (e) => {
+              if (drag.dragging === null) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              const r = e.currentTarget.getBoundingClientRect();
+              drag.hover(c.id, e.clientY > r.top + r.height / 2);
+            }
+          : undefined
+      }
+      onDrop={drag ? (e) => (e.preventDefault(), drag.drop()) : undefined}
+      onDragEnd={drag ? () => drag.end() : undefined}
+      title={drag ? 'Drag to reorder pinned chats' : undefined}
+    >
     <button className={`chat-row${active ? ' active' : ''}${c.unread ? ' unread' : ''}${muted ? ' muted' : ''}`} onClick={() => setState({ activeId: c.id })} aria-current={active}>
       <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} network={multi ? c.network : undefined} />
       <span className="chat-row-main">
