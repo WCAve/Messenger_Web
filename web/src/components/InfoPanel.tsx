@@ -138,8 +138,15 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
           {info && tab === 'media' && (info.media.length ? (
             <div className="media-grid">
               {info.media.map((m) => (
-                <button key={m.attachment.id} onClick={() => onOpenMedia(m.attachment, m.authorName, m.sentAt)} aria-label={`Open ${m.attachment.filename ?? 'media'}`}>
-                  {m.attachment.contentType.startsWith('image/') ? (
+                <button
+                  key={m.attachment.id}
+                  onClick={() => (m.attachment.pending ? void api.fetchAttachment(m.attachment.id).catch(() => {}) : onOpenMedia(m.attachment, m.authorName, m.sentAt))}
+                  aria-label={`Open ${m.attachment.filename ?? 'media'}`}
+                  title={m.attachment.pending ? 'Not on the server yet: click to get it from WhatsApp' : undefined}
+                >
+                  {m.attachment.pending ? (
+                    <span className="media-badge">{m.attachment.contentType.startsWith('image/') ? 'Photo' : 'Video'} · not loaded</span>
+                  ) : m.attachment.contentType.startsWith('image/') ? (
                     <>
                       <img src={attachmentUrl(m.attachment.id)} alt="" loading="lazy" />
                       {m.attachment.contentType === 'image/gif' && <span className="media-badge">GIF</span>}

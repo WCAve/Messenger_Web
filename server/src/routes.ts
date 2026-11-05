@@ -1034,9 +1034,26 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Attachments: served from our own copy, fetched from the Signal API on first use.
+  // A WhatsApp file from imported history that isn't here yet: fetch it in the background and say so
+  // straight away. Holding the request open (old files can take WhatsApp a minute) would tie up the
+  // browser's few connections to this server and make the whole app wait. The chat updates when the
+  // file arrives. Downloads (?download=1) do wait.
+  r.post('/api/attachments/:id/fetch', (ctx) => {
+    const id = ctx.params.id;
+    if (!isSafeId(id)) throw new HttpError(400, 'Bad id');
+    if (fs.existsSync(localPath(id))) return { ready: true };
+    void fetchAttachment(id).catch(() => {});
+    return { queued: true };
+  });
+
   r.get('/api/attachments/:id', async (ctx) => {
     const id = ctx.params.id;
     if (!isSafeId(id)) throw new HttpError(400, 'Bad id');
+    if (id.startsWith('wa-') && !fs.existsSync(localPath(id)) && !ctx.query.has('download')) {
+      void fetchAttachment(id).catch(() => {});
+      ctx.res.setHeader('retry-after', '10');
+      throw new HttpError(404, 'Not downloaded yet');
+    }
     if (!(await fetchAttachment(id))) throw new HttpError(404, 'Attachment not available');
     const file = localPath(id);
     const type = MIME[path.extname(id).toLowerCase()];

@@ -718,7 +718,7 @@ export function conversationInfo(conv: ConversationRow) {
     const authorName = nameForKey(m.author);
     for (const a of (m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]) {
       if (a.missing) continue; // WhatsApp couldn't provide it any more
-      const entry = { messageId: m.id, sentAt: m.sent_ts, authorName, attachment: a };
+      const entry = { messageId: m.id, sentAt: m.sent_ts, authorName, attachment: attachmentDto(a) as Attachment };
       if (a.contentType.startsWith('image/') || a.contentType.startsWith('video/')) media.push(entry);
       else if (!a.voiceNote) files.push(entry);
     }
@@ -947,7 +947,7 @@ function nextRev() {
 }
 
 /** WhatsApp files from imported history may not be on the server yet ("pending": fetched on first view). */
-function attachmentDto(a: Attachment) {
+export function attachmentDto(a: Attachment) {
   if (!a.id.startsWith('wa-') || a.missing) return a;
   try {
     if (fs.existsSync(localPath(a.id))) return a;

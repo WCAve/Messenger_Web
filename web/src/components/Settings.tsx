@@ -191,7 +191,8 @@ function BackupImport() {
   useEffect(() => {
     if (open) api.backupInfo().then(setInfo, (e) => setError(e.message));
   }, [open, b?.stage]);
-  const file = b?.file !== undefined ? b.file : info?.file ?? null;
+  // Whichever knows about a file: the live state, or the answer to our own upload / question.
+  const file = b?.file ?? info?.file ?? null;
   const plain = !!file && /\.db$/i.test(file.name);
   const digits = key.replace(/[^0-9a-f]/gi, '').length;
 

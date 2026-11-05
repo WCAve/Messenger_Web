@@ -48,6 +48,7 @@ export const api = {
   whatsapp: () => call<WaState>('GET', '/api/whatsapp'),
   whatsappLogout: () => call<WaState>('POST', '/api/whatsapp/logout'),
   whatsappRestart: () => call<WaState>('POST', '/api/whatsapp/restart'),
+  fetchAttachment: (id: string) => call<{ ready?: true; queued?: true }>('POST', `/api/attachments/${encodeURIComponent(id)}/fetch`),
   backupInfo: () => call<{ file: BackupFile | null; folder: string }>('GET', '/api/whatsapp/backup'),
   backupImport: (key?: string) => call<{ started: true }>('POST', '/api/whatsapp/backup/import', key ? { key } : {}),
   backupMedia: () => call<{ started: true }>('POST', '/api/whatsapp/backup/media'),

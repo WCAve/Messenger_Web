@@ -535,7 +535,7 @@ async function withMediaSlot<T>(fn: () => Promise<T>): Promise<T> {
     return await fn();
   } finally {
     mediaSlots++;
-    mediaWaiting.shift()?.();
+    mediaWaiting.pop()?.(); // newest first: what you just scrolled to matters more than what you scrolled past
   }
 }
 const mediaInflight = new Map<string, Promise<boolean>>();

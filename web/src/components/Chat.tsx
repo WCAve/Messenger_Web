@@ -626,18 +626,20 @@ const MessageItem = memo(function MessageItem({
             {visual.slice(0, 4).map((a, i) =>
               a.missing ? (
                 <MissingMedia key={a.id} a={a} />
+              ) : a.pending ? (
+                <PendingImage key={a.id} a={a} />
               ) : a.contentType.startsWith('video/') ? (
                 <div key={a.id} className="img-btn">
                   <GifVideo a={a} onLoad={onMediaLoad} />
                 </div>
               ) : (
-                <button key={a.id} className={`img-btn${a.pending ? ' pending' : ''}`} onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
+                <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
                   <img
                     src={attachmentUrl(a.id)}
                     alt={a.caption ?? a.filename ?? 'Image'}
                     loading="lazy"
-                    onLoad={(e) => (e.currentTarget.parentElement?.classList.remove('pending'), onMediaLoad?.())}
-                    onError={(e) => e.currentTarget.parentElement?.classList.add('failed')}
+                    onLoad={onMediaLoad}
+                    onError={(e) => a.id.startsWith('wa-') && e.currentTarget.parentElement?.classList.add('failed')}
                     style={visual.length === 1 && a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}
                   />
                   {i === 3 && visual.length > 4 && <span className="more-images">+{visual.length - 4}</span>}
@@ -804,26 +806,57 @@ function MissingMedia({ a }: { a: Attachment }) {
   );
 }
 
-/** Video or audio from imported WhatsApp history: loads when you press play, not when the chat opens. */
-function PendingPlayable({ a }: { a: Attachment }) {
-  const [on, setOn] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const url = attachmentUrl(a.id);
-  const video = a.contentType.startsWith('video/');
-  if (failed) return <MissingMedia a={a} />;
-  if (on) {
-    return video ? (
-      <video className="video" src={url} controls autoPlay onError={() => setFailed(true)} />
-    ) : (
-      <audio className="audio" src={url} controls autoPlay onError={() => setFailed(true)} />
-    );
-  }
+const askedFor = new Set<string>(); // files we've asked the server to fetch this session
+
+/**
+ * A photo from imported WhatsApp history that isn't on the server yet. Once it's on screen, the server
+ * is asked to fetch it (in the background); the message updates when it's there, or says it's gone.
+ */
+function PendingImage({ a }: { a: Attachment }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || askedFor.has(a.id)) return;
+    const go = () => {
+      if (askedFor.has(a.id)) return;
+      askedFor.add(a.id);
+      api.fetchAttachment(a.id).catch(() => askedFor.delete(a.id));
+    };
+    if (typeof IntersectionObserver === 'undefined') return go();
+    const io = new IntersectionObserver((es) => {
+      if (es.some((e) => e.isIntersecting)) {
+        io.disconnect();
+        go();
+      }
+    }, { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [a.id]);
   return (
-    <button className="file pending-media" onClick={() => setOn(true)}>
-      <Icon name="play" size={26} />
+    <div ref={ref} className="img-btn pending" title="Getting it from WhatsApp…" style={a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}>
+      <span className="pending-label">{a.contentType.startsWith('video/') ? 'GIF' : 'Photo'} · getting it from WhatsApp…</span>
+    </div>
+  );
+}
+
+/** Video or audio from imported WhatsApp history: fetched when you press play, not when the chat opens. */
+function PendingPlayable({ a }: { a: Attachment }) {
+  const [asked, setAsked] = useState(askedFor.has(a.id));
+  const video = a.contentType.startsWith('video/');
+  return (
+    <button
+      className="file pending-media"
+      disabled={asked}
+      onClick={() => {
+        askedFor.add(a.id);
+        setAsked(true);
+        api.fetchAttachment(a.id).catch(() => (askedFor.delete(a.id), setAsked(false)));
+      }}
+    >
+      {asked ? <span className="spinner small" /> : <Icon name="play" size={26} />}
       <span>
         <strong>{video ? 'Video' : a.voiceNote ? 'Voice message' : 'Audio'}</strong>
-        <small>{[formatSize(a.size), 'tap to load from WhatsApp'].filter(Boolean).join(' · ')}</small>
+        <small>{asked ? 'Getting it from WhatsApp… this can take a minute' : [formatSize(a.size), 'tap to load from WhatsApp'].filter(Boolean).join(' · ')}</small>
       </span>
     </button>
   );
