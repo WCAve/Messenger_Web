@@ -28,7 +28,7 @@ jobs:
           MOCK_WA_LINKED=1 node mock/mock-waha.mjs &
           sleep 1
           DATA_DIR=$RUNNER_TEMP/data APP_PASSWORD=ci-password SIGNAL_API_URL=http://127.0.0.1:8080 \
-            WAHA_URL=http://127.0.0.1:8090 WAHA_API_KEY=test-waha-key \
+            WAHA_URL=http://127.0.0.1:8090 WAHA_API_KEY=test-waha-key WAHA_HISTORY_ROUNDS_MS=1000,6000 \
             node --no-warnings=ExperimentalWarning server/dist/index.js &
           for i in $(seq 1 20); do curl -fs localhost:3000/healthz && break; sleep 0.5; done
           curl -fs -c jar -H 'content-type: application/json' -d '{"password":"ci-password"}' localhost:3000/api/login
