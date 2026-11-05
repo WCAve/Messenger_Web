@@ -1,5 +1,7 @@
 # ---- build ----
-FROM node:22-alpine AS build
+# Runs on the build machine's own CPU for every target: the output is plain JavaScript, and npm under
+# ARM emulation crashes ("Illegal instruction").
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /app
 COPY package.json ./
 COPY server/package.json server/
