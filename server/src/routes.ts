@@ -32,6 +32,7 @@ import {
   typingWa,
   voteWa,
   waAvatar,
+  waAvatarCached,
   waChatForNumber,
 } from './whatsapp.js';
 import {
@@ -431,7 +432,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return { ok: true };
   });
   r.get('/api/avatars/wa/:jid', async (ctx) => {
-    const file = await waAvatar(noExt(ctx.params.jid));
+    // Pictures come from WhatsApp Web, which can be busy for a minute (with many groups). Never keep the
+    // browser waiting long: it has only a few connections to us, and the rest of the app needs them.
+    const jid = noExt(ctx.params.jid);
+    const stale = waAvatarCached(jid);
+    const lookup = waAvatar(jid);
+    const file = stale ?? (await Promise.race([lookup, new Promise<null>((r) => setTimeout(() => r(null), 2500))]));
     if (!file) throw new HttpError(404, 'No picture');
     return sendFile(ctx.res, file, { 'content-type': sniffImage(file), 'cache-control': 'private, max-age=86400' }, ctx.req.method === 'HEAD');
   });

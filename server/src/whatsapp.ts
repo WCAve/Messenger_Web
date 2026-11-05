@@ -289,7 +289,13 @@ const HISTORY_KEY = 'wa_history_v2';
 let historyTimers: ReturnType<typeof setTimeout>[] = [];
 
 async function afterConnect() {
+  // With WEBJS the chat list makes WhatsApp Web look up every group, which keeps it busy for up to a
+  // minute. Once contacts are known, let the app load first and do this a little later.
+  const known = kvGet('wa_directory_v1') === 'done';
+  if (known) await pause(60_000);
+  if (state.status !== 'connected') return;
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
+  kvSet('wa_directory_v1', 'done');
   setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
   if (kvGet(HISTORY_KEY) === 'done') return;
   // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
@@ -924,7 +930,7 @@ async function refreshGroupName(conv: ConversationRow) {
   groupNameTried.set(conv.wa_id!, Date.now());
   const g = await waha.group(conv.wa_id!);
   if (descriptionOf(g) === undefined && descWarnings++ < 5) {
-    log.info(`whatsapp: group ${conv.wa_id} came without a description field (fields: ${Object.keys(g?.groupMetadata ?? g ?? {}).slice(0, 40).join(', ')})`);
+    log.debug?.(`whatsapp: group ${conv.wa_id} came without a description field (fields: ${Object.keys(g?.groupMetadata ?? g ?? {}).slice(0, 40).join(', ')})`);
   }
   const name = groupNameOf(g);
   const desc = descriptionOf(g);
@@ -1586,6 +1592,12 @@ async function withAvatarSlot<T>(fn: () => Promise<T>): Promise<T> {
 let avatarWarnings = 0;
 
 /** A WhatsApp profile/group picture, cached for 12 hours (no picture: 6 hours; errors: 30 minutes). */
+/** The cached picture right away, however old (waAvatar refreshes it in the background). */
+export function waAvatarCached(jid: string): string | null {
+  const file = path.join(avatarDir, 'wa-' + crypto.createHash('sha256').update(jid).digest('hex').slice(0, 32));
+  return fs.existsSync(file) ? file : null;
+}
+
 export function waAvatar(jid: string): Promise<string | null> {
   const name = 'wa-' + crypto.createHash('sha256').update(jid).digest('hex').slice(0, 32);
   const file = path.join(avatarDir, name);
