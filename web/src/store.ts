@@ -46,6 +46,8 @@ export interface State {
   forwarding: Message | null;
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
+  /** The sticker manager is open (in the chat list column). */
+  stickerManager: boolean;
 }
 
 let state: State = {
@@ -62,6 +64,7 @@ let state: State = {
   activeId: null,
   panel: null,
   receiptTick: 0,
+  stickerManager: false,
   drafts: loadDrafts(),
   forwarding: null,
 };

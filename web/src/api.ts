@@ -1,5 +1,5 @@
 import type { BackupFile, WaContact, WaState } from './types';
-import type { Conversation, ConversationInfo, DirectoryContact, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
+import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
 export interface RichText {
@@ -85,7 +85,13 @@ export const api = {
   updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia' | 'waShowOnline'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
-  stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
+  stickers: () => call<{ packs: StickerPack[]; local: LocalStickers }>('GET', '/api/stickers'),
+  createStickerPack: (title: string, ids: string[]) => call<LocalStickers>('POST', '/api/stickers/local', { title, ids }),
+  updateStickerPack: (id: string, patch: { title?: string; add?: string[]; remove?: string[]; order?: string[] }) => call<LocalStickers>('POST', `/api/stickers/local/${encodeURIComponent(id)}`, patch),
+  deleteStickerPack: (id: string) => call<LocalStickers>('DELETE', `/api/stickers/local/${encodeURIComponent(id)}`),
+  forgetStickers: (ids: string[]) => call<LocalStickers>('POST', '/api/stickers/forget', { ids }),
+  addStickerImages: (images: string[], packId?: string) => call<LocalStickers>('POST', '/api/stickers/images', { images, packId }),
+  sendLocalSticker: (id: number, stickerId: string, quoteId?: number) => call<Message>('POST', `/api/conversations/${id}/local-sticker`, { id: stickerId, quoteId }),
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,

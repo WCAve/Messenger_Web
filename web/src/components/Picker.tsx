@@ -3,7 +3,8 @@ import { api } from '../api';
 import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { frequentEmoji, loadUsage } from '../emoji/usage';
-import type { StickerItem, StickerPack } from '../types';
+import { setState } from '../store';
+import type { LocalStickers, StickerItem, StickerPack } from '../types';
 import { Icon } from './ui';
 
 export interface PickedGif {
@@ -11,10 +12,8 @@ export interface PickedGif {
   title: string;
 }
 
-export interface PickedSticker {
-  packId: string;
-  stickerId: number;
-}
+/** A Signal pack sticker, or one of your own (sticker manager / WhatsApp). */
+export type PickedSticker = { packId: string; stickerId: number } | { localId: string };
 
 export type PickerTab = 'emoji' | 'gif' | 'sticker';
 
@@ -29,7 +28,8 @@ export function Picker({
   title,
   allowGif = true,
   allowStickers = true,
-  waStickers,
+  stickerNetwork = 'signal',
+  onStickerImage,
 }: {
   tab: PickerTab;
   onTab: (t: PickerTab) => void;
@@ -39,9 +39,10 @@ export function Picker({
   onClose: () => void;
   title?: string;
   allowGif?: boolean; // false = emoji only (choosing a reaction)
-  allowStickers?: boolean; // Signal sticker packs (not for WhatsApp chats)
-  /** WhatsApp chats: your WhatsApp stickers instead of Signal's packs. */
-  waStickers?: { onPick: (id: string) => void; onImage: (file: File) => void };
+  allowStickers?: boolean;
+  /** Which network the chat is on (how a sticker gets sent), and "image as sticker" for WhatsApp. */
+  stickerNetwork?: 'signal' | 'whatsapp';
+  onStickerImage?: (file: File) => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -63,7 +64,7 @@ export function Picker({
             GIF
           </button>
         )}
-        {allowGif && (allowStickers || waStickers) && (
+        {allowGif && allowStickers && (
           <button className={tab === 'sticker' ? 'on' : undefined} onClick={() => onTab('sticker')}>
             Stickers
           </button>
@@ -72,7 +73,7 @@ export function Picker({
           <Icon name="close" size={18} />
         </button>
       </div>
-      {tab === 'emoji' || !allowGif || (tab === 'sticker' && !allowStickers && !waStickers) ? (
+      {tab === 'emoji' || !allowGif || (tab === 'sticker' && !allowStickers) ? (
         <EmojiGrid
           onPick={(e) => {
             rememberEmoji(e);
@@ -81,10 +82,8 @@ export function Picker({
         />
       ) : tab === 'gif' ? (
         <GifGrid onPick={onGif} />
-      ) : waStickers ? (
-        <WaStickerGrid {...waStickers} />
       ) : (
-        <StickerGrid onPick={onSticker} />
+        <StickerGrid onPick={onSticker} network={stickerNetwork} onImage={onStickerImage} />
       )}
     </div>
   );
@@ -92,79 +91,59 @@ export function Picker({
 
 // ---------------------------------------------------------------------------
 
-/** WhatsApp: stickers you've received, sent or imported, plus "make one from an image". */
-function WaStickerGrid({ onPick, onImage }: { onPick: (id: string) => void; onImage: (file: File) => void }) {
-  const [list, setList] = useState<{ id: string; url: string }[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    api.waStickers().then((r) => setList(r.stickers), (e) => setError(e.message));
-  }, []);
-  return (
-    <div className="sticker-body">
-      <div className="sticker-grid">
-        <button className="sticker-cell sticker-make" onClick={() => input.current?.click()} title="Make a sticker from an image">
-          <Icon name="plus" size={26} />
-          <span>From an image</span>
-        </button>
-        <input ref={input} type="file" accept="image/*" hidden onChange={(e) => (e.target.files?.[0] && onImage(e.target.files[0]), (e.target.value = ''))} />
-        {list?.map((s) => (
-          <button
-            key={s.id}
-            className="sticker-cell"
-            onClick={() => onPick(s.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              if (confirm('Remove this sticker from your list?')) api.removeWaSticker(s.id).then((r) => setList(r.stickers), () => {});
-            }}
-            title="Sticker (right-click to remove from the list)"
-          >
-            <img src={s.url} alt="Sticker" loading="lazy" />
-          </button>
-        ))}
-      </div>
-      {list && !list.length && (
-        <p className="sticker-empty">Stickers you receive or send appear here. Stickers saved on your phone can be imported from Settings → WhatsApp → backup → <em>Import stickers from the folder</em>.</p>
-      )}
-      {error && <p className="form-error">{error}</p>}
-    </div>
-  );
-}
-
 const RECENT_STICKERS = 'sw-recent-stickers';
-function recentStickers(): (PickedSticker & { url: string })[] {
+type Recent = PickedSticker & { url: string };
+function recentStickers(): Recent[] {
   try {
-    return JSON.parse(localStorage.getItem(RECENT_STICKERS) ?? '[]');
+    return (JSON.parse(localStorage.getItem(RECENT_STICKERS) ?? '[]') as Recent[]).filter((s) => s && s.url);
   } catch {
     return [];
   }
 }
-function rememberSticker(s: PickedSticker & { url: string }) {
+function rememberSticker(s: Recent) {
   try {
-    const list = [s, ...recentStickers().filter((x) => !(x.packId === s.packId && x.stickerId === s.stickerId))].slice(0, 16);
+    const same = (x: Recent) => ('localId' in x && 'localId' in s ? x.localId === s.localId : 'packId' in x && 'packId' in s && x.packId === s.packId && x.stickerId === s.stickerId);
+    const list = [s, ...recentStickers().filter((x) => !same(x))].slice(0, 24);
     localStorage.setItem(RECENT_STICKERS, JSON.stringify(list));
   } catch {
-    /* storage unavailable */
+    /* private mode */
   }
 }
 
 let packsCache: StickerPack[] | null = null;
+let localCache: LocalStickers | null = null;
 
-function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
+/**
+ * One sticker picker for every chat: Signal's packs, your own packs from the sticker manager, and
+ * WhatsApp stickers not in a pack yet. How it's sent depends on the chat (see the Composer).
+ */
+function StickerGrid({
+  onPick,
+  network,
+  onImage,
+}: {
+  onPick: (s: PickedSticker) => void;
+  network: 'signal' | 'whatsapp';
+  onImage?: (file: File) => void;
+}) {
   const [packs, setPacks] = useState<StickerPack[] | null>(packsCache);
+  const [local, setLocal] = useState<LocalStickers | null>(localCache);
   const [active, setActive] = useState<string>('recent');
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState('');
   const [adding, setAdding] = useState(false);
   const recent = useMemo(() => recentStickers(), []);
+  const imageInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api
       .stickers()
       .then((r) => {
         packsCache = r.packs;
+        localCache = r.local;
         setPacks(r.packs);
-        setActive((a) => (a === 'recent' && !recent.length && r.packs[0] ? r.packs[0].packId : a));
+        setLocal(r.local);
+        setActive((a) => (a === 'recent' && !recent.length ? (r.packs[0]?.packId ?? (r.local.packs[0] ? r.local.packs[0].id : r.local.unsorted.length ? 'unsorted' : 'add')) : a));
       })
       .catch((e) => setError(e.message));
   }, [recent.length]);
@@ -186,13 +165,20 @@ function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
     }
   }
 
-  const pick = (packId: string, s: StickerItem) => {
+  const pickSignal = (packId: string, s: StickerItem) => {
     rememberSticker({ packId, stickerId: s.id, url: s.url });
     onPick({ packId, stickerId: s.id });
   };
+  const pickLocal = (s: { id: string; url: string }) => {
+    rememberSticker({ localId: s.id, url: s.url });
+    onPick({ localId: s.id });
+  };
 
-  const current = packs?.find((p) => p.packId === active);
-  const showRecent = active === 'recent' && recent.length > 0;
+  const signalPack = packs?.find((p) => p.packId === active);
+  const localPack = local?.packs.find((p) => p.id === active);
+  const loaded = !!packs && !!local;
+  // Your own packs can't be sent as Signal stickers (Signal's API can't upload packs): they go as a picture.
+  const asPicture = network === 'signal' && (!!localPack || active === 'unsorted');
 
   return (
     <>
@@ -207,38 +193,74 @@ function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
             <img src={p.cover.url} alt={p.title} loading="lazy" />
           </button>
         ))}
-        <button className={active === 'add' ? 'on' : undefined} onClick={() => setActive('add')} title="Add a sticker pack" aria-label="Add a sticker pack">
+        {local?.packs.map((p) => (
+          <button key={p.id} className={active === p.id ? 'on' : undefined} onClick={() => setActive(p.id)} title={p.title}>
+            {p.cover ? <img src={p.cover.url} alt={p.title} loading="lazy" /> : <Icon name="sticker" size={20} />}
+          </button>
+        ))}
+        {!!local?.unsorted.length && (
+          <button className={active === 'unsorted' ? 'on' : undefined} onClick={() => setActive('unsorted')} title="WhatsApp stickers not in a pack">
+            <img src={local.unsorted[0].url} alt="Not in a pack" loading="lazy" />
+          </button>
+        )}
+        {network === 'whatsapp' && onImage && (
+          <>
+            <button onClick={() => imageInput.current?.click()} title="Send an image as a sticker" aria-label="Send an image as a sticker">
+              <Icon name="image" size={20} />
+            </button>
+            <input ref={imageInput} type="file" accept="image/*" hidden onChange={(e) => (e.target.files?.[0] && onImage(e.target.files[0]), (e.target.value = ''))} />
+          </>
+        )}
+        <button className={active === 'add' ? 'on' : undefined} onClick={() => setActive('add')} title="Add a Signal sticker pack" aria-label="Add a sticker pack">
           <Icon name="plus" size={20} />
+        </button>
+        <button onClick={() => setState({ stickerManager: true })} title="Sticker manager" aria-label="Sticker manager">
+          <Icon name="gear" size={20} />
         </button>
       </nav>
       <div className="picker-body">
         {error && <p className="form-error picker-empty">{error}</p>}
-        {!packs && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
-        {showRecent && (
+        {!loaded && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
+        {active === 'recent' && recent.length > 0 && (
           <div className="sticker-grid">
             {recent.map((s) => (
-              <button key={`${s.packId}:${s.stickerId}`} className="sticker-cell" onClick={() => onPick(s)}>
+              <button key={'localId' in s ? s.localId : `${s.packId}:${s.stickerId}`} className="sticker-cell" onClick={() => ('localId' in s ? pickLocal({ id: s.localId, url: s.url }) : onPick(s))}>
                 <img src={s.url} alt="Sticker" loading="lazy" />
               </button>
             ))}
           </div>
         )}
-        {current && (
+        {signalPack && (
           <>
             <h4>
-              {current.title}
-              {current.author && <span className="muted"> · {current.author}</span>}
+              {signalPack.title}
+              {signalPack.author && <span className="muted"> · {signalPack.author}</span>}
             </h4>
             <div className="sticker-grid">
-              {current.stickers.map((s) => (
-                <button key={s.id} className="sticker-cell" onClick={() => pick(current.packId, s)} title={s.emoji ?? 'Sticker'}>
+              {signalPack.stickers.map((s) => (
+                <button key={s.id} className="sticker-cell" onClick={() => pickSignal(signalPack.packId, s)} title={s.emoji ?? 'Sticker'}>
                   <img src={s.url} alt={s.emoji ?? 'Sticker'} loading="lazy" />
                 </button>
               ))}
             </div>
           </>
         )}
-        {packs && (active === 'add' || (!packs.length && !recent.length)) && (
+        {(localPack || active === 'unsorted') && local && (
+          <>
+            <h4>
+              {localPack ? localPack.title : 'WhatsApp stickers not in a pack'}
+              {asPicture && <span className="muted"> · sent as a picture in Signal chats</span>}
+            </h4>
+            <div className="sticker-grid">
+              {(localPack ? localPack.stickers : local.unsorted).map((s) => (
+                <button key={s.id} className="sticker-cell" onClick={() => pickLocal(s)} title="Sticker">
+                  <img src={s.url} alt="Sticker" loading="lazy" />
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        {loaded && (active === 'add' || (!packs!.length && !local!.packs.length && !local!.unsorted.length && !recent.length)) && (
           <form
             className="sticker-add"
             onSubmit={(e) => {
@@ -246,9 +268,11 @@ function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
               if (link.trim()) void addPack();
             }}
           >
-            {!packs.length && <p>No sticker packs yet. Packs you install in Signal on your phone appear here automatically.</p>}
+            {!packs!.length && !local!.packs.length && (
+              <p>No stickers yet. Signal packs you install on your phone appear here automatically, and WhatsApp stickers can be put in packs in the sticker manager.</p>
+            )}
             <p>
-              Add a pack from{' '}
+              Add a Signal pack from{' '}
               <a href="https://signalstickers.org/" target="_blank" rel="noopener noreferrer">
                 signalstickers.org
               </a>
@@ -266,6 +290,8 @@ function StickerGrid({ onPick }: { onPick: (s: PickedSticker) => void }) {
     </>
   );
 }
+
+// ---------------------------------------------------------------------------
 
 function EmojiGrid({ onPick }: { onPick: (e: string) => void }) {
   const [q, setQ] = useState('');

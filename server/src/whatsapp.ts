@@ -1592,14 +1592,28 @@ export function removeStickerWa(id: string) {
  * Send a sticker: one from the library, or any image (WhatsApp Web turns it into a 512×512 sticker
  * itself, in WAHA's browser).
  */
-export async function sendStickerWa(conv: ConversationRow, src: { id?: string; image?: string }, quote: { sentTs: number; author: string; text?: string | null } | null) {
+export async function sendStickerWa(
+  conv: ConversationRow,
+  src: { id?: string; image?: string; path?: string; mimetype?: string },
+  quote: { sentTs: number; author: string; text?: string | null } | null,
+) {
   requireWa();
   let file: WaFile;
   let attachment: Attachment;
-  if (src.id) {
+  if (src.path) {
+    // A Signal pack sticker: WhatsApp gets its image (and makes a WhatsApp sticker of it).
+    const buf = fs.readFileSync(src.path);
+    const mimetype = src.mimetype || 'image/webp';
+    const id = 'stk-' + crypto.createHash('sha1').update(buf).digest('hex').slice(0, 24) + (EXT[mimetype] ?? '.webp');
+    if (!fs.existsSync(localPath(id))) fs.writeFileSync(localPath(id), buf);
+    file = { mimetype, data: buf.toString('base64') };
+    attachment = { id, contentType: mimetype, sticker: true, size: buf.length };
+  } else if (src.id) {
     if (!isSafeId(src.id) || !fs.existsSync(localPath(src.id))) throw Object.assign(new Error('Sticker not found'), { httpStatus: 404 });
-    file = { mimetype: 'image/webp', data: fs.readFileSync(localPath(src.id)).toString('base64') };
-    attachment = { id: src.id, contentType: 'image/webp', sticker: true, size: fs.statSync(localPath(src.id)).size };
+    const ext = src.id.slice(src.id.lastIndexOf('.')).toLowerCase();
+    const mimetype = Object.entries(EXT).find(([, e]) => e === ext)?.[0] ?? 'image/webp';
+    file = { mimetype, data: fs.readFileSync(localPath(src.id)).toString('base64') };
+    attachment = { id: src.id, contentType: mimetype, sticker: true, size: fs.statSync(localPath(src.id)).size };
   } else {
     const f = src.image ? parseDataUrl(src.image) : null;
     if (!f || !f.mimetype.startsWith('image/')) throw Object.assign(new Error('Pick an image'), { httpStatus: 400 });

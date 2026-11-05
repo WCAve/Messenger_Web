@@ -9,6 +9,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
+import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
@@ -578,9 +579,29 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Stickers
+  // Signal's packs (when Signal is set up) and the packs made in the sticker manager.
   r.get('/api/stickers', async () => {
-    const account = requireAccount();
-    return { packs: await listPacks(account, (m) => log('warn', m)) };
+    const account = self.number;
+    const packs = account && getState().status === 'connected' ? await listPacks(account, (m) => log('warn', m)).catch(() => []) : [];
+    return { packs, local: localStickers() };
+  });
+  r.post('/api/stickers/local', (ctx) => createPack(ctx.body?.title, ctx.body?.ids));
+  r.post('/api/stickers/local/:id', (ctx) => updatePack(ctx.params.id, ctx.body ?? {}));
+  r.delete('/api/stickers/local/:id', (ctx) => deletePack(ctx.params.id));
+  r.post('/api/stickers/forget', (ctx) => forgetStickers(ctx.body?.ids));
+  r.post('/api/stickers/images', (ctx) => addImages(ctx.body?.images, typeof ctx.body?.packId === 'string' ? ctx.body.packId : undefined));
+
+  // A sticker from your own packs: a WhatsApp sticker in WhatsApp chats, a picture in Signal chats.
+  r.post('/api/conversations/:id/local-sticker', async (ctx) => {
+    const c = conv(ctx);
+    const id = String(ctx.body?.id ?? '');
+    if (!isSafeId(id) || !fs.existsSync(localPath(id))) throw new HttpError(404, 'Sticker not found');
+    const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
+    const quote = quoted && quoted.conversation_id === c.id && !quoted.deleted ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' } : null;
+    if (isWa(c)) return messageDto(await wa(() => sendStickerWa(c, { id }, quote)));
+    const account = accountFor(c);
+    const att: Attachment = { id, contentType: stickerMime(id), size: fs.statSync(localPath(id)).size };
+    return queueOutgoing(account, c, { text: '', ranges: null, attachments: [att], base64: [readBase64(att)], quote, sticker: null, preview: null }, (m) => log('warn', m));
   });
 
   r.post('/api/stickers/packs', async (ctx) => {
@@ -726,7 +747,6 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         : null;
     if (rawSticker && !sticker) throw new HttpError(400, 'Invalid sticker');
     if (sticker && (text || files.length)) throw new HttpError(400, 'A sticker is sent on its own');
-    if (sticker && isWa(c)) throw new HttpError(400, "Signal stickers can't be sent to WhatsApp");
     if (!text && !files.length && !sticker) throw new HttpError(400, 'Empty message');
 
     const attachments: Attachment[] = [];
@@ -747,6 +767,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' }
         : null;
 
+    // A Signal pack sticker in a WhatsApp chat: sent the WhatsApp way (WhatsApp makes a sticker of the image).
+    if (sticker && isWa(c)) {
+      const img = self.number ? await getStickerImage(self.number, sticker.packId, sticker.stickerId) : null;
+      if (!img) throw new HttpError(404, "That sticker isn't available");
+      return messageDto(await wa(() => sendStickerWa(c, { path: img.file, mimetype: img.type }, quote)));
+    }
     const preview = !sticker && !files.length ? await previewFor(ctx.body?.previewUrl, text) : null;
     recordEmoji(emojiIn(text));
     return queueOutgoing(account, c, { text, ranges, attachments, base64, quote, sticker, preview }, (m) => log('warn', m));

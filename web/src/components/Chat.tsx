@@ -1328,7 +1328,8 @@ function Composer({
     setPanel(null);
     setError(null);
     try {
-      const msg = await api.send(id, { text: '', quoteId: replyTo?.id, sticker: s });
+      // Your own stickers: a WhatsApp sticker in WhatsApp chats, a picture in Signal chats (server decides).
+      const msg = 'localId' in s ? await api.sendLocalSticker(id, s.localId, replyTo?.id) : await api.send(id, { text: '', quoteId: replyTo?.id, sticker: s });
       upsertMessages(id, [msg]);
       refreshUsageSoon();
       clearReply();
@@ -1443,8 +1444,8 @@ function Composer({
           tab={reactTo ? 'emoji' : panel}
           onTab={setPanel}
           allowGif={!reactTo}
-          allowStickers={capsFor(conversation).stickers}
-          waStickers={conversation.network === 'whatsapp' ? { onPick: (sid) => void sendWaSticker({ id: sid }), onImage: (f) => void sendWaSticker({ file: f }) } : undefined}
+          stickerNetwork={conversation.network}
+          onStickerImage={conversation.network === 'whatsapp' ? (f) => void sendWaSticker({ file: f }) : undefined}
           title={reactTo ? 'React' : undefined}
           onEmoji={(e) => (reactTo ? void react(e) : insertAtCaret(e))}
           onGif={sendGif}

@@ -40,6 +40,7 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Emoji picker with your most used emoji first (counted on the server, so every browser shares them), and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍). Names several emoji share, like `:laugh:`, give the one you use most
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link
+- One sticker picker for every chat: Signal packs, your own packs and recent stickers. A **sticker manager** (⋮ menu, or the gear in the picker) puts WhatsApp stickers into your own packs: received ones, ones imported from the backup folder, or your own images. Signal packs go as Signal stickers in Signal chats and as WhatsApp stickers in WhatsApp chats; your own packs go as WhatsApp stickers in WhatsApp chats and as a picture in Signal chats (Signal's API can't upload packs)
 - Settings: your profile (picture, first name, about), theme (System, Light, Dark blue, or Dark green with WhatsApp-like colours), Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
 - Change a group's picture from Group info (if the group lets you)
 - Resizable chat list: drag the divider, or double-click it to reset
@@ -69,11 +70,11 @@ WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S**
 - "online" / "last seen …" under the name (Settings → Privacy; can be switched off), and, if you switch it on, you show as online while Messenger Web is open and in front
 - Add someone to your WhatsApp contacts, or rename them, from contact info
 - Your WhatsApp name, about and picture in Settings
-- WhatsApp stickers: shown as stickers, sent from the sticker tab (stickers you've received, sent or imported from the backup folder), or made from any image (WhatsApp turns it into a sticker)
+- WhatsApp stickers: shown as stickers, sent from the same sticker picker as Signal chats (Signal packs included), or made from any image (WhatsApp turns it into a sticker)
 - Archive syncs both ways; archived WhatsApp chats stay archived when new messages arrive, like on the phone
 - Polls: see and vote, and create new ones
 - Search, pin/mute/archive, drafts and forwarding work across both networks; you can forward a Signal message to a WhatsApp chat and the other way round
-- Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls and changing group pictures (do those on your phone)
+- Not on WhatsApp chats: disappearing-message settings, ending polls and changing group pictures (do those on your phone)
 - Replies: WhatsApp only links a reply when WhatsApp Web still has the original (it may know it by the privacy id instead of the number; both are tried). For older messages, like most of an imported backup, the reply goes out with the original as a `> ` quote, and the reply bar says so before you send
 - **Full history from an Android backup** (Settings → WhatsApp → *Import full history from an Android backup*): turn on end-to-end encrypted backup with a 64-digit key on the phone, back up, and upload `msgstore.db.crypt15` (or copy it into `whatsapp-backup/` in the data folder). Every chat and message the phone has is imported, with replies, reactions and group events; messages already here are skipped. Then copy the phone's `WhatsApp/Media` folder into the same `whatsapp-backup/` folder and click *Add media from the folder*. The key isn't stored, and the backup and its decrypted copy are deleted after the import
 - Developed against WAHA's **WEBJS** engine. With WEBJS you see that a call came in, but not whether you answered it on your phone, so call lines read "Incoming voice call" unless WhatsApp sends its own call log
@@ -234,6 +235,7 @@ server/src
   ingest.ts       turns signal-cli envelopes into stored messages, receipts and live events
   avatars.ts      profile pictures and group avatars, cached on disk
   stickers.ts     sticker packs: keys from signal-cli, download + decrypt from Signal's CDN, disk cache
+  stickerpacks.ts your own sticker packs (WhatsApp stickers grouped for the picker)
   settings.ts     server-wide settings (env defaults, overridable from the UI)
   store.ts        SQLite access and the JSON shapes sent to the browser
   signal-api.ts   signal-cli-rest-api client

@@ -8,6 +8,7 @@ import { formatListTime } from '../util';
 import { type NotifyState, notifyState, requestNotifications } from '../notifications';
 import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
+import { StickerManager } from './StickerManager';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 import { Emojified } from '../emoji/render';
 
@@ -20,6 +21,7 @@ function typingKind(list: { recording?: boolean }[] | undefined): TypingKind {
 export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const conversations = useStore((s) => s.conversations);
   const activeId = useStore((s) => s.activeId);
+  const stickerManager = useStore((s) => s.stickerManager);
   const typing = useStore((s) => s.typing);
   const account = useStore((s) => [s.signal.account, s.whatsapp.me].filter(Boolean).join(" · "));
   const [query, setQuery] = useState('');
@@ -88,6 +90,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   };
 
   if (mode === 'new') return <NewChat onClose={() => setMode('list')} />;
+  if (stickerManager) return <StickerManager />;
   if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
 
   if (archivedMode) {
@@ -130,6 +133,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
             <div className="menu" role="menu">
               <button role="menuitem" onClick={() => (setMode('settings'), setMenu(false))}>
                 <Icon name="gear" size={18} /> Settings
+              </button>
+              <button role="menuitem" onClick={() => (setState({ stickerManager: true }), setMenu(false))}>
+                <Icon name="sticker" size={18} /> Sticker manager
               </button>
               <button role="menuitem" onClick={() => (api.refreshDirectory().catch(() => {}), setMenu(false))}>
                 <Icon name="refresh" size={18} /> Refresh contacts and groups

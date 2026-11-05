@@ -34,6 +34,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const [linkingSignal, setLinkingSignal] = useState(false);
   const live = useStore((s) => s.live);
   const activeId = useStore((s) => s.activeId);
+  const stickerManager = useStore((s) => s.stickerManager);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
   // Muted chats don't count towards the number in the tab title.
   const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + (c.mutedUntil > Date.now() ? 0 : c.unread || (c.markedUnread ? 1 : 0)), 0));
@@ -111,7 +112,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div
-      className={`app${activeId ? ' chat-open' : ''}${active && panel ? ' panel-open' : ''}`}
+      className={`app${activeId && !stickerManager ? ' chat-open' : ''}${active && panel ? ' panel-open' : ''}`}
       style={sidebarWidth ? ({ '--side-w': `${sidebarWidth}px` } as CSSProperties) : undefined}
     >
       <SidebarResizer />

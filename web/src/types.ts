@@ -113,6 +113,12 @@ export interface StickerPack {
   stickers: StickerItem[];
 }
 
+/** Packs made in Messenger Web's sticker manager, and WhatsApp stickers not in one yet. */
+export interface LocalStickers {
+  packs: { id: string; title: string; stickers: { id: string; url: string }[]; cover: { id: string; url: string } | null }[];
+  unsorted: { id: string; url: string }[];
+}
+
 export interface Recipient {
   key: string;
   name: string;

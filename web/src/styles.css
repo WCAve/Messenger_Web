@@ -3076,3 +3076,127 @@ aside[aria-label='Search messages'] .panel-body > .panel-empty {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* ---------- sticker manager ---------- */
+.sticker-manager .muted.pad {
+  padding: 8px 16px;
+}
+.stk-pack + .stk-pack {
+  border-top: 1px solid var(--mist);
+}
+.stk-pack-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+}
+button.stk-pack-head {
+  cursor: pointer;
+}
+.stk-pack-head img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+.stk-pack-head span {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+.stk-pack-head small {
+  color: var(--ink-3);
+}
+.stk-pack-body {
+  padding-bottom: 10px;
+}
+.sticker-manager .sticker-grid {
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+}
+.stk-cell {
+  position: relative;
+  cursor: pointer;
+}
+.stk-cell.on {
+  background: var(--haze);
+  outline: 2px solid var(--ultra);
+}
+.stk-check {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ultra);
+  color: #fff;
+  font-size: 12px;
+  display: grid;
+  place-items: center;
+}
+.stk-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--sidebar);
+  color: var(--ink-2);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.2);
+}
+.stk-cell:hover .stk-remove,
+.stk-remove:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .stk-remove {
+    opacity: 1;
+  }
+}
+.stk-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 6px;
+  background: var(--sidebar);
+  border-bottom: 1px solid var(--mist);
+}
+.stk-toolbar span {
+  font-weight: 600;
+  margin-right: auto;
+}
+.stk-toolbar input,
+.stk-toolbar select,
+.stk-link input {
+  padding: 6px 10px;
+  border: 1px solid var(--mist);
+  border-radius: 8px;
+  background: var(--porcelain);
+  color: inherit;
+  min-width: 0;
+}
+.stk-toolbar input {
+  width: 140px;
+}
+.stk-link {
+  display: flex;
+  gap: 8px;
+  padding: 10px 0;
+}
+.stk-link input {
+  flex: 1;
+}
