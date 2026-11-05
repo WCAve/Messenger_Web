@@ -215,18 +215,53 @@ function connectWs() {
 
 let queue: Promise<unknown> = Promise.resolve(); // handle events one at a time, in order
 
+const HISTORY_KEY = 'wa_history_v2';
+let historyTimers: ReturnType<typeof setTimeout>[] = [];
+
 async function afterConnect() {
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
-  if (kvGet('wa_history_done') !== '1') {
-    setState({ ...state, importing: true });
-    try {
-      await importHistory();
-      kvSet('wa_history_done', '1');
-    } catch (e) {
-      log.warn(`whatsapp: history import stopped: ${(e as Error).message}`);
-    }
+  if (kvGet(HISTORY_KEY) === 'done') return;
+  // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
+  // rounds; messages we already have are skipped, so later rounds only add what arrived since.
+  const rounds = (process.env.WAHA_HISTORY_ROUNDS_MS ?? '').split(',').map(Number).filter((n) => n > 0);
+  scheduleHistory(rounds.length ? rounds : [20_000, 3 * 60_000, 10 * 60_000]);
+}
+
+function scheduleHistory(delays: number[]) {
+  historyTimers.forEach(clearTimeout);
+  historyTimers = delays.map((d, i) =>
+    setTimeout(async () => {
+      if (state.status !== 'connected') return;
+      await runHistoryImport();
+      if (i === delays.length - 1) kvSet(HISTORY_KEY, 'done');
+    }, d),
+  );
+}
+
+let importing = false;
+export async function runHistoryImport(): Promise<{ chats: number; messages: number }> {
+  if (importing) return { chats: 0, messages: 0 };
+  importing = true;
+  setState({ ...state, importing: true });
+  try {
+    const r = await importHistory();
+    log.info(`whatsapp: history import: ${r.messages} new messages from ${r.chats} chats`);
+    await refreshDirectory().catch(() => {});
+    return r;
+  } catch (e) {
+    const msg = (e as Error).message;
+    log.warn(`whatsapp: history import failed: ${msg}${/store/i.test(msg) ? ' (NOWEB engine: enable the store in the session config, or use GOWS)' : ''}`);
+    throw e;
+  } finally {
+    importing = false;
     setState({ ...state, importing: false });
   }
+}
+
+/** Import again now (button in Settings). */
+export async function importHistoryNow() {
+  requireWa();
+  return runHistoryImport();
 }
 
 export function startWhatsApp(logger: Logger) {
@@ -247,7 +282,8 @@ export function stopWhatsApp() {
 
 export async function logoutWhatsApp() {
   await waha.logout();
-  kvSet('wa_history_done', '0');
+  kvSet(HISTORY_KEY, '');
+  historyTimers.forEach(clearTimeout);
   setState({ ...state, status: 'starting', me: undefined, name: undefined });
   recheckWa(1500);
 }
@@ -267,7 +303,11 @@ export async function refreshDirectory() {
     const jid = bare(id);
     upsertWaContact({ jid, name: c.name ?? c.Name ?? null, pushName: c.pushname ?? c.pushName ?? c.PushName ?? null, number: c.number ? '+' + String(c.number).replace(/\D/g, '') : undefined });
   }
-  for (const g of listWaGroups()) await refreshGroup(g).catch(() => {});
+  await refreshGroupNames().catch((e) => log.warn(`whatsapp: group names: ${(e as Error).message}`));
+  for (const g of listWaGroups()) {
+    if (!g.group_name) await refreshGroupName(g).catch(() => {});
+    await refreshGroup(g).catch(() => {});
+  }
   for (const g of listWaGroups()) emitConversation(g.id);
 }
 
@@ -497,14 +537,36 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
   return row;
 }
 
+/** Name from a group object, whatever the engine: GOWS {JID, Name}, NOWEB {id, subject}, WEBJS {name | groupMetadata.subject}. */
+function groupNameOf(g: Json): string | null {
+  return g?.Name || g?.subject || g?.name || g?.groupMetadata?.subject || g?.GroupName?.Name || null;
+}
+function groupIdOf(g: Json): string | null {
+  const id = g?.JID ?? g?.id ?? g?.groupMetadata?.id;
+  return typeof id === 'string' ? id : id?._serialized ?? null;
+}
+
+const groupNameTried = new Map<string, number>();
 async function refreshGroupName(conv: ConversationRow) {
-  const list = await waha.chatsOverview(100);
-  for (const c of list ?? []) {
-    const id = typeof c.id === 'string' ? c.id : c.id?._serialized;
-    if (id && bare(id) === conv.wa_id && c.name) {
-      getOrCreateWaChat(conv.wa_id!, c.name);
-      emitConversation(conv.id);
-    }
+  const last = groupNameTried.get(conv.wa_id!) ?? 0;
+  if (Date.now() - last < 60_000) return;
+  groupNameTried.set(conv.wa_id!, Date.now());
+  const name = groupNameOf(await waha.group(conv.wa_id!));
+  if (name) {
+    getOrCreateWaChat(conv.wa_id!, name);
+    emitConversation(conv.id);
+  }
+}
+
+/** Names of all groups in one call. */
+async function refreshGroupNames() {
+  const res = await waha.groups();
+  const list: Json[] = Array.isArray(res) ? res : res && typeof res === 'object' ? Object.values(res) : [];
+  const known = new Map(listWaGroups().map((g) => [g.wa_id, g]));
+  for (const g of list) {
+    const id = groupIdOf(g);
+    const name = groupNameOf(g);
+    if (id && name && known.has(bare(id)) && known.get(bare(id))!.group_name !== name) getOrCreateWaChat(bare(id), name);
   }
 }
 
@@ -592,9 +654,12 @@ async function handleEvent(e: Json) {
 
 // ---------- history ----------
 
-async function importHistory() {
+async function importHistory(): Promise<{ chats: number; messages: number }> {
   const chats = await waha.chatsOverview(config.wahaHistoryChats);
-  log.info(`whatsapp: importing recent messages from ${chats?.length ?? 0} chats`);
+  log.info(`whatsapp: checking ${chats?.length ?? 0} recent chats for history`);
+  let total = 0;
+  let touched = 0;
+  let failures = 0;
   for (const c of chats ?? []) {
     const idRaw = typeof c.id === 'string' ? c.id : c.id?._serialized;
     if (!idRaw || skipChat(idRaw)) continue;
@@ -612,9 +677,14 @@ async function importHistory() {
     list = [...(list ?? [])].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
     const rows: MessageRow[] = [];
     for (const m of list) {
-      const row = await ingestMessage(m, { history: true }).catch(() => undefined);
+      const row = await ingestMessage(m, { history: true }).catch((e) => {
+        if (failures++ < 3) log.warn(`whatsapp: couldn't import message ${m?.id}: ${(e as Error).message}`);
+        return undefined;
+      });
       if (row) rows.push(row);
     }
+    total += rows.length;
+    if (rows.length) touched++;
     // Keep WhatsApp's unread count for the chat.
     const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? c._chat?.UnreadCount ?? 0);
     if (unread > 0) {
@@ -623,6 +693,7 @@ async function importHistory() {
     }
     emitConversation(conv.id);
   }
+  return { chats: touched, messages: total };
 }
 
 // ---------- outgoing ----------

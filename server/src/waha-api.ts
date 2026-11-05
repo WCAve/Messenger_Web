@@ -48,7 +48,8 @@ export const waha = {
     undefined,
     10_000,
   ),
-  createSession: () => call<Json>('POST', '/api/sessions', { name: S(), start: true }),
+  // NOWEB only keeps chats and messages (needed for the history import) with its store switched on.
+  createSession: () => call<Json>('POST', '/api/sessions', { name: S(), start: true, config: { noweb: { store: { enabled: true, fullSync: false } } } }),
   startSession: () => call<Json>('POST', `/api/sessions/${enc(S())}/start`),
   logout: () => call<Json>('POST', `/api/sessions/${enc(S())}/logout`),
   async qr(): Promise<Buffer> {
@@ -71,6 +72,7 @@ export const waha = {
   message: (chatId: string, id: string) => call<Json>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(id)}?downloadMedia=true`),
   contacts: () => call<Json[]>('GET', `/api/contacts/all?session=${enc(S())}`, undefined, 60_000),
   groups: () => call<Json>('GET', `/api/${enc(S())}/groups`, undefined, 60_000),
+  group: (groupId: string) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(groupId)}`, undefined, 20_000),
   participants: (groupId: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(groupId)}/participants/v2`),
   chatPicture: (chatId: string) => call<{ url?: string | null }>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/picture`, undefined, 20_000),
   lidToPhone: (lid: string) => call<{ lid: string; pn?: string | null }>('GET', `/api/${enc(S())}/lids/${enc(lid)}`, undefined, 10_000),

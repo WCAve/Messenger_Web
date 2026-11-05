@@ -48,6 +48,7 @@ export const api = {
   whatsapp: () => call<WaState>('GET', '/api/whatsapp'),
   whatsappLogout: () => call<WaState>('POST', '/api/whatsapp/logout'),
   whatsappRestart: () => call<WaState>('POST', '/api/whatsapp/restart'),
+  whatsappImport: () => call<{ chats: number; messages: number }>('POST', '/api/whatsapp/import'),
   whatsappRefresh: () => call<{ ok: true }>('POST', '/api/whatsapp/refresh'),
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),
   messages: (id: number, before?: number, limit = 50) =>

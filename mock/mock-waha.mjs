@@ -24,6 +24,7 @@ const PEOPLE = {
   lid: { id: '88888888888888@lid', name: null, pushname: 'Privé Pieter' },
 };
 const GROUP = { id: '120363000000000001@g.us', name: 'Familie' };
+const GROUP2 = { id: '120363000000000002@g.us', name: 'Buren' }; // no history: first seen through a new message
 
 let status = process.env.MOCK_WA_LINKED === '1' ? 'WORKING' : 'SCAN_QR_CODE';
 const sent = [];
@@ -106,6 +107,19 @@ function addHistory(m) {
   history.get(chat).push(m);
   return m;
 }
+// Like a real phone after linking, the group's history only reaches WAHA a few seconds later.
+let groupHistoryLoaded = false;
+function lateHistory() {
+  if (groupHistoryLoaded) return;
+  groupHistoryLoaded = true;
+  const now = Date.now();
+  const H = 3600_000;
+  addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Wie neemt er taart mee?', ts: now - 5 * H }));
+  addHistory(msg({ chat: GROUP.id, author: PEOPLE.jan.id, body: '@31655500002 jij toch? 🎂', ts: now - 4 * H }));
+  addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Hoe laat?', ts: now - 3.5 * H, data: { type: 'poll_creation', pollName: 'Hoe laat?', pollOptions: [{ name: '14:00' }, { name: '15:00' }], pollSelectableOptionsCount: 1 } }));
+}
+setInterval(() => status === 'WORKING' && setTimeout(lateHistory, 4000), 1000);
+
 function seed() {
   const now = Date.now();
   const H = 3600_000;
@@ -114,16 +128,14 @@ function seed() {
   addHistory(msg({ chat: j, fromMe: true, body: 'Ja, zeker 👍', ts: now - 29 * H, replyTo: { id: a.id, participant: j, body: a.body } }));
   addHistory(msg({ chat: j, body: 'Dit is *vet* en dit _schuin_', ts: now - 3 * H }));
   addHistory(msg({ chat: j, body: 'Kijk eens', ts: now - 2 * H, media: 'image/png' }));
-  addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Wie neemt er taart mee?', ts: now - 5 * H }));
-  addHistory(msg({ chat: GROUP.id, author: PEOPLE.jan.id, body: '@31655500002 jij toch? 🎂', ts: now - 4 * H }));
-  addHistory(msg({ chat: GROUP.id, author: PEOPLE.sanne.id, body: 'Hoe laat?', ts: now - 3.5 * H, data: { type: 'poll_creation', pollName: 'Hoe laat?', pollOptions: [{ name: '14:00' }, { name: '15:00' }], pollSelectableOptionsCount: 1 } }));
   addHistory(msg({ chat: PEOPLE.lid.id, body: 'Hallo via een privé-id', ts: now - 6 * H }));
 }
 seed();
 
 function overview() {
   return [...history.entries()]
-    .map(([id, list]) => ({ id, name: id === GROUP.id ? GROUP.name : Object.values(PEOPLE).find((p) => p.id === id)?.pushname ?? null, picture: null, lastMessage: list[list.length - 1], _chat: { unreadCount: id === PEOPLE.jan.id ? 2 : 0 } }))
+    // GOWS leaves group names out of the overview: they come from the groups endpoints.
+    .map(([id, list]) => ({ id, name: id === GROUP.id ? null : Object.values(PEOPLE).find((p) => p.id === id)?.pushname ?? null, picture: null, lastMessage: list[list.length - 1], _chat: { unreadCount: id === PEOPLE.jan.id ? 2 : 0 } }))
     .sort((x, y) => y.lastMessage.timestamp - x.lastMessage.timestamp);
 }
 
@@ -167,7 +179,7 @@ const server = http.createServer(async (req, res) => {
       if (p === '/mock/incoming') {
         const b = await body(req);
         const person = PEOPLE[b.from ?? 'jan'];
-        const chat = b.group ? GROUP.id : person.id;
+        const chat = b.group === 'buren' ? GROUP2.id : b.group ? GROUP.id : person.id;
         const mm = msg({ chat, author: b.group ? person.id : undefined, body: b.text ?? 'Hallo!', media: b.media, ...(b.extra ?? {}) });
         emit('message.any', { ...mm, ...(b.payload ?? {}) });
         return json(res, 200, mm);
@@ -238,7 +250,12 @@ const server = http.createServer(async (req, res) => {
     }
     const parts = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)/participants/v2$`));
     if (parts) return json(res, 200, [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }]);
-    if (p === `/api/${SESSION}/groups`) return json(res, 200, [{ id: GROUP.id, name: GROUP.name }]);
+    if (p === `/api/${SESSION}/groups`) return json(res, 200, [GROUP, GROUP2].map((g) => ({ JID: g.id, Name: g.name })));
+    const one = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)$`));
+    if (one) {
+      const g = [GROUP, GROUP2].find((x) => x.id === decodeURIComponent(one[1]));
+      return g ? json(res, 200, { JID: g.id, Name: g.name }) : json(res, 404, { message: 'not found' });
+    }
     const lid = p.match(new RegExp(`^/api/${SESSION}/lids/([^/]+)$`));
     if (lid) {
       const l = decodeURIComponent(lid[1]);

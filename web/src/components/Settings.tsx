@@ -240,6 +240,20 @@ function WhatsAppSection() {
             Refresh contacts and groups
           </button>
         )}
+        {wa.status === 'connected' && (
+          <button
+            className="btn"
+            disabled={busy || wa.importing}
+            onClick={() =>
+              void run(async () => {
+                const r = await api.whatsappImport();
+                setNotice(r.messages ? `Imported ${r.messages} messages from ${r.chats} chats.` : 'No older messages found that weren’t here already.');
+              })
+            }
+          >
+            Import recent history
+          </button>
+        )}
         {wa.status === 'failed' && (
           <button className="btn" disabled={busy} onClick={() => void run(() => api.whatsappRestart())}>
             Restart session
