@@ -223,6 +223,8 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
             </ul>
           </section>
         )}
+
+        {!group && conversation.network === 'whatsapp' && <BlockSection conversation={conversation} />}
       </div>
     </aside>
   );
@@ -425,5 +427,31 @@ export function MessageInfoPanel({ messageId }: { messageId: number }) {
         </p>
       </div>
     </aside>
+  );
+}
+
+function BlockSection({ conversation }: { conversation: Conversation }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const name = conversation.title;
+  async function toggle() {
+    if (!conversation.blocked && !confirm(`Block ${name}? Blocked contacts can't call you or send you messages.`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      upsertConversation(await api.block(conversation.id, !conversation.blocked));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="panel-section">
+      <button className={`panel-action${conversation.blocked ? '' : ' danger'}`} disabled={busy} onClick={() => void toggle()}>
+        <Icon name="block" size={20} /> {conversation.blocked ? `Unblock ${name}` : `Block ${name}`}
+      </button>
+      {error && <p className="form-error">{error}</p>}
+    </section>
   );
 }

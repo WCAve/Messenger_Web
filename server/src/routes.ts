@@ -19,6 +19,7 @@ import {
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
+  blockWa,
   refreshGroupInfoWa,
   waAbout,
   reactWa,
@@ -220,6 +221,7 @@ interface Outgoing {
   quote: { sentTs: number; author: string; text?: string | null } | null;
   sticker: { packId: string; stickerId: number } | null;
   preview: LinkPreview | null;
+  forwardOf?: string | null; // WhatsApp message id to forward natively
 }
 
 /** Store a message as pending, show it everywhere, and send it in the background. */
@@ -240,6 +242,7 @@ function queueOutgoing(account: string, c: ConversationRow, o: Outgoing, log: (m
     read: true,
     sticker: o.sticker,
     preview: o.preview,
+    forwarded: o.forwardOf ? 1 : 0,
     // signal-cli applies the chat's disappearing timer to everything it sends.
     expiresIn: c.expire_timer || 0,
     expiresAt: c.expire_timer ? now + c.expire_timer * 1000 : null,
@@ -283,6 +286,7 @@ async function deliver(
     quote?: { sentTs: number; author: string; text?: string | null } | null;
     sticker?: { packId: string; stickerId: number } | null;
     preview?: LinkPreview | null;
+    forwardOf?: string | null;
   },
   log: (m: string) => void,
 ) {
@@ -580,7 +584,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return sendAvatar(ctx, 'profile', c?.uuid || c?.number);
   });
 
-  r.post('/api/conversations', (ctx) => {
+  r.post('/api/conversations', async (ctx) => {
     const number = typeof ctx.body?.number === 'string' ? ctx.body.number.replace(/[\s()-]/g, '') : undefined;
     const uuid = typeof ctx.body?.uuid === 'string' ? ctx.body.uuid : undefined;
     if (number && !/^\+[1-9]\d{6,14}$/.test(number)) {
@@ -590,7 +594,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       const jid = typeof ctx.body?.jid === 'string' ? ctx.body.jid : null;
       if (jid && /^[\w.:-]+@(c\.us|lid|g\.us)$/.test(jid)) return conversationDto(getOrCreateWaChat(jid));
       if (!number) throw new HttpError(400, 'number required');
-      return conversationDto(waChatForNumber(number));
+      return conversationDto(await wa(() => waChatForNumber(number)));
     }
     if (!number && !uuid) throw new HttpError(400, 'number or uuid required');
     return conversationDto(getOrCreateDirect(uuid ?? null, number ?? null));
@@ -722,8 +726,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const ranges: Ranges | null = m.ranges ? JSON.parse(m.ranges) : null;
     const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const preview: LinkPreview | null = m.preview ? JSON.parse(m.preview) : null;
+    const source = getConversation(m.conversation_id)!;
+    // WhatsApp → WhatsApp goes as a real forward (setting); anything else is sent as a copy.
+    const native = isWa(source) && !!m.ext_id && !m.ext_id.startsWith('call:') && getSettings().waNativeForward;
     const sent = targets.map((t, i) =>
-      queueOutgoing(accounts[i], t!, { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview }, (msg) => log('warn', msg)),
+      queueOutgoing(
+        accounts[i],
+        t!,
+        { text: m.body ?? '', ranges, attachments, base64, quote: null, sticker, preview, forwardOf: native && isWa(t!) ? m.ext_id : null },
+        (msg) => log('warn', msg),
+      ),
     );
     return { messages: sent };
   });
@@ -817,7 +829,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/conversations/:id/flags', (ctx) => {
     const c = conv(ctx);
     const b = ctx.body ?? {};
-    if (b.pinned === true && !c.pinned_at && pinnedCount() >= 4) throw new HttpError(400, 'You can pin up to 4 chats');
+    if (b.pinned === true && !c.pinned_at && pinnedCount() >= 10) throw new HttpError(400, 'You can pin up to 10 chats');
     setConversationFlags(c.id, {
       pinned: typeof b.pinned === 'boolean' ? b.pinned : undefined,
       archived: typeof b.archived === 'boolean' ? b.archived : undefined,
@@ -954,6 +966,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       })();
     }
     return { ok: true };
+  });
+
+  // Block / unblock a WhatsApp contact (Signal's API can't block people).
+  r.post('/api/conversations/:id/block', async (ctx) => {
+    const c = conv(ctx);
+    if (!isWa(c) || c.kind !== 'direct') throw new HttpError(400, 'Only WhatsApp contacts can be blocked here');
+    await wa(() => blockWa(c, ctx.body?.blocked !== false));
+    const updated = getConversation(c.id)!;
+    emitConversation(updated);
+    return conversationDto(updated);
   });
 
   // "Mark as unread" (WhatsApp: also on your phone; Signal has no such thing, so it stays here).

@@ -78,6 +78,11 @@ export const waha = {
   participants: (groupId: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(groupId)}/participants/v2`),
   chatPicture: (chatId: string) => call<{ url?: string | null }>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/picture`, undefined, 20_000),
   subscribePresence: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/presence/${enc(chatId)}/subscribe`, undefined, 15_000),
+  checkExists: (phone: string) =>
+    call<{ numberExists: boolean; chatId?: string | null }>('GET', `/api/contacts/check-exists?session=${enc(S())}&phone=${enc(phone)}`, undefined, 20_000),
+  block: (contactId: string) => call<Json>('POST', '/api/contacts/block', { session: S(), contactId }, 20_000),
+  unblock: (contactId: string) => call<Json>('POST', '/api/contacts/unblock', { session: S(), contactId }, 20_000),
+  forward: (chatId: string, messageId: string) => call<Json>('POST', '/api/forwardMessage', { session: S(), chatId, messageId }, 120_000),
   markUnread: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/unread`, undefined, 15_000),
   about: (contactId: string) => call<{ about?: string | null } | null>('GET', `/api/contacts/about?session=${enc(S())}&contactId=${enc(contactId)}`, undefined, 10_000),
   lidToPhone: (lid: string) => call<{ lid: string; pn?: string | null }>('GET', `/api/${enc(S())}/lids/${enc(lid)}`, undefined, 10_000),

@@ -37,12 +37,15 @@ import {
   setConversationFlags,
   setGroupDescription,
   setWaAbout,
+  setWaBlocked,
   setWaGroupMembers,
   statusRank,
   updateMessage,
   upsertWaContact,
   waAboutCached,
+  waBlocked,
   waContact,
+  waNumberOf,
 } from './store.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
@@ -284,8 +287,8 @@ export function startWhatsApp(logger: Logger) {
   stopped = false;
   void check();
   dirTimer = setInterval(() => state.status === 'connected' && refreshDirectory().catch(() => {}), 6 * 3600_000);
-  // Mutes change more often than names: check those every 15 minutes.
-  setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 15 * 60_000).unref();
+  // Mutes and pins change more often than names: check those every 5 minutes.
+  setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 5 * 60_000).unref();
 }
 
 export function stopWhatsApp() {
@@ -318,6 +321,7 @@ export async function refreshDirectory() {
     if (!id || id.endsWith('@g.us') || skipChat(id)) continue;
     const jid = bare(id);
     upsertWaContact({ jid, name: c.name ?? c.Name ?? null, pushName: c.pushname ?? c.pushName ?? c.PushName ?? null, number: c.number ? '+' + String(c.number).replace(/\D/g, '') : undefined });
+    if (typeof c.isBlocked === 'boolean' && c.isBlocked !== waBlocked(jid)) setWaBlocked(jid, c.isBlocked);
   }
   await refreshGroupNames().catch((e) => log.warn(`whatsapp: group names: ${(e as Error).message}`));
   await syncMutes().catch((e) => log.warn(`whatsapp: mute status: ${(e as Error).message}`));
@@ -504,11 +508,24 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
   }
 
   if (m._data?.type === 'call_log') return callLogMessage(m, conv, chatId, fromMe, !!opts.history);
+  if (m._data?.type === 'gp2') {
+    if (!isGroup) return;
+    const d = m._data;
+    return groupNotice({ id: extId, chat: chatId, type: String(d.subtype ?? ''), author: d.author ?? m.author ?? null, recipients: d.recipients ?? [], body: m.body ?? d.body ?? '', ts: Number(m.timestamp) * 1000 }, !!opts.history);
+  }
+
+  // View-once media can't be opened on a linked device (WhatsApp Web can't either).
+  const viewOnce = !!(m._data?.isViewOnce ?? m.isViewOnce);
+  const forwarded = m._data?.isForwarded || m.isForwarded ? (Number(m._data?.forwardingScore ?? m.forwardingScore ?? 0) >= 5 ? 2 : 1) : 0;
 
   const poll = pollOf(m);
   let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv);
   const attachments: Attachment[] = [];
-  if (m.hasMedia) {
+  if (viewOnce) {
+    const t = String(m._data?.type ?? '');
+    body = `${t === 'video' ? '🎥 View-once video' : t === 'ptt' || t === 'audio' ? '🎤 View-once voice message' : '📷 View-once photo'}: open it on your phone`;
+    ranges = null;
+  } else if (m.hasMedia) {
     try {
       const a = await downloadMedia(m, extId);
       if (a) attachments.push(a);
@@ -554,6 +571,7 @@ async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise
     read: fromMe || !!opts.history,
     poll,
     extId,
+    forwarded,
   });
   if (row && !opts.history) {
     emitMessage(row);
@@ -600,11 +618,21 @@ async function syncMutes() {
     if (!id || skipChat(id)) continue;
     const until = mutedUntilOf(c) ?? mutedUntilOf(c._chat);
     const unreadCount = c.unreadCount ?? c._chat?.unreadCount;
-    if (until === undefined && unreadCount === undefined) continue;
+    if (until === undefined && unreadCount === undefined && c.pinned === undefined) continue;
     const jid = await resolve(id);
     if (!jid) continue;
     const conv = getOrCreateWaChat(jid, jid.endsWith('@g.us') ? c.name ?? null : null);
     if (unreadCount !== undefined) phoneUnread(conv, Number(unreadCount));
+    // Pinned on the phone (one way: WAHA can't pin chats). Only changes are copied.
+    const pinned = typeof c.pinned === 'boolean' ? c.pinned : typeof c._chat?.pinned === 'boolean' ? c._chat.pinned : undefined;
+    if (pinned !== undefined && kvGet(`wa_pin:${jid}`) !== String(pinned)) {
+      kvSet(`wa_pin:${jid}`, String(pinned));
+      if (!!getConversation(conv.id)!.pinned_at !== pinned) {
+        setConversationFlags(conv.id, pinned ? { pinned: true, archived: false } : { pinned: false });
+        changed++;
+        emitConversation(conv.id);
+      }
+    }
     if (until === undefined) continue;
     known++;
     const remote = until > Date.now() ? until : 0;
@@ -620,7 +648,7 @@ async function syncMutes() {
   if (!known && !muteNoticeShown) {
     muteNoticeShown = true;
     log.info(`whatsapp: this WAHA engine (${state.engine ?? 'unknown'}) doesn't report which chats are muted on your phone`);
-  } else if (changed) log.info(`whatsapp: copied ${changed} mute setting${changed === 1 ? '' : 's'} from your phone`);
+  } else if (changed) log.info(`whatsapp: copied ${changed} mute/pin setting${changed === 1 ? '' : 's'} from your phone`);
 }
 
 /**
@@ -790,6 +818,14 @@ async function handleEvent(e: Json) {
     case 'engine.event': {
       // WEBJS passes on whatsapp-web.js's own events; "unread_count" fires as soon as a chat's count
       // changes, including when you mark it unread (or read it) on your phone.
+      if (['group_join', 'group_leave', 'group_admin_changed', 'group_update'].includes(p?.event)) {
+        const n = p.data ?? {};
+        const id = typeof n.id === 'string' ? n.id : n.id?._serialized;
+        const chat = n.chatId ?? n.id?.remote;
+        if (!id || typeof chat !== 'string' || !chat.endsWith('@g.us')) return;
+        await groupNotice({ id, chat, type: String(n.type ?? ''), author: n.author ?? null, recipients: n.recipientIds ?? [], body: n.body ?? '', ts: Number(n.timestamp) * 1000 }, false);
+        return;
+      }
       if (p?.event !== 'unread_count') return;
       const id = typeof p.data?.id === 'string' ? p.data.id : p.data?.id?._serialized;
       if (!id || skipChat(id) || typeof p.data?.unreadCount !== 'number') return;
@@ -906,9 +942,16 @@ function quoteExt(conv: ConversationRow, q: { sentTs: number } | null | undefine
 export async function deliverWa(
   conv: ConversationRow,
   messageId: number,
-  p: { text: string; ranges?: Ranges | null; base64: string[]; quote?: { sentTs: number } | null; sticker?: unknown; preview?: LinkPreview | null },
+  p: { text: string; ranges?: Ranges | null; base64: string[]; quote?: { sentTs: number } | null; sticker?: unknown; preview?: LinkPreview | null; forwardOf?: string | null },
 ) {
   const chatId = conv.wa_id!;
+  if (p.forwardOf) {
+    // WhatsApp's own forward: no new upload, and the other side sees "Forwarded". The echo links our row.
+    await waha.forward(chatId, p.forwardOf);
+    const current = getMessage(messageId);
+    emitMessage(updateMessage(messageId, { status: current && statusRank(current.status) > statusRank('sent') ? current.status! : 'sent', error: null, ts_confirmed: 1 }));
+    return;
+  }
   const wa = toWaText(p.text, p.ranges ?? null, jidFor);
   const reply_to = quoteExt(conv, p.quote);
   let first: Json;
@@ -988,6 +1031,88 @@ export async function waAbout(jid: string): Promise<string | null> {
   }
 }
 
+// ---------- group system lines ----------
+
+async function nameOfJid(raw: unknown): Promise<string> {
+  const id = typeof raw === 'string' ? raw : (raw as { _serialized?: string } | null)?._serialized;
+  const jid = await resolve(id);
+  if (!jid) return 'Someone';
+  if (self.isWa(jid)) return 'You';
+  const name = nameForKey(keyFor(jid));
+  return name === 'Unknown' ? waNumberOf(jid) ?? name : name;
+}
+
+function listNames(names: string[]) {
+  return names.length <= 1 ? names[0] ?? 'Someone' : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+/** "Jan added Sanne", "Sanne left", "You changed the group name to …": from live events or history. */
+async function groupNotice(
+  n: { id: string; chat: string; type: string; author: unknown; recipients: unknown[]; body: string; ts: number },
+  history: boolean,
+): Promise<MessageRow | undefined> {
+  if (findMessageByExt(n.id)) return; // the event and the history message are the same notification
+  const chatJid = await resolve(n.chat);
+  if (!chatJid) return;
+  const authorId = typeof n.author === 'string' ? n.author : (n.author as { _serialized?: string } | null)?._serialized ?? null;
+  const recipientIds = (n.recipients ?? []).map((r) => (typeof r === 'string' ? r : (r as { _serialized?: string })?._serialized)).filter((r): r is string => !!r);
+  const A = authorId ? await nameOfJid(authorId) : 'Someone';
+  const R = listNames(await Promise.all(recipientIds.map(nameOfJid)));
+  const byOther = !!authorId && !recipientIds.includes(authorId);
+  const many = recipientIds.length > 1;
+  const quote = (s: string) => `“${s}”`;
+  const text: string | null = (() => {
+    switch (n.type) {
+      case 'add':
+        return byOther ? `${A} added ${R}` : `${R} joined`;
+      case 'invite':
+      case 'linked_group_join':
+        return `${R} joined using this group's invite link`;
+      case 'remove':
+        return byOther ? `${A} removed ${R}` : `${R} left`;
+      case 'leave':
+        return `${R} left`;
+      case 'promote':
+        return R === 'You' ? "You're now an admin" : `${R} ${many ? 'are now admins' : 'is now an admin'}`;
+      case 'demote':
+        return R === 'You' ? "You're no longer an admin" : `${R} ${many ? 'are no longer admins' : 'is no longer an admin'}`;
+      case 'subject':
+        return n.body ? `${A} changed the group name to ${quote(n.body)}` : `${A} changed the group name`;
+      case 'description':
+        return `${A} changed the group description`;
+      case 'picture':
+        return `${A} changed this group's icon`;
+      case 'announce':
+        return n.body === 'off' ? `${A} changed this group's settings to allow all members to send messages` : `${A} changed this group's settings to allow only admins to send messages`;
+      case 'restrict':
+        return n.body === 'off' ? `${A} changed this group's settings to allow all members to edit this group's info` : `${A} changed this group's settings to allow only admins to edit this group's info`;
+      case 'create':
+        return n.body ? `${A} created group ${quote(n.body)}` : `${A} created this group`;
+      default:
+        return null;
+    }
+  })();
+  if (!text) return;
+  const conv = getOrCreateWaChat(chatJid);
+  const author = authorId ? (self.isWa(authorId) ? 'self' : keyFor((await resolve(authorId)) ?? authorId)) : 'unknown';
+  const row = insertMessage({
+    conversationId: conv.id,
+    sentTs: freeTimestamp(conv.id, n.ts || Date.now(), author),
+    author,
+    outgoing: false, // a system line, even when you did it (no ticks)
+    kind: 'system',
+    body: text,
+    read: true,
+    extId: n.id,
+  });
+  if (row && !history) {
+    emitMessage(row);
+    emitConversation(conv.id);
+    refreshGroupSoon(chatJid);
+  }
+  return row;
+}
+
 // ---------- calls ----------
 
 type CallOutcome = 'incoming' | 'missed' | 'answered' | 'declined' | 'outgoing';
@@ -1062,7 +1187,7 @@ function callLogMessage(m: Json, conv: ConversationRow, chatId: string, fromMe: 
     conversationId: conv.id,
     sentTs: freeTimestamp(conv.id, ts, author),
     author,
-    outgoing: fromMe,
+    outgoing: false,
     kind: 'system',
     body,
     read: fromMe || outcome === 'answered',
@@ -1175,8 +1300,18 @@ export function waAvatar(jid: string): Promise<string | null> {
   return p;
 }
 
-/** Start (or open) a WhatsApp chat with a phone number. */
-export function waChatForNumber(number: string): ConversationRow {
+/** Start (or open) a WhatsApp chat with a phone number, after checking the number is on WhatsApp. */
+export async function waChatForNumber(number: string): Promise<ConversationRow> {
   const digits = number.replace(/\D/g, '');
-  return getOrCreateWaChat(`${digits}@c.us`);
+  const existing = findWaChat(`${digits}@c.us`);
+  if (existing?.last_message_at || state.status !== 'connected') return existing ?? getOrCreateWaChat(`${digits}@c.us`);
+  const r = await waha.checkExists(digits);
+  if (!r?.numberExists) throw Object.assign(new Error(`${number} isn't on WhatsApp`), { httpStatus: 400 });
+  const jid = (await resolve(r.chatId ?? `${digits}@c.us`)) ?? `${digits}@c.us`;
+  return getOrCreateWaChat(jid);
+}
+
+export async function blockWa(conv: ConversationRow, block: boolean) {
+  await (block ? waha.block(conv.wa_id!) : waha.unblock(conv.wa_id!));
+  setWaBlocked(conv.wa_id!, block);
 }

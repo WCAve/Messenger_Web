@@ -73,7 +73,7 @@ export const api = {
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
   setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
-  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages'>>) =>
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[] }>('GET', '/api/stickers'),
@@ -88,6 +88,7 @@ export const api = {
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
   opened: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/open`),
+  block: (id: number, blocked: boolean) => call<Conversation>('POST', `/api/conversations/${id}/block`, { blocked }),
   markUnread: (id: number) => call<Conversation>('POST', `/api/conversations/${id}/unread`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
@@ -107,6 +108,7 @@ export interface ServerSettings {
   sendLinkPreviews: boolean;
   waHistoryChats: number; // 0 = as many as possible
   waHistoryMessages: number;
+  waNativeForward: boolean;
   account: string | null;
   status: string;
   apiVersion: string | null;

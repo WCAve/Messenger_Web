@@ -184,6 +184,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE wa_contacts ADD COLUMN about TEXT;
   ALTER TABLE wa_contacts ADD COLUMN about_at INTEGER;
   `,
+  `
+  -- WhatsApp "Forwarded" label: 1 = forwarded, 2 = forwarded many times.
+  ALTER TABLE messages ADD COLUMN forwarded INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE wa_contacts ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 function migrate() {

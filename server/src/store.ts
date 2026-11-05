@@ -115,6 +115,7 @@ export interface MessageRow {
   expires_at: number | null;
   poll: string | null;
   ext_id: string | null;
+  forwarded: number;
 }
 
 /** Hooks other modules plug into (avoids import cycles). */
@@ -261,6 +262,14 @@ export function waAboutCached(jid: string): { about: string | null; at: number }
   const r = waByJid.get(jid) as (WaContactRow & { about: string | null; about_at: number | null }) | undefined;
   return r?.about_at ? { about: r.about, at: r.about_at } : undefined;
 }
+export function setWaBlocked(jid: string, blocked: boolean) {
+  if (!waByJid.get(jid)) upsertWaContact({ jid });
+  db.prepare('UPDATE wa_contacts SET blocked = ? WHERE jid = ?').run(blocked ? 1 : 0, jid);
+}
+export function waBlocked(jid: string): boolean {
+  return !!(waByJid.get(jid) as { blocked?: number } | undefined)?.blocked;
+}
+
 export function setWaAbout(jid: string, about: string | null) {
   if (!waByJid.get(jid)) upsertWaContact({ jid });
   db.prepare('UPDATE wa_contacts SET about = ?, about_at = ? WHERE jid = ?').run(about, Date.now(), jid);
@@ -536,6 +545,7 @@ export function conversationDto(row: ConversationRow) {
       : null,
     unread: unreadStmt.get(conv.id)!.n,
     markedUnread: !!conv.marked_unread,
+    blocked: conv.kind === 'direct' && (conv.network === 'whatsapp' ? waBlocked(conv.wa_id!) : !!peer?.blocked),
     archived: !!conv.archived,
     pinnedAt: conv.pinned_at ?? null,
     mutedUntil: conv.muted_until > Date.now() ? conv.muted_until : 0,
@@ -858,13 +868,14 @@ export function insertMessage(m: {
   expiresAt?: number | null;
   poll?: Poll | null;
   extId?: string | null;
+  forwarded?: number;
 }): MessageRow | undefined {
   const info = db
     .prepare(
       `INSERT OR IGNORE INTO messages
         (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
-         ranges, preview, expires_in, expires_at, poll, ext_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ranges, preview, expires_in, expires_at, poll, ext_id, forwarded)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -887,6 +898,7 @@ export function insertMessage(m: {
       m.expiresAt ?? null,
       m.poll ? JSON.stringify(m.poll) : null,
       m.extId ?? null,
+      m.forwarded ?? 0,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
@@ -896,7 +908,7 @@ export function insertMessage(m: {
 
 export function updateMessage(
   id: number,
-  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id'>>,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id' | 'forwarded'>>,
 ) {
   const keys = Object.keys(fields);
   if (!keys.length) return msgById.get(id);
@@ -944,6 +956,7 @@ export function messageDto(m: MessageRow) {
     read: !!m.read,
     edited: !!m.edited,
     deleted: !!m.deleted,
+    forwarded: m.deleted ? 0 : m.forwarded || 0,
   };
 }
 export type MessageDto = ReturnType<typeof messageDto>;

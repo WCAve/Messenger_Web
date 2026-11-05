@@ -6,7 +6,7 @@ import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs } from '../prefs';
-import { getState, setDraft, setHasNewer, setState, upsertMessages, useStore } from '../store';
+import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, Message, Network } from '../types';
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
@@ -189,6 +189,9 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         />
       )}
 
+      {conversation.blocked ? (
+        <BlockedBar conversation={conversation} />
+      ) : (
       <Composer
         key={id}
         conversation={conversation}
@@ -202,6 +205,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         clearDropped={() => setDropped([])}
         disabled={!connected}
       />
+      )}
 
       {dragging && <div className="drop-overlay">Drop files to send to {conversation.title}</div>}
     </section>
@@ -604,6 +608,11 @@ const MessageItem = memo(function MessageItem({
             <Emojified text={m.authorName} />
           </div>
         )}
+        {!!m.forwarded && !m.deleted && (
+          <div className="forwarded">
+            <Icon name="forward" size={14} /> {m.forwarded > 1 ? 'Forwarded many times' : 'Forwarded'}
+          </div>
+        )}
         {m.quote && (
           <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
             <strong>{m.quote.author === 'self' ? 'You' : m.quote.authorName}</strong>
@@ -862,6 +871,34 @@ function shortcodeAtCaret(text: string, caret: number): { start: number; term: s
   const m = /(^|[\s(])(:[a-z0-9_+-]{2,40})$/i.exec(text.slice(0, caret));
   if (!m) return null;
   return { start: caret - m[2].length, term: m[2].slice(1) };
+}
+
+/** In place of the message box, like WhatsApp: you can't message someone you blocked. */
+function BlockedBar({ conversation }: { conversation: Conversation }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="blocked-bar">
+      <span>You blocked this contact.</span>
+      <button
+        className="link-btn"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            upsertConversation(await api.block(conversation.id, false));
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Tap to unblock
+      </button>
+      {error && <span className="form-error">{error}</span>}
+    </div>
+  );
 }
 
 function Composer({

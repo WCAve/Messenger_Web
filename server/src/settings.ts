@@ -12,6 +12,8 @@ const DEFAULTS = {
   // WhatsApp history import: how many chats, and messages per chat. 0 = as many as WhatsApp gives.
   waHistoryChats: config.wahaHistoryChats,
   waHistoryMessages: config.wahaHistoryMessages,
+  // Forward WhatsApp messages the way WhatsApp does (with the "Forwarded" label) instead of sending a copy.
+  waNativeForward: true,
 };
 export type ServerSettings = typeof DEFAULTS;
 

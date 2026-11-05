@@ -370,6 +370,7 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   const [notice, setNotice] = useState<string | null>(null);
   const [permission, setPermission] = useState<NotifyState>(notifyState);
   const signalOn = useStore((s) => s.signal.status !== 'disabled');
+  const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
 
   useEffect(() => {
     api.settings().then(setServer, (e) => setError(e.message));
@@ -534,6 +535,15 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
             disabled={!server}
             onChange={(v) => void saveServer({ sendLinkPreviews: v })}
           />
+          {waOn && (
+            <Toggle
+              label="Forward WhatsApp messages natively"
+              hint="Forwarding between WhatsApp chats works like on your phone: the message shows as “Forwarded”. Off: a copy is sent instead. Forwards between Signal and WhatsApp are always copies."
+              checked={!!server?.waNativeForward}
+              disabled={!server}
+              onChange={(v) => void saveServer({ waNativeForward: v })}
+            />
+          )}
         </Section>
 
         <Section title="Account">

@@ -2868,3 +2868,49 @@ img.emoji {
   background: var(--paper);
   color: var(--ink);
 }
+
+/* "Forwarded" label (WhatsApp) */
+.bubble .forwarded {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--ink-3);
+  margin-bottom: 2px;
+}
+
+/* Blocked contact: in place of the message box */
+.blocked-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--sidebar);
+  border-top: 1px solid var(--mist);
+  color: var(--ink-2);
+  font-size: 14px;
+}
+.panel-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.panel-action.danger {
+  color: var(--alarm);
+}
+.panel-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

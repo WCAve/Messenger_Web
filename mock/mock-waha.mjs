@@ -158,6 +158,8 @@ function authed(req, url) {
   return req.headers['x-api-key'] === KEY || url.searchParams.get('x-api-key') === KEY;
 }
 
+const blocked = new Set();
+const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
 const DESC = { [GROUP.id]: 'De familie-app 🏡\nWees lief voor elkaar' };
@@ -211,6 +213,12 @@ const server = http.createServer(async (req, res) => {
         emit(b.event, b.payload);
         return json(res, 200, { ok: true });
       }
+      if (p === '/mock/pin') {
+        const b = await body(req);
+        if (b.pinned) pinnedOnPhone.add(b.jid);
+        else pinnedOnPhone.delete(b.jid);
+        return json(res, 200, { ok: true });
+      }
       if (p === '/mock/status') {
         const b = await body(req);
         status = b.status;
@@ -249,7 +257,7 @@ const server = http.createServer(async (req, res) => {
 
     // Like WEBJS: chats carry isMuted / muteExpiration (seconds, -1 = always). Familie is muted on the phone.
     if (p === `/api/${SESSION}/chats`) {
-      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0, unreadCount: markedUnread.has(id) ? -1 : 0 })));
+      return json(res, 200, [...history.keys()].map((id) => ({ id: { _serialized: id }, name: id === GROUP.id ? GROUP.name : null, isMuted: id === GROUP.id, muteExpiration: id === GROUP.id ? -1 : 0, unreadCount: markedUnread.has(id) ? -1 : 0, pinned: pinnedOnPhone.has(id) })));
     }
     const unread = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/unread$`));
     if (unread && m === 'POST') {
@@ -282,7 +290,20 @@ const server = http.createServer(async (req, res) => {
     const pic = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/picture$`));
     if (pic) return json(res, 200, { url: decodeURIComponent(pic[1]) === PEOPLE.jan.id ? `http://127.0.0.1:${PORT}/pic/jan.png` : null });
     if (p === '/api/contacts/all') {
-      return json(res, 200, Object.values(PEOPLE).map((x) => ({ id: x.id, name: x.name, pushname: x.pushname, number: x.id.endsWith('@c.us') ? x.id.split('@')[0] : undefined })));
+      return json(res, 200, Object.values(PEOPLE).map((x) => ({ id: x.id, name: x.name, pushname: x.pushname, number: x.id.endsWith('@c.us') ? x.id.split('@')[0] : undefined, isBlocked: blocked.has(x.id) })));
+    }
+    // Numbers ending in 0000 aren't on WhatsApp.
+    if (p === '/api/contacts/check-exists') {
+      const phone = String(url.searchParams.get('phone') ?? '').replace(/\D/g, '');
+      sent.push({ path: p, method: m, phone });
+      return json(res, 200, phone.endsWith('0000') ? { numberExists: false } : { numberExists: true, chatId: `${phone}@c.us` });
+    }
+    if ((p === '/api/contacts/block' || p === '/api/contacts/unblock') && m === 'POST') {
+      const b = await body(req);
+      sent.push({ path: p, method: m, ...b });
+      if (p.endsWith('/block')) blocked.add(b.contactId);
+      else blocked.delete(b.contactId);
+      return json(res, 201, { ok: true });
     }
     const parts = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)/participants/v2$`));
     if (parts) return json(res, 200, [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }]);

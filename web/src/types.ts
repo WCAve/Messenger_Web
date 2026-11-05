@@ -34,6 +34,7 @@ export interface Conversation {
   lastMessage: { text: string; outgoing: boolean; status: string | null; authorName: string | null } | null;
   unread: number;
   markedUnread: boolean; // "Mark as unread"
+  blocked: boolean;
   archived: boolean;
   expireTimer: number; // disappearing messages, seconds; 0 = off
   pinnedAt: number | null;
@@ -122,6 +123,7 @@ export interface Message {
   read: boolean;
   edited: boolean;
   deleted: boolean;
+  forwarded?: number; // WhatsApp: 1 = forwarded, 2 = forwarded many times
   /** Ranges in UTF-16 offsets over body (which already has "@Name" for each mention). */
   styles?: StyleRange[];
   mentions?: { start: number; length: number; key: string; name: string }[];
