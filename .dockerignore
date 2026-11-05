@@ -6,3 +6,4 @@
 mock
 unraid
 *.md
+web/.cache

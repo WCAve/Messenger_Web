@@ -9,6 +9,7 @@ import { type NotifyState, notifyState, requestNotifications } from '../notifica
 import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
 import { Avatar, Icon, StatusMark } from './ui';
+import { Emojified } from '../emoji/render';
 
 export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const conversations = useStore((s) => s.conversations);
@@ -338,7 +339,9 @@ function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolea
       <Avatar name={c.title} seed={String(c.number ?? c.title)} group={c.kind === 'group'} src={c.avatar} network={multi ? c.network : undefined} />
       <span className="chat-row-main">
         <span className="chat-row-top">
-          <span className="chat-title">{c.title}</span>
+          <span className="chat-title">
+            <Emojified text={c.title} />
+          </span>
           {c.lastMessageAt && <time>{formatListTime(c.lastMessageAt)}</time>}
         </span>
         <span className="chat-row-bottom">
@@ -348,13 +351,13 @@ function ChatRow({ c, active, typing, draft }: { c: Conversation; active: boolea
             ) : draft ? (
               <>
                 <span className="draft-label">Draft: </span>
-                {draft}
+                <Emojified text={draft} />
               </>
             ) : lm ? (
               <>
                 {lm.outgoing && <StatusMark status={lm.status} />}
                 {lm.authorName && <span className="preview-author">{lm.authorName}: </span>}
-                {lm.text}
+                <Emojified text={lm.text} />
               </>
             ) : null}
           </span>

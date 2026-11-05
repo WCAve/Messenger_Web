@@ -4,6 +4,7 @@ import { api } from '../api';
 import { setState, upsertMessages, useStore } from '../store';
 import type { Message } from '../types';
 import { Avatar, Icon } from './ui';
+import { Emojified } from '../emoji/render';
 
 function Dialog({ title, onClose, children, label }: { title: string; onClose: () => void; children: ReactNode; label?: string }) {
   useEffect(() => {
@@ -63,7 +64,9 @@ export function PollView({ m, canEnd = true }: { m: Message; canEnd?: boolean })
 
   return (
     <div className={`poll${poll.closed ? ' closed' : ''}`}>
-      <strong className="poll-q">{poll.question}</strong>
+      <strong className="poll-q">
+        <Emojified text={poll.question} />
+      </strong>
       <small className="poll-kind">{poll.closed ? 'Poll ended' : poll.multiple ? 'Select one or more' : 'Select one'}</small>
       <ul>
         {poll.options.map((o, i) => {
@@ -80,7 +83,9 @@ export function PollView({ m, canEnd = true }: { m: Message; canEnd?: boolean })
                 <span className={`poll-check${poll.multiple ? ' square' : ''}`} aria-hidden>
                   {mine && <Icon name="check" size={14} />}
                 </span>
-                <span className="poll-text">{o.text}</span>
+                <span className="poll-text">
+                  <Emojified text={o.text} />
+                </span>
                 <span className="poll-count">{o.voters.length}</span>
                 <span className="poll-bar" style={{ width: `${(o.voters.length / max) * 100}%` }} />
               </button>

@@ -1,3 +1,14 @@
+/* Google Noto Color Emoji (SIL Open Font License, see /emoji/noto/LICENSE.txt). Only emoji code points use
+   it, so letters and digits keep the system font. Browsers without COLRv1 fonts (Safari) use their own. */
+@font-face {
+  font-family: 'Messenger Emoji';
+  src: url('/emoji/noto/NotoColorEmoji.ttf') format('truetype');
+  font-display: swap;
+  unicode-range: U+00A9, U+00AE, U+200D, U+203C, U+2049, U+20E3, U+2122, U+2139, U+2194-2199, U+21A9-21AA, U+231A-231B, U+2328,
+    U+23CF, U+23E9-23F3, U+23F8-23FA, U+24C2, U+25AA-25AB, U+25B6, U+25C0, U+25FB-25FE, U+2600-27BF, U+2934-2935, U+2B05-2B07,
+    U+2B1B-2B1C, U+2B50, U+2B55, U+3030, U+303D, U+3297, U+3299, U+FE0F, U+1F000-1FAFF, U+E0020-E007F;
+}
+
 /* Messenger Web — ink, porcelain, ultramarine. */
 :root {
   --ink: #1b1f3b;
@@ -26,7 +37,7 @@
   --row-active: var(--ultra-soft);
   --header: var(--sidebar);
   --self-hue: 221; /* colour of "You" in quotes and reply bars */
-  --font: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --font: 'Messenger Emoji', system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   color-scheme: light;
 }
 
@@ -2431,7 +2442,7 @@ body.resizing * {
 .unread-divider {
   align-self: stretch;
   text-align: center;
-  margin: 10px -100px;
+  margin: 10px calc(-1 * clamp(12px, 4%, 72px));
   padding: 5px 0;
   background: color-mix(in srgb, var(--paper) 70%, transparent);
   font-size: 13px;
@@ -2735,4 +2746,62 @@ body.resizing * {
   color: inherit;
   text-decoration: underline;
   margin-left: 6px;
+}
+
+/* ---------- emoji style ---------- */
+:root[data-emoji='system'] {
+  --font: system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+img.emoji {
+  display: inline-block;
+  width: 1.25em;
+  height: 1.25em;
+  margin: 0 0.04em;
+  vertical-align: -0.28em;
+  object-fit: contain;
+}
+.bubble.jumbo img.emoji {
+  width: 1.1em;
+  height: 1.1em;
+  vertical-align: -0.12em;
+}
+.emoji-cell img.emoji,
+.quick-react img.emoji,
+.emoji-suggest .emoji img.emoji {
+  width: 1.15em;
+  height: 1.15em;
+  margin: 0;
+  vertical-align: middle;
+}
+.messages {
+  overflow-x: hidden;
+}
+.emoji-styles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 0 16px 8px;
+}
+.emoji-styles button {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border-radius: 12px;
+  border: 1px solid var(--mist);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 13px;
+}
+.emoji-styles button.on {
+  border-color: var(--ultra);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--ultra);
+}
+.emoji-sample {
+  font-size: 24px;
+  line-height: 1.2;
+}
+.emoji-sample[data-style='system'] {
+  font-family: system-ui, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
 }

@@ -193,8 +193,10 @@ function push(envelope) {
 // ---------- envelope builders ----------
 const from = (p) => ({ source: p.number || p.uuid, sourceNumber: p.number || null, sourceUuid: p.uuid, sourceName: p.profile, sourceDevice: 1 });
 const timers = {}; // disappearing-message timer per chat ('group' or a number), set via PUT
+// Signal uses the timestamp as a message's id, so two messages from one sender never share one.
+let lastTs = 0;
 function incoming(p, text, opts = {}) {
-  const ts = opts.ts ?? Date.now();
+  const ts = opts.ts ?? (lastTs = Math.max(Date.now(), lastTs + 1));
   const timer = timers[opts.group ? 'group' : p.number] ?? 0;
   push({
     ...from(p),

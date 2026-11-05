@@ -7,6 +7,7 @@ import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refre
 import { applyPendingReceipts, humanDuration } from './ingest.js';
 import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
+import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
 import {
   createPollWa,
@@ -598,6 +599,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return listMessages(c.id, before, limit);
   });
 
+  r.get('/api/emoji/usage', () => ({ usage: emojiUsage() }));
+  r.post('/api/emoji/alias', (ctx) => {
+    recordAlias(String(ctx.body?.emoji ?? ''), String(ctx.body?.code ?? '').toLowerCase());
+    return { ok: true };
+  });
+
   r.get('/api/search', (ctx) => {
     const q = (ctx.query.get('q') ?? '').trim();
     if (q.length < 2) return { results: [] };
@@ -670,6 +677,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         : null;
 
     const preview = !sticker && !files.length ? await previewFor(ctx.body?.previewUrl, text) : null;
+    recordEmoji(emojiIn(text));
     return queueOutgoing(account, c, { text, ranges, attachments, base64, quote, sticker, preview }, (m) => log('warn', m));
   });
 
@@ -870,6 +878,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     else await signalApi.react(account, body);
     reactions = reactions.filter((x) => x.author !== 'self');
     if (!removing) reactions.push({ emoji, author: 'self' });
+    if (!removing) recordEmoji([emoji]);
     return messageDto(emitMessageRow(m.id, { reactions: reactions.length ? JSON.stringify(reactions) : null })!);
   });
 

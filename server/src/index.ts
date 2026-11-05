@@ -45,6 +45,9 @@ const STATIC_MIME: Record<string, string> = {
   '.json': 'application/json',
   '.webmanifest': 'application/manifest+json',
   '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.webp': 'image/webp',
+  '.txt': 'text/plain; charset=utf-8',
   '.map': 'application/json',
 };
 
@@ -57,15 +60,19 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
     file = path.join(webDist, 'index.html'); // SPA fallback
   }
   const isIndex = file.endsWith('index.html');
-  sendFile(
-    res,
-    file,
-    {
-      'content-type': STATIC_MIME[path.extname(file)] ?? 'application/octet-stream',
-      'cache-control': isIndex ? 'no-cache' : urlPath.startsWith('/assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
-    },
-    req.method === 'HEAD',
-  );
+  const headers: Record<string, string> = {
+    'content-type': STATIC_MIME[path.extname(file)] ?? 'application/octet-stream',
+    // Emoji files never change under the same name; a new set gets new names.
+    'cache-control': isIndex ? 'no-cache' : urlPath.startsWith('/assets/') || urlPath.startsWith('/emoji/') ? 'public, max-age=31536000, immutable' : 'public, max-age=3600',
+    vary: 'accept-encoding',
+  };
+  // Pre-compressed copies made at build time (the emoji font is 5 MB, 2.4 MB compressed).
+  const accept = String(req.headers['accept-encoding'] ?? '');
+  if (/\bbr\b/.test(accept) && fs.existsSync(file + '.br')) {
+    headers['content-encoding'] = 'br';
+    file += '.br';
+  }
+  sendFile(res, file, headers, req.method === 'HEAD');
 }
 
 const handler: http.RequestListener = async (req, res) => {

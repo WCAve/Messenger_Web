@@ -1,6 +1,8 @@
 import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
+import { Emojified } from '../emoji/render';
+import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs } from '../prefs';
@@ -137,7 +139,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           />
           <span className="chat-head-text">
             <h2>
-              {conversation.title}
+              <Emojified text={conversation.title} />
               {conversation.expireTimer > 0 && (
                 <span className="timer-badge" title={`Disappearing messages: ${durationLabel(conversation.expireTimer)}`}>
                   <Icon name="timer" size={14} />
@@ -430,7 +432,7 @@ function RichBody({ m }: { m: Message }) {
   return (
     <>
       {list.map((p, i) => {
-        let node: ReactNode = p.text;
+        let node: ReactNode = <Emojified text={p.text} />;
         if (p.styles.has('MONOSPACE')) node = <code>{node}</code>;
         if (p.styles.has('BOLD')) node = <strong>{node}</strong>;
         if (p.styles.has('ITALIC')) node = <em>{node}</em>;
@@ -552,7 +554,9 @@ const MessageItem = memo(function MessageItem({
   if (m.kind === 'system') {
     return (
       <div className="system-line" data-ts={m.sentAt}>
-        <span>{m.body}</span>
+        <span>
+          <Emojified text={m.body} />
+        </span>
       </div>
     );
   }
@@ -567,6 +571,7 @@ const MessageItem = memo(function MessageItem({
     setError(null);
     try {
       await fn();
+      refreshUsageSoon();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -590,13 +595,15 @@ const MessageItem = memo(function MessageItem({
       >
         {group && !m.outgoing && !continued && (
           <div className="author" style={{ ['--hue' as string]: hueFor(m.author) }}>
-            {m.authorName}
+            <Emojified text={m.authorName} />
           </div>
         )}
         {m.quote && (
           <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
             <strong>{m.quote.author === 'self' ? 'You' : m.quote.authorName}</strong>
-            <span>{m.quote.text || 'Attachment'}</span>
+            <span>
+              <Emojified text={m.quote.text || 'Attachment'} />
+            </span>
           </button>
         )}
         {visual.length > 0 && (
@@ -666,7 +673,7 @@ const MessageItem = memo(function MessageItem({
               title={names.join(', ')}
               onClick={() => canAct && act(() => api.react(m.id, emoji))}
             >
-              {emoji}
+              <Emojified text={emoji} />
               {names.length > 1 && <span>{names.length}</span>}
             </button>
           ))}
@@ -729,7 +736,7 @@ const MessageItem = memo(function MessageItem({
             <div className="quick-react" role="menu">
               {QUICK_REACTIONS.map((e) => (
                 <button key={e} className={e === myReaction ? 'mine' : undefined} onClick={() => (setPicker(false), act(() => api.react(m.id, e)))}>
-                  {e}
+                  <Emojified text={e} />
                 </button>
               ))}
               <button className="more" onClick={() => (setPicker(false), onMoreReactions(m))} aria-label="More reactions" title="More reactions">
@@ -1012,6 +1019,7 @@ function Composer({
     const done = /:([a-z0-9_+-]{1,40}):$/i.exec(v.slice(0, caret));
     const e = done && emojiForCode(done[1]);
     if (done && e) {
+      rememberAlias(e, done[1].toLowerCase());
       const start = caret - done[0].length;
       v = v.slice(0, start) + e + v.slice(caret);
       caret = start + e.length;
@@ -1035,6 +1043,7 @@ function Composer({
     if (!suggest) return;
     const caret = area.current?.selectionStart ?? text.length;
     const e = suggest.items[i].entry.e;
+    rememberAlias(e, suggest.items[i].code);
     const after = text.slice(caret);
     const insert = e + (after.startsWith(' ') ? '' : ' ');
     setTextAndCaret(text.slice(0, suggest.start) + insert + after, suggest.start + insert.length);
@@ -1097,6 +1106,7 @@ function Composer({
       dismissedLinks.current.clear();
       if (getState().hasNewer[id]) await loadLatest(id).catch(() => {}); // back to the bottom to see it
       upsertMessages(id, [msg]);
+      refreshUsageSoon();
       files.forEach((f) => f.preview && URL.revokeObjectURL(f.preview));
       mentions.current = [];
       setText('');
@@ -1122,6 +1132,7 @@ function Composer({
       const name = (g.title || 'giphy').replace(/[^\w -]+/g, '').trim().slice(0, 40).replace(/\s+/g, '-') || 'giphy';
       const msg = await api.send(id, { text: '', quoteId: replyTo?.id, attachments: [{ name: `${name}.gif`, type: 'image/gif', data }] });
       upsertMessages(id, [msg]);
+      refreshUsageSoon();
       clearReply();
     } catch (e) {
       setError((e as Error).message === 'Failed to fetch' ? "Couldn't download the GIF from Giphy." : (e as Error).message);
@@ -1137,6 +1148,7 @@ function Composer({
     try {
       const msg = await api.send(id, { text: '', quoteId: replyTo?.id, sticker: s });
       upsertMessages(id, [msg]);
+      refreshUsageSoon();
       clearReply();
     } catch (e) {
       setError((e as Error).message);
@@ -1152,6 +1164,7 @@ function Composer({
     if (!target) return;
     try {
       await api.react(target.id, e);
+      refreshUsageSoon();
     } catch (err) {
       setError((err as Error).message);
     }
@@ -1261,7 +1274,9 @@ function Composer({
           <Icon name="pencil" size={18} />
           <div>
             <strong>Editing message</strong>
-            <span>{editing.body}</span>
+            <span>
+              <Emojified text={editing.body} />
+            </span>
           </div>
           <button className="icon-btn sm" onClick={stopEditing} aria-label="Cancel editing" title="Cancel (Esc)">
             <Icon name="close" size={18} />
@@ -1272,7 +1287,9 @@ function Composer({
         <div className="reply-preview" style={{ ['--hue' as string]: replyTo.author === 'self' ? 'var(--self-hue)' : hueFor(replyTo.author) }}>
           <div>
             <strong>Replying to {replyTo.author === 'self' ? 'yourself' : replyTo.authorName}</strong>
-            <span>{replyTo.body || (replyTo.attachments.length ? 'Attachment' : '')}</span>
+            <span>
+              <Emojified text={replyTo.body || (replyTo.attachments.length ? 'Attachment' : '')} />
+            </span>
           </div>
           <button className="icon-btn sm" onClick={clearReply} aria-label="Cancel reply">
             <Icon name="close" size={18} />
@@ -1351,7 +1368,9 @@ function Composer({
                 }}
                 onMouseEnter={() => setSuggest({ ...suggest, index: i })}
               >
-                <span className="emoji">{s.entry.e}</span>
+                <span className="emoji">
+                  <Emojified text={s.entry.e} />
+                </span>
                 <span className="code">:{s.code}:</span>
               </li>
             ))}

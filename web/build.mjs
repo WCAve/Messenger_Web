@@ -1,6 +1,7 @@
 // Bundles the UI into web/dist with esbuild. `node build.mjs --watch` rebuilds on change.
 import * as esbuild from 'esbuild';
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,12 +18,29 @@ function writeIndex(metafile) {
     .replace('<!--CSS-->', css ? `<link rel="stylesheet" href="${css}">` : '')
     .replace('<!--JS-->', `<script type="module" src="${js}"></script>`);
   fs.writeFileSync(path.join(dist, 'index.html'), html);
-  for (const f of fs.readdirSync(path.join(root, 'public'))) fs.copyFileSync(path.join(root, 'public', f), path.join(dist, f));
+  fs.cpSync(path.join(root, 'public'), dist, { recursive: true });
+  compressFont();
+}
+
+// The emoji font is large: keep a brotli copy next to it, the server sends that when the browser accepts it.
+let fontDone = false;
+function compressFont() {
+  const font = path.join(dist, 'emoji', 'noto', 'NotoColorEmoji.ttf');
+  if (!fs.existsSync(font) || (watch && fontDone && fs.existsSync(font + '.br'))) return;
+  const src = path.join(root, '.cache', 'NotoColorEmoji.ttf.br');
+  const stat = fs.statSync(font);
+  if (!fs.existsSync(src) || fs.statSync(src).mtimeMs < stat.mtimeMs) {
+    fs.mkdirSync(path.dirname(src), { recursive: true });
+    fs.writeFileSync(src, zlib.brotliCompressSync(fs.readFileSync(font), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11, [zlib.constants.BROTLI_PARAM_SIZE_HINT]: stat.size } }));
+  }
+  fs.copyFileSync(src, font + '.br');
+  fontDone = true;
 }
 
 const options = {
   entryPoints: [path.join(root, 'src/main.tsx')],
   bundle: true,
+  external: ['/emoji/*'], // served from public/, not bundled
   outdir: path.join(dist, 'assets'),
   entryNames: watch ? 'app' : 'app-[hash]',
   format: 'esm',

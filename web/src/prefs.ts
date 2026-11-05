@@ -10,9 +10,13 @@ export interface Prefs {
   sidebarWidth: number | null;
   /** The "turn on notifications" banner was closed. */
   notifyBannerDismissed: boolean;
+  /** Which emoji artwork to show. */
+  emoji: EmojiStyle;
 }
 
-const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null, notifyBannerDismissed: false };
+export type EmojiStyle = 'noto' | 'fluent' | 'twemoji' | 'system';
+
+const DEFAULTS: Prefs = { theme: 'system', enterToSend: true, notifications: true, notificationPreview: true, sidebarWidth: null, notifyBannerDismissed: false, emoji: 'noto' };
 const KEY = 'sw-prefs';
 
 function load(): Prefs {
@@ -33,6 +37,12 @@ export function applyTheme(theme: Prefs['theme']) {
   else document.documentElement.setAttribute('data-theme', theme);
 }
 
+/** Noto comes as a font; the others are images, with Noto as the font underneath (e.g. while typing). */
+export function applyEmojiStyle(style: EmojiStyle) {
+  document.documentElement.setAttribute('data-emoji', style);
+}
+applyEmojiStyle(prefs.emoji);
+
 export function getPrefs() {
   return prefs;
 }
@@ -49,6 +59,7 @@ export function setPrefs(patch: Partial<Prefs>) {
     /* storage unavailable: the choice lasts until reload */
   }
   if (patch.theme) applyTheme(patch.theme);
+  if (patch.emoji) applyEmojiStyle(patch.emoji);
   listeners.forEach((l) => l());
 }
 

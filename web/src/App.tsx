@@ -4,6 +4,7 @@ import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
 import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
 import { ForwardDialog } from './components/Extras';
+import { loadUsage } from './emoji/usage';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
 import { Sidebar, SidebarResizer } from './components/Sidebar';
@@ -46,6 +47,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   }, [activeId]);
 
   useLiveEvents();
+  useEffect(() => void loadUsage(), []);
 
   // Unread count in the tab title
   useEffect(() => {

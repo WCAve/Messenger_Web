@@ -34,7 +34,8 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Pin (up to 4), mute and archive chats from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. These stay in Messenger Web; your phone keeps its own
 - Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat
 - Disappearing messages: set the timer from chat or group info, messages and their files are deleted from Messenger Web when it runs out. Switching the timer off needs your phone (the Signal API can't send "off" yet)
-- Emoji picker, and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍)
+- Emoji in Google's Noto style by default (or Microsoft Fluent 3D, Twemoji or your system's, in Settings → Emoji), built in so nothing loads from elsewhere
+- Emoji picker with your most used emoji first (counted on the server, so every browser shares them), and Slack/WhatsApp-style `:shortcode` suggestions (`:lau` → 😆, `:thumbsup:` → 👍). Names several emoji share, like `:laugh:`, give the one you use most
 - GIF picker (Giphy, needs a free key; see [Settings](#settings)); received GIFs loop silently
 - Stickers: shown in chats, sent from the sticker tab (packs installed on your phone appear automatically), and new packs added by pasting a signal.art link
 - Settings: your profile (picture, first name, about), theme (System, Light, Dark blue, or Dark green with WhatsApp-like colours), Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
@@ -204,6 +205,8 @@ Open http://localhost:3000. The mock starts unlinked: its QR code "links" four s
 It auto-replies to anything you send, and messages containing "fail" are rejected so you can test retries.
 The sample group has a description, admins, an avatar, a member with only a profile name and one Signal knows nothing about, a GIF (silent MP4) and a normal video, and a mention stored as a phone number. Group sends take a second, with delivery receipts arriving before the send returns, like on real Signal.
 `POST /mock/incoming {"from":"bob","text":"hi","group":true}` on the mock injects incoming messages.
+
+Emoji artwork is in `web/public/emoji`, made by `web/scripts/gen-emoji-assets.py` from the upstream sets (instructions at the top of that script): [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) (SIL OFL 1.1), [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (MIT) and [Twemoji](https://github.com/jdecked/twemoji) (graphics CC-BY 4.0, © Twitter, Inc. and other contributors). Each folder has its license.
 
 ### Layout
 

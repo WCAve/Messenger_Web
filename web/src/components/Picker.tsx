@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
-import { CATEGORIES, EMOJI, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';
+import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';
+import { Emojified } from '../emoji/render';
+import { frequentEmoji, loadUsage } from '../emoji/usage';
 import type { StickerItem, StickerPack } from '../types';
 import { Icon } from './ui';
 
@@ -225,15 +227,19 @@ function EmojiGrid({ onPick }: { onPick: (e: string) => void }) {
   const [q, setQ] = useState('');
   const body = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
-  const recent = useMemo(() => recentEmoji(), []);
+  // Most used across all your browsers (from the server); this browser's recent picks until there's history.
+  const [frequent, setFrequent] = useState<string[]>(() => frequentEmoji());
+  const recent = useMemo(() => (frequent.length ? frequent : recentEmoji()), [frequent]);
   const results = useMemo(() => (q.trim() ? searchEmoji(q.trim(), 120).map((r) => r.entry) : null), [q]);
-  const nameOf = useMemo(() => new Map(EMOJI.map((x) => [x.e, x.codes[0]])), []);
 
-  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    input.current?.focus();
+    loadUsage(true).then(() => setFrequent(frequentEmoji()));
+  }, []);
 
   const cell = (e: string) => (
-    <button key={e} className="emoji-cell" onClick={() => onPick(e)} title={`:${nameOf.get(e) ?? ''}:`}>
-      {e}
+    <button key={e} className="emoji-cell" onClick={() => onPick(e)} title={`:${displayCode(e) ?? ''}:`}>
+      <Emojified text={e} />
     </button>
   );
 
@@ -246,7 +252,7 @@ function EmojiGrid({ onPick }: { onPick: (e: string) => void }) {
       {!results && (
         <nav className="emoji-cats" aria-label="Emoji categories">
           {recent.length > 0 && (
-            <button onClick={() => body.current?.querySelector('#cat-recent')?.scrollIntoView()} title="Recent">
+            <button onClick={() => body.current?.querySelector('#cat-recent')?.scrollIntoView()} title={frequent.length ? 'Frequently used' : 'Recent'}>
               🕘
             </button>
           )}
@@ -268,7 +274,7 @@ function EmojiGrid({ onPick }: { onPick: (e: string) => void }) {
           <>
             {recent.length > 0 && (
               <section id="cat-recent">
-                <h4>Recent</h4>
+                <h4>{frequent.length ? 'Frequently used' : 'Recent'}</h4>
                 <div className="emoji-grid">{recent.map(cell)}</div>
               </section>
             )}

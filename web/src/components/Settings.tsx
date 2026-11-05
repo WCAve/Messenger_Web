@@ -56,6 +56,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+function EmojiSample({ set }: { set: 'fluent' | 'twemoji' }) {
+  const ext = set === 'fluent' ? 'webp' : 'png';
+  return (
+    <>
+      {['1f602', '1f44d', '2764'].map((k) => (
+        <img key={k} className="emoji" src={`/emoji/${set}/${k}.${ext}`} alt="" />
+      ))}
+    </>
+  );
+}
+
 /** Your Signal profile: picture, first name, about. Changes sync to your phone and contacts. */
 function ProfileSection() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -273,6 +284,13 @@ function WhatsAppSection() {
   );
 }
 
+const EMOJI_STYLES: { value: Prefs['emoji']; label: string; sample: string }[] = [
+  { value: 'noto', label: 'Google Noto', sample: '😂' },
+  { value: 'fluent', label: 'Fluent 3D', sample: '😂' },
+  { value: 'twemoji', label: 'Twemoji', sample: '😂' },
+  { value: 'system', label: 'System', sample: '😂' },
+];
+
 const THEMES: { value: Prefs['theme']; label: string }[] = [
   { value: 'system', label: 'System' },
   { value: 'light', label: 'Light' },
@@ -360,6 +378,28 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
               ))}
             </div>
           </div>
+        </Section>
+
+        <Section title="Emoji">
+          <div className="setting-row">
+            <span className="setting-text">
+              <strong>Emoji style</strong>
+              <small>Applies to this browser. Fluent and Twemoji show in messages and lists; the message box uses Noto while you type.</small>
+            </span>
+          </div>
+          <div className="emoji-styles" role="radiogroup" aria-label="Emoji style">
+            {EMOJI_STYLES.map((s) => (
+              <button key={s.value} role="radio" aria-checked={prefs.emoji === s.value} className={prefs.emoji === s.value ? 'on' : undefined} onClick={() => setPrefs({ emoji: s.value })}>
+                <span className="emoji-sample" data-style={s.value}>
+                  {s.value === 'noto' || s.value === 'system' ? '😂👍❤️' : <EmojiSample set={s.value} />}
+                </span>
+                {s.label}
+              </button>
+            ))}
+          </div>
+          <p className="muted setting-note">
+            Noto: Google, SIL Open Font License. Fluent: Microsoft, MIT. Twemoji graphics: © Twitter, Inc. and other contributors, CC-BY 4.0.
+          </p>
         </Section>
 
         <Section title="Chats">

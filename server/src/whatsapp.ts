@@ -820,35 +820,57 @@ export async function voteWa(conv: ConversationRow, m: MessageRow, poll: Poll, p
 const avatarDir = path.join(config.dataDir, 'avatars');
 const avatarInflight = new Map<string, Promise<string | null>>();
 
-/** A WhatsApp profile/group picture, cached for 12 hours (misses for 6). */
+// Picture lookups go through WhatsApp, which rate-limits bursts (a chat list asks for dozens at once).
+let avatarSlots = 2;
+const avatarWaiting: (() => void)[] = [];
+async function withAvatarSlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (avatarSlots === 0) await new Promise<void>((r) => avatarWaiting.push(r));
+  avatarSlots--;
+  try {
+    return await fn();
+  } finally {
+    avatarSlots++;
+    setTimeout(() => avatarWaiting.shift()?.(), 150);
+  }
+}
+let avatarWarnings = 0;
+
+/** A WhatsApp profile/group picture, cached for 12 hours (no picture: 6 hours; errors: 30 minutes). */
 export function waAvatar(jid: string): Promise<string | null> {
   const name = 'wa-' + crypto.createHash('sha256').update(jid).digest('hex').slice(0, 32);
   const file = path.join(avatarDir, name);
   const miss = file + '.none';
+  const fail = file + '.fail';
   let p = avatarInflight.get(name);
   if (p) return p;
   p = (async () => {
     const now = Date.now();
-    const cached = fs.existsSync(file) ? fs.statSync(file) : null;
-    if (cached && now - cached.mtimeMs < 12 * 3600_000) return file;
-    if (!cached && fs.existsSync(miss) && now - fs.statSync(miss).mtimeMs < 6 * 3600_000) return null;
+    const age = (f: string) => (fs.existsSync(f) ? now - fs.statSync(f).mtimeMs : Infinity);
+    const cached = fs.existsSync(file);
+    if (cached && age(file) < 12 * 3600_000) return file;
+    if (!cached && age(miss) < 6 * 3600_000) return null;
+    if (age(fail) < 30 * 60_000) return cached ? file : null;
     if (state.status !== 'connected') return cached ? file : null;
     try {
-      const { url } = await waha.chatPicture(jid);
+      const url = await withAvatarSlot(async () => (await waha.chatPicture(jid)).url);
+      fs.mkdirSync(avatarDir, { recursive: true });
       if (!url) {
         fs.writeFileSync(miss, '');
         fs.rmSync(file, { force: true });
         return null;
       }
       const res = url.includes('/api/files/') ? await waha.file(url) : await fetch(url, { signal: AbortSignal.timeout(20_000) });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw new Error(`picture download answered ${res.status}`);
       const buf = Buffer.from(await res.arrayBuffer());
-      fs.mkdirSync(avatarDir, { recursive: true });
       fs.writeFileSync(file + '.part', buf);
       fs.renameSync(file + '.part', file);
       fs.rmSync(miss, { force: true });
+      fs.rmSync(fail, { force: true });
       return file;
-    } catch {
+    } catch (e) {
+      if (avatarWarnings++ < 5) log.warn(`whatsapp: picture for ${jid}: ${(e as Error).message}`);
+      fs.mkdirSync(avatarDir, { recursive: true });
+      fs.writeFileSync(fail, '');
       return cached ? file : null;
     } finally {
       avatarInflight.delete(name);

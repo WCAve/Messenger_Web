@@ -1,5 +1,6 @@
 import { CURATED } from './curated';
 import { EXTRA } from './extra';
+import { preferredAlias, usageScore } from './usage';
 
 export interface EmojiEntry {
   e: string; // the emoji
@@ -53,11 +54,46 @@ export const CATEGORIES: { name: string; icon: string; items: EmojiEntry[] }[] =
   return order.map((name) => ({ name, icon: icons[name], items: EMOJI.filter((x) => x.category === name) })).filter((c) => c.items.length);
 })();
 
+/** The name to show for an emoji: the one you use most, else its main shortcode. */
+export function displayCode(e: string): string | undefined {
+  const entry = byEmoji.get(e);
+  const mine = preferredAlias(e);
+  return mine && (entry?.codes.includes(mine) || entry?.words.includes(mine)) ? mine : entry?.codes[0];
+}
+
+const byEmoji = new Map<string, EmojiEntry>();
+for (const entry of EMOJI) if (!byEmoji.has(entry.e)) byEmoji.set(entry.e, entry);
+
+const byWord = new Map<string, EmojiEntry[]>();
+for (const entry of EMOJI) {
+  for (const w of entry.words) {
+    if (!/^[a-z0-9_+-]{2,40}$/.test(w)) continue;
+    const list = byWord.get(w) ?? byWord.set(w, []).get(w)!;
+    if (!list.includes(entry)) list.push(entry);
+  }
+}
+
 const byCode = new Map<string, EmojiEntry>();
 for (const entry of EMOJI) for (const c of entry.codes) if (!byCode.has(c)) byCode.set(c, entry);
 
+/**
+ * The emoji for a :name:. A real shortcode wins (":joy:" is always 😂). A name several emoji share
+ * (":laugh:" fits 😆, 🤣 and 😂) gives the one you use most.
+ */
 export function emojiForCode(code: string): string | undefined {
-  return byCode.get(code.toLowerCase())?.e;
+  const c = code.toLowerCase();
+  const exact = byCode.get(c);
+  if (exact) return exact.e;
+  let best: EmojiEntry | undefined;
+  let bestScore = -1;
+  for (const entry of byWord.get(c) ?? []) {
+    const score = usageScore(entry.e) + (entry.curated ? 0.001 : 0);
+    if (score > bestScore) {
+      best = entry;
+      bestScore = score;
+    }
+  }
+  return best?.e;
 }
 
 /** Replace complete :shortcodes: in text, Slack-style. Unknown codes are left alone. */
@@ -92,6 +128,7 @@ export function searchEmoji(term: string, limit = 8): { entry: EmojiEntry; code:
   const q = term.toLowerCase().replace(/^:|:$/g, '');
   if (!q) return [];
   const recent = recentEmoji();
+  const rank = (c: string) => (c === q ? 0 : c.startsWith(q) ? 1 + c.length / 100 : c.includes('_' + q) ? 2 + c.length / 100 : c.includes(q) ? 4 + c.length / 100 : Infinity);
   const scored: { entry: EmojiEntry; code: string; score: number }[] = [];
   for (const entry of EMOJI) {
     let best = Infinity;
@@ -107,16 +144,31 @@ export function searchEmoji(term: string, limit = 8): { entry: EmojiEntry; code:
         bestCode = c;
       }
     }
-    if (best > 3) {
+    if (best > 1.5) {
+      // Matched by a keyword: offer it under that name, so ":laugh" shows 😂 as :laugh:.
       for (const w of entry.words) {
-        if (w === q) best = Math.min(best, 2.5);
-        else if (w.startsWith(q)) best = Math.min(best, 3 + w.length / 100);
+        const s = w === q ? 1.5 : w.startsWith(q) ? 2.2 + w.length / 100 : Infinity;
+        if (s < best) {
+          best = s;
+          if (/^[a-z0-9_+-]{2,40}$/.test(w)) bestCode = w;
+        }
       }
     }
     if (best === Infinity) continue;
+    // The name you usually use for this emoji wins when it matches what you're typing about as well.
+    const mine = preferredAlias(entry.e);
+    if (mine && (entry.codes.includes(mine) || entry.words.includes(mine)) && rank(mine) <= Math.max(best, 1.99)) {
+      bestCode = mine;
+      best = Math.min(best, rank(mine));
+    }
     if (!entry.curated) best += 0.5;
-    const r = recent.indexOf(entry.e);
-    if (r >= 0) best -= 0.4 - r / 100;
+    // Emoji you use a lot come first (up to about one and a half rank steps); otherwise recent picks in this browser.
+    const used = usageScore(entry.e);
+    if (used > 0) best -= Math.min(1.6, Math.log2(1 + used) * 0.5);
+    else {
+      const r = recent.indexOf(entry.e);
+      if (r >= 0) best -= 0.4 - r / 100;
+    }
     scored.push({ entry, code: bestCode, score: best });
   }
   scored.sort((a, b) => a.score - b.score);
