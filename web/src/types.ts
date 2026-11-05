@@ -133,7 +133,7 @@ export interface Message {
   kind: 'message' | 'sticker' | 'system' | 'poll';
   body: string | null;
   attachments: Attachment[];
-  quote: { sentAt: number; author: string; authorName: string; text: string } | null;
+  quote: { sentAt: number; author: string; authorName: string; text: string; unlinked?: boolean } | null;
   reactions: { emoji: string; author: string; authorName: string }[];
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | null;
   error: string | null;

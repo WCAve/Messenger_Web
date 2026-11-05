@@ -227,6 +227,13 @@ const server = http.createServer(async (req, res) => {
         return json(res, 200, { ok: true });
       }
       if (p === '/mock/stats') return json(res, 200, stats);
+      if (p === '/mock/history') {
+        const b = await body(req); // {"chat":…,"id":…,"body":…}: a message WhatsApp Web has, with exactly this id
+        const mm = msg({ chat: b.chat, body: b.body ?? '' });
+        mm.id = b.id;
+        addHistory(mm);
+        return json(res, 200, mm);
+      }
       if (p === '/mock/bulk') {
         const b = await body(req); // {"from":"sanne","n":2500}: that many old messages in a direct chat
         const who = PEOPLE[b.from ?? 'sanne'];
@@ -329,7 +336,9 @@ const server = http.createServer(async (req, res) => {
       if (msgs[2]) {
         stats.singleFetches++;
         if (mockConfig.mediaDelayMs) await new Promise((r) => setTimeout(r, mockConfig.mediaDelayMs));
-        const x = list.find((y) => y.id === decodeURIComponent(msgs[2])) ?? null;
+        // WhatsApp Web finds a message by its id alone, whichever chat the URL names
+        const want = decodeURIComponent(msgs[2]);
+        const x = [...history.values()].flat().find((y) => y.id === want) ?? null;
         return json(res, 200, x?._data?.gone ? { ...x, media: null } : x);
       }
       const limit = Number(url.searchParams.get('limit') ?? 10);

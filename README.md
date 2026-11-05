@@ -69,6 +69,7 @@ WhatsApp chats sit in the same list as Signal chats, with a small **W** or **S**
 - Polls: see and vote, and create new ones
 - Search, pin/mute/archive, drafts and forwarding work across both networks; you can forward a Signal message to a WhatsApp chat and the other way round
 - Not on WhatsApp chats: Signal sticker packs, disappearing-message settings, ending polls and changing group pictures (do those on your phone)
+- Replies: WhatsApp only links a reply when WhatsApp Web still has the original (it may know it by the privacy id instead of the number; both are tried). For older messages, like most of an imported backup, the reply goes out with the original as a `> ` quote, and the reply bar says so before you send
 - **Full history from an Android backup** (Settings → WhatsApp → *Import full history from an Android backup*): turn on end-to-end encrypted backup with a 64-digit key on the phone, back up, and upload `msgstore.db.crypt15` (or copy it into `whatsapp-backup/` in the data folder). Every chat and message the phone has is imported, with replies, reactions and group events; messages already here are skipped. Then copy the phone's `WhatsApp/Media` folder into the same `whatsapp-backup/` folder and click *Add media from the folder*. The key isn't stored, and the backup and its decrypted copy are deleted after the import
 - Developed against WAHA's **WEBJS** engine. With WEBJS you see that a call came in, but not whether you answered it on your phone, so call lines read "Incoming voice call" unless WhatsApp sends its own call log
 

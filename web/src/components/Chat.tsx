@@ -615,7 +615,10 @@ const MessageItem = memo(function MessageItem({
         )}
         {m.quote && (
           <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
-            <strong>{m.quote.author === 'self' ? 'You' : m.quote.authorName}</strong>
+            <strong>
+              {m.quote.author === 'self' ? 'You' : m.quote.authorName}
+              {m.quote.unlinked && <span className="quote-note" title="WhatsApp no longer had this message, so the reply was sent with the quoted text"> · quoted as text</span>}
+            </strong>
             <span>
               <Emojified text={m.quote.text || 'Attachment'} />
             </span>
@@ -1009,6 +1012,20 @@ function Composer({
   const [panel, setPanel] = useState<PickerTab | null>(null);
   const [suggest, setSuggest] = useState<{ start: number; term: string; items: ReturnType<typeof searchEmoji>; index: number } | null>(null);
   const [mentionSuggest, setMentionSuggest] = useState<{ start: number; items: { key: string; name: string }[]; index: number } | null>(null);
+  // WhatsApp only links a reply when WhatsApp Web still has the message; say so before sending.
+  const [unlinkable, setUnlinkable] = useState<number | null>(null);
+  useEffect(() => {
+    setUnlinkable(null);
+    if (!replyTo || conversation.network !== 'whatsapp') return;
+    let cancelled = false;
+    api
+      .replyable(replyTo.id)
+      .then((r) => !cancelled && !r.linkable && setUnlinkable(replyTo.id))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [replyTo?.id, conversation.network]);
   const mentions = useRef<ComposerMention[]>(getState().drafts[conversation.id]?.mentions ?? []); // people picked from the @ suggestions
   const [pollOpen, setPollOpen] = useState(false);
   const [linkCard, setLinkCard] = useState<{ url: string; title: string; description: string | null; image: string | null } | null>(null);
@@ -1411,6 +1428,7 @@ function Composer({
             <span>
               <Emojified text={replyTo.body || (replyTo.attachments.length ? 'Attachment' : '')} />
             </span>
+            {unlinkable === replyTo.id && <small className="reply-note">Too old to link on WhatsApp: it will be sent with the quoted text</small>}
           </div>
           <button className="icon-btn sm" onClick={clearReply} aria-label="Cancel reply">
             <Icon name="close" size={18} />

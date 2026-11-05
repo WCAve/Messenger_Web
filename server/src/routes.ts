@@ -20,6 +20,7 @@ import {
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
+  linkableQuoteId,
   downloadPendingMedia,
   cancelImportWa,
   blockWa,
@@ -549,6 +550,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const info = conversationInfo(c);
     if (isWa(c) && c.kind === 'direct') info.about = await waAbout(c.wa_id!);
     return info;
+  });
+
+  // Can WhatsApp link a reply to this message? (Old ones from a backup: WhatsApp Web may not have them.)
+  r.get('/api/messages/:id/replyable', async (ctx) => {
+    const m = message(ctx);
+    const c = getConversation(m.conversation_id)!;
+    if (!isWa(c) || getWaState().status !== 'connected') return { linkable: true };
+    return { linkable: !!(await linkableQuoteId(m)) };
   });
 
   r.get('/api/messages/:id/info', (ctx) => {

@@ -3036,3 +3036,14 @@ img.emoji {
 aside[aria-label='Search messages'] .panel-body > .panel-empty {
   padding: 6px 16px;
 }
+.reply-note {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-3);
+  margin-top: 2px;
+}
+.quote-note {
+  font-weight: 400;
+  color: var(--ink-3);
+  font-size: 12px;
+}

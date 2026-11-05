@@ -120,6 +120,7 @@ export function seedLids(pairs: [string, string][]) {
     if (!l.endsWith('@lid') || !p.endsWith('@c.us')) continue;
     lidCache.set(l, p);
     kvSet(`lid:${l}`, p);
+    kvSet(`lidof:${p}`, l);
   }
 }
 
@@ -155,6 +156,7 @@ export async function resolve(jid: unknown): Promise<string | null> {
     const pn = r?.pn ? bare(r.pn) : null;
     lidCache.set(j, pn);
     kvSet(`lid:${j}`, pn ?? '');
+    if (pn) kvSet(`lidof:${pn}`, j);
     return pn ?? j;
   } catch {
     lidCache.set(j, null); // try again after a restart
@@ -1268,10 +1270,65 @@ function parseDataUrl(s: string): WaFile | null {
   return m ? { mimetype: m[1], filename: m[2] || undefined, data: m[3] } : null;
 }
 
-function quoteExt(conv: ConversationRow, q: { sentTs: number } | null | undefined) {
-  if (!q) return undefined;
-  const r = db.prepare<[number, number], { ext_id: string | null }>('SELECT ext_id FROM messages WHERE conversation_id = ? AND sent_ts = ?').get(conv.id, q.sentTs);
-  return r?.ext_id ?? undefined;
+/** The other spelling of someone's id: phone number ↔ privacy id (@lid), when we know both. */
+function otherId(jid: string): string | null {
+  if (jid.endsWith('@lid')) {
+    const pn = lidCache.get(jid) ?? kvGet(`lid:${jid}`);
+    return pn || null;
+  }
+  if (jid.endsWith('@c.us')) {
+    const lid = kvGet(`lidof:${jid}`);
+    if (lid) return lid;
+    const r = db.prepare<[string], { key: string }>("SELECT key FROM kv WHERE key LIKE 'lid:%' AND value = ? LIMIT 1").get(jid);
+    return r ? r.key.slice(4) : null;
+  }
+  return null;
+}
+
+/**
+ * WhatsApp Web only links a reply when it has the quoted message itself, and it may know it by
+ * another spelling of the id (the chat or the sender by privacy id instead of number). Returns the id
+ * it knows, or null. Remembered per message (a miss for a day).
+ */
+export async function linkableQuoteId(m: MessageRow): Promise<string | null> {
+  if (!m.ext_id || m.ext_id.startsWith('call:')) return null;
+  const cacheKey = `waquote:${m.id}`;
+  const cached = kvGet(cacheKey);
+  if (cached) {
+    const c = JSON.parse(cached) as { id: string | null; at: number };
+    if (c.id || Date.now() - c.at < 24 * 3600_000) return c.id;
+  }
+  if (state.status !== 'connected') return m.ext_id; // can't check: try as is
+  const parts = m.ext_id.split('_');
+  const candidates = new Set<string>([m.ext_id]);
+  if ((parts[0] === 'true' || parts[0] === 'false') && parts.length >= 3) {
+    const [fromMe, chat, raw, ...rest] = parts;
+    const author = rest.join('_');
+    const chats = [chat, otherId(chat)].filter((x): x is string => !!x);
+    const authors = author ? [author, otherId(author)].filter((x): x is string => !!x) : [''];
+    for (const c of chats) for (const a of authors) candidates.add(`${fromMe}_${c}_${raw}${a ? '_' + a : ''}`);
+  }
+  const conv = getConversation(m.conversation_id)!;
+  const found = await Promise.all(
+    [...candidates].map((id) =>
+      waha
+        .message(conv.wa_id!, id, false)
+        .then((r) => (r && (r.id || r._data) ? id : null))
+        .catch(() => null),
+    ),
+  );
+  const id = found.find(Boolean) ?? null;
+  kvSet(cacheKey, JSON.stringify({ id, at: Date.now() }));
+  return id;
+}
+
+/** "> Jan: the quoted text" in WhatsApp's quote formatting, for replies WhatsApp Web can't link. */
+function textQuote(q: MessageRow): string {
+  const who = q.outgoing ? 'You' : nameForKey(q.author);
+  const text = (renderBody(q.body, q.ranges)?.text ?? '').replace(/￼/g, '').trim() || (q.attachments ? 'Attachment' : '');
+  const short = text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text;
+  const lines = short.split('\n').slice(0, 3);
+  return `> *${who}:* ${lines[0] ?? ''}\n` + lines.slice(1).map((l) => `> ${l}\n`).join('') + '\n';
 }
 
 /** Send a stored pending message. Several files go out as several WhatsApp messages; the first one's id is kept. */
@@ -1289,7 +1346,19 @@ export async function deliverWa(
     return;
   }
   const wa = toWaText(p.text, p.ranges ?? null, jidFor);
-  const reply_to = quoteExt(conv, p.quote);
+  let reply_to: string | undefined;
+  if (p.quote) {
+    const q = db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ?').get(conv.id, p.quote.sentTs);
+    if (q) {
+      reply_to = (await linkableQuoteId(q)) ?? undefined;
+      if (!reply_to) {
+        // Too old for WhatsApp Web to link: quote it as text, and show the same here.
+        wa.text = textQuote(q) + wa.text;
+        const row = getMessage(messageId);
+        if (row?.quote) emitMessage(updateMessage(messageId, { quote: JSON.stringify({ ...JSON.parse(row.quote), unlinked: true }) }));
+      }
+    }
+  }
   let first: Json;
   if (p.sticker) throw new Error("Signal stickers can't be sent to WhatsApp");
   if (p.base64.length) {

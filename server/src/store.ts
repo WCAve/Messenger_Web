@@ -85,6 +85,7 @@ export interface Quote {
   sentTs: number;
   author: string;
   text?: string | null;
+  unlinked?: boolean; // WhatsApp: sent as quoted text, because WhatsApp Web no longer had the message
 }
 
 export interface Reaction {
@@ -928,7 +929,7 @@ export function insertMessage(m: {
 
 export function updateMessage(
   id: number,
-  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id' | 'forwarded'>>,
+  fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id' | 'forwarded' | 'quote'>>,
 ) {
   const all: Record<string, unknown> = { ...fields };
   if (typeof fields.ext_id === 'string') all.ext_raw = extRawOf(fields.ext_id);
@@ -982,7 +983,7 @@ export function messageDto(m: MessageRow) {
     expiresIn: m.expires_in || undefined,
     expiresAt: m.expires_at ?? undefined,
     attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]).map(attachmentDto),
-    quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '' } : null,
+    quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '', ...(quote.unlinked ? { unlinked: true } : {}) } : null,
     reactions: reactions.map((r) => ({ emoji: r.emoji, author: r.author, authorName: nameForKey(r.author) })),
     status: m.status === 'viewed' ? 'read' : m.status,
     error: m.error,
