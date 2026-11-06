@@ -198,6 +198,17 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
 
       {conversation.blocked ? (
         <BlockedBar conversation={conversation} />
+      ) : conversation.left ? (
+        <div className="blocked-bar">
+          <span>You're no longer in this group.</span>
+        </div>
+      ) : conversation.sendAdminsOnly && !conversation.admin ? (
+        <div className="blocked-bar">
+          <span>Only admins can send messages.</span>
+          <button className="link-btn" onClick={() => setState({ panel: { kind: 'chat' } })}>
+            Group info
+          </button>
+        </div>
       ) : (
       <Composer
         key={id}

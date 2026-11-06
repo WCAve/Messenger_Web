@@ -177,6 +177,16 @@ const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
+// Group state: the two seeded groups start with you (admin), Jan and Sanne (superadmin).
+const groups = new Map();
+function groupState(id) {
+  if (!groups.has(id) && [GROUP.id, GROUP2.id].includes(id)) {
+    const base = id === GROUP.id ? GROUP : GROUP2;
+    groups.set(id, { id, name: base.name, parts: [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }], msgAdmins: false, infoAdmins: false, addAll: false, approval: false, invite: 'FamilieInvite1234567' + (id === GROUP.id ? 'A' : 'B'), requests: [], tags: id === GROUP.id ? { [PEOPLE.sanne.id]: 'Organiser' } : {} });
+  }
+  return groups.get(id) ?? null;
+}
+groupState(GROUP.id); groupState(GROUP2.id);
 const DESC = { [GROUP.id]: 'De familie-app 🏡\nWees lief voor elkaar' };
 const subscribed = new Set(); // presence: WEBJS only reports typing for chats you subscribed to
 function presence(chatId, who, state) {
@@ -386,15 +396,91 @@ const server = http.createServer(async (req, res) => {
       else blocked.delete(b.contactId);
       return json(res, 201, { ok: true });
     }
-    const parts = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)/participants/v2$`));
-    if (parts) return json(res, 200, [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }]);
-    // WEBJS: groups are wwebjs GroupChat objects
-    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name, desc: DESC[g.id] ?? undefined } });
-    if (p === `/api/${SESSION}/groups`) return json(res, 200, [GROUP, GROUP2].map(groupChat));
-    const one = p.match(new RegExp(`^/api/${SESSION}/groups/([^/]+)$`));
-    if (one) {
-      const g = [GROUP, GROUP2].find((x) => x.id === decodeURIComponent(one[1]));
-      return g ? json(res, 200, groupChat(g)) : json(res, 404, { message: 'not found' });
+    // ---------- groups (stateful: management calls change them) ----------
+    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name, desc: DESC[g.id] ?? undefined, announce: g.msgAdmins, restrict: g.infoAdmins, size: g.parts.length } });
+    const gm = p.match(new RegExp(`^/api/${SESSION}/groups/([^/?]+)(/.*)?$`));
+    const gid = gm && gm[1] !== 'join-info' && gm[1] !== 'join' && gm[1] !== 'count' && gm[1] !== 'refresh' ? decodeURIComponent(gm[1]) : null;
+    const g = gid ? groupState(gid) : null;
+    const rest = gm?.[2] ?? '';
+    const amAdmin = (x) => x.parts.some((q) => q.id === ME.id && q.role !== 'participant');
+    const ids = (b) => (b.participants ?? []).map((q) => q.id);
+    if (p === `/api/${SESSION}/groups` && m === 'GET') return json(res, 200, [...groups.values()].filter((x) => x.parts.some((q) => q.id === ME.id)).map(groupChat));
+    if (p === `/api/${SESSION}/groups` && m === 'POST') {
+      const b = await body(req);
+      sent.push({ path: p, method: m, ...b });
+      const id = `1203630${String(Date.now()).slice(-8)}${groups.size}@g.us`;
+      groups.set(id, { id, name: b.name, parts: [{ id: ME.id, role: 'superadmin' }, ...ids(b).map((x) => ({ id: x, role: 'participant' }))], msgAdmins: false, infoAdmins: false, addAll: true, approval: false, invite: rid(), requests: [], tags: {} });
+      setTimeout(() => emit('group.v2.join', { group: { id, subject: b.name } }), 100);
+      return json(res, 201, { gid: { server: 'g.us', user: id.split('@')[0], _serialized: id }, participants: {} });
+    }
+    if (p === `/api/${SESSION}/groups/join-info`) {
+      const code = new URL(req.url, 'http://x').searchParams.get('code');
+      const found = [...groups.values()].find((x) => x.invite === code);
+      return found ? json(res, 200, { id: found.id, subject: found.name, desc: DESC[found.id] ?? '', size: found.parts.length, membershipApprovalMode: found.approval }) : json(res, 404, { message: 'invite code not found' });
+    }
+    if (p === `/api/${SESSION}/groups/join` && m === 'POST') {
+      const b = await body(req);
+      sent.push({ path: p, method: m, ...b });
+      const found = [...groups.values()].find((x) => x.invite === b.code);
+      if (!found) return json(res, 404, { message: 'invite code not found' });
+      if (found.approval) return json(res, 201, {});
+      found.parts.push({ id: ME.id, role: 'participant' });
+      setTimeout(() => emit('group.v2.join', { group: { id: found.id, subject: found.name } }), 100);
+      return json(res, 201, { id: found.id });
+    }
+    if (g) {
+      if (rest === '' && m === 'GET') return json(res, 200, groupChat(g));
+      if (rest === '/participants/v2' && m === 'GET') return json(res, 200, g.parts.some((q) => q.id === ME.id) ? g.parts : []);
+      if (m !== 'GET') {
+        const b = m === 'DELETE' ? {} : await body(req);
+        sent.push({ path: p, method: m, ...b, file: b.file ? { mimetype: b.file.mimetype } : undefined });
+        const adminOnly = ['/subject', '/description', '/picture'].includes(rest) ? g.infoAdmins : !['/leave', '/participants/v2/tags/my', '/participants/add'].includes(rest);
+        if (adminOnly && !amAdmin(g) && !(rest === '/participants/add' && g.addAll)) return json(res, 403, { message: 'not admin' });
+        const changed = (type, participants) => setTimeout(() => emit(type ? 'group.v2.participants' : 'group.v2.update', { group: { id: g.id, subject: g.name, desc: DESC[g.id] }, type, participants: (participants ?? []).map((id) => ({ id })) }), 50);
+        switch (rest) {
+          case '/subject': g.name = b.subject; changed(); break;
+          case '/description': DESC[g.id] = b.description; changed(); break;
+          case '/picture': g.picture = m === 'PUT'; changed(); break;
+          case '/participants/add': for (const x of ids(b)) if (!g.parts.some((q) => q.id === x)) g.parts.push({ id: x, role: 'participant' }); changed('add', ids(b)); break;
+          case '/participants/remove': g.parts = g.parts.filter((q) => !ids(b).includes(q.id)); changed('remove', ids(b)); break;
+          case '/admin/promote': for (const q of g.parts) if (ids(b).includes(q.id)) q.role = 'admin'; changed('promote', ids(b)); break;
+          case '/admin/demote': for (const q of g.parts) if (ids(b).includes(q.id)) q.role = 'participant'; changed('demote', ids(b)); break;
+          case '/settings/security/info-admin-only': g.infoAdmins = b.adminsOnly; changed(); break;
+          case '/settings/security/messages-admin-only': g.msgAdmins = b.adminsOnly; changed(); break;
+          case '/settings/security/member-add-mode': g.addAll = b.membersCanAddNewMember; changed(); break;
+          case '/settings/security/membership-approval': g.approval = b.newMembersApprovalRequired; changed(); break;
+          case '/invite-code/revoke': g.invite = rid(); break;
+          case '/participants/join-requests/approve': for (const x of ids(b)) { g.requests = g.requests.filter((r) => r !== x); g.parts.push({ id: x, role: 'participant' }); } changed('add', ids(b)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
+          case '/participants/join-requests/reject': g.requests = g.requests.filter((r) => !ids(b).includes(r)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
+          case '/leave': g.parts = g.parts.filter((q) => q.id !== ME.id); setTimeout(() => emit('group.v2.leave', { group: { id: g.id } }), 50); break;
+          case '/participants/v2/tags/my': if (b.tag) g.tags[ME.id] = b.tag; else delete g.tags[ME.id]; setTimeout(() => emit('group.v2.participants.tag', { group: { id: g.id }, participant: ME.id, tag: b.tag }), 50); break;
+          default: return json(res, 404, { message: 'mock: unknown group call ' + rest });
+        }
+        return json(res, 200, { success: true });
+      }
+      const setting = rest.match(/^\/settings\/security\/(.+)$/);
+      if (setting) return json(res, 200, { 'info-admin-only': { adminsOnly: g.infoAdmins }, 'messages-admin-only': { adminsOnly: g.msgAdmins }, 'member-add-mode': { membersCanAddNewMember: g.addAll }, 'membership-approval': { newMembersApprovalRequired: g.approval } }[setting[1]] ?? {});
+      if (rest === '/invite-code') return amAdmin(g) ? json(res, 200, `https://chat.whatsapp.com/${g.invite}`) : json(res, 403, { message: 'not admin' });
+      if (rest === '/participants/join-requests') return json(res, 200, g.requests.map((id) => ({ id: { _serialized: id }, requestMethod: 'InviteLink', t: Math.floor(Date.now() / 1000) })));
+      if (rest === '/participants/v2/tags') return json(res, 200, Object.entries(g.tags).map(([id, tag]) => ({ id, tag })));
+      if (rest === '/picture') return json(res, 200, { url: null });
+    }
+    if (gid && !g) return json(res, 404, { message: 'group not found' });
+    if (p === '/mock/join-request' && m === 'POST') {
+      const b = await body(req); // {group, who}
+      const x = groupState(b.group);
+      x.requests.push(b.who);
+      emit('group.join-request', { groupId: b.group, requester: b.who, action: 'created' });
+      return json(res, 201, {});
+    }
+    if (p === '/mock/groups') return json(res, 200, Object.fromEntries(groups));
+    if (p === '/mock/group-set' && m === 'POST') {
+      const b = await body(req); // {group, patch: {msgAdmins…}, myRole}
+      const x = groupState(b.group);
+      Object.assign(x, b.patch ?? {});
+      if (b.myRole) for (const q of x.parts) if (q.id === ME.id) q.role = b.myRole;
+      emit('group.v2.update', { group: { id: x.id, subject: x.name } });
+      return json(res, 201, {});
     }
     const lid = p.match(new RegExp(`^/api/${SESSION}/lids/([^/]+)$`));
     if (lid) {

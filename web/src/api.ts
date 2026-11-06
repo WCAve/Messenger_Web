@@ -1,4 +1,4 @@
-import type { BackupFile, WaContact, WaState } from './types';
+import type { BackupFile, GroupAction, GroupDetails, Network, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -80,7 +80,13 @@ export const api = {
   setTimer: (id: number, seconds: number) => call<Conversation>('POST', `/api/conversations/${id}/timer`, { seconds }),
   profile: () => call<Profile>('GET', '/api/profile'),
   updateProfile: (b: { givenName: string; about: string; avatar?: string | null }) => call<Profile>('POST', '/api/profile', b),
-  setGroupAvatar: (id: number, avatar: string) => call<Conversation>('POST', `/api/conversations/${id}/avatar`, { avatar }),
+  setGroupAvatar: (id: number, avatar: string | null) => call<Conversation>('POST', `/api/conversations/${id}/group/picture`, { avatar }),
+  group: (id: number) => call<GroupDetails>('GET', `/api/conversations/${id}/group`),
+  groupAction: (id: number, a: GroupAction) => call<{ conversation: Conversation; details: GroupDetails | null }>('POST', `/api/conversations/${id}/group`, a),
+  createGroup: (b: { network: Network; name: string; members: string[]; avatar?: string; description?: string }) => call<Conversation>('POST', '/api/groups', b),
+  joinInfo: (link: string) =>
+    call<{ name: string; description: string | null; size: number | null; approval: boolean; already: boolean }>('GET', `/api/groups/join-info?link=${encodeURIComponent(link)}`),
+  joinGroup: (link: string) => call<{ conversation: Conversation | null }>('POST', '/api/groups/join', { link }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
   updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia' | 'waShowOnline'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),

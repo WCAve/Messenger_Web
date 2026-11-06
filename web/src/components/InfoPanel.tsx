@@ -6,6 +6,7 @@ import { NETWORK_LABEL, capsFor } from '../networks';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
 import { TIMER_OPTIONS, durationLabel, formatDay, formatListTime, formatSize, formatTime, squareAvatar } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
+import { EditableText, GroupManageSections, MemberMenu, useGroup } from './GroupManage';
 
 function closePanel() {
   setState({ panel: null });
@@ -31,8 +32,9 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState('');
   const id = conversation.id;
+  const groupTick = useStore((s) => s.groupTick[id] ?? 0);
 
-  // Reload when the chat changes or new messages/members arrive.
+  // Reload when the chat changes, new messages/members arrive, or the group changes (admins, labels).
   useEffect(() => {
     let cancelled = false;
     api
@@ -42,7 +44,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
     return () => {
       cancelled = true;
     };
-  }, [id, conversation.lastMessageAt, conversation.title, conversation.members?.length]);
+  }, [id, conversation.lastMessageAt, conversation.title, conversation.members?.length, conversation.admin, conversation.left, groupTick]);
 
   useEffect(() => {
     setExpanded(false);
@@ -51,6 +53,9 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
   }, [id]);
 
   const group = conversation.kind === 'group';
+  const g = useGroup(conversation);
+  const canEdit = group && !!g.details?.canEditInfo;
+  const labels = g.details?.labels ?? {};
   const text = group ? info?.description : info?.about;
   const long = !!text && (text.length > 220 || text.split('\n').length > 5);
   const members = (info?.members ?? []).filter((m) => !filter || m.name.toLowerCase().includes(filter.toLowerCase()) || m.number?.includes(filter));
@@ -74,7 +79,9 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
   async function openMember(m: Member) {
     if (m.key === 'self') return;
     try {
-      const c = await api.startChat(m.key.startsWith('+') ? { number: m.key } : { uuid: m.key, number: m.number ?? undefined });
+      const c = await api.startChat(
+        m.key.startsWith('wa:') ? { network: 'whatsapp', jid: m.key.slice(3) } : m.key.startsWith('+') ? { number: m.key } : { uuid: m.key, number: m.number ?? undefined },
+      );
       upsertConversation(c);
       setState({ activeId: c.id, panel: null });
     } catch (e) {
@@ -87,7 +94,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
       <PanelHead title={group ? 'Group info' : 'Contact info'} />
       <div className="panel-body">
         <section className="panel-hero">
-          {group && capsFor(conversation).groupPhoto ? (
+          {canEdit && capsFor(conversation).groupPhoto ? (
             <button className="profile-photo" onClick={() => photoInput.current?.click()} title="Change group picture" aria-label="Change group picture" disabled={photoBusy}>
               <Avatar key={conversation.avatar ?? ''} name={conversation.title} seed={String(conversation.title)} group size={120} src={conversation.avatar} />
               <span className="photo-overlay">{photoBusy ? <span className="spinner small" /> : <Icon name="camera" size={26} />}</span>
@@ -96,7 +103,13 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
             <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={group} size={120} src={conversation.avatar} />
           )}
           <input ref={photoInput} type="file" accept="image/*" hidden onChange={(e) => (void changeGroupPhoto(e.target.files?.[0]), (e.target.value = ''))} />
-          <h3>{conversation.title}</h3>
+          {canEdit ? (
+            <EditableText value={conversation.title} label="Edit group name" max={conversation.network === 'whatsapp' ? 100 : 32} onSave={(v) => g.act({ action: 'rename', name: v.trim() })}>
+              <h3>{conversation.title}</h3>
+            </EditableText>
+          ) : (
+            <h3>{conversation.title}</h3>
+          )}
           <p className="muted">
             {group
               ? `${conversation.network === 'whatsapp' ? 'WhatsApp group' : 'Group'} · ${info?.memberCount ?? conversation.members?.length ?? 0} members`
@@ -105,8 +118,38 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
         </section>
 
         {error && <p className="form-error pad">{error}</p>}
+        {g.error && <p className="form-error pad">{g.error}</p>}
 
-        {text && (
+        {canEdit && (
+          <section className="panel-section">
+            <h4>Description</h4>
+            <EditableText
+              value={info?.description ?? ''}
+              label={info?.description ? 'Edit group description' : 'Add group description'}
+              multiline
+              max={conversation.network === 'whatsapp' ? 2048 : 480}
+              placeholder="Group description"
+              onSave={async (v) => {
+                const ok = await g.act({ action: 'describe', description: v });
+                if (ok) setInfo((i) => (i ? { ...i, description: v.trim() || null } : i));
+                return ok;
+              }}
+            >
+              {info?.description ? (
+                <p className={`panel-text${long && !expanded ? ' clamped' : ''}`}>{info.description}</p>
+              ) : (
+                <p className="muted panel-text">Add a group description</p>
+              )}
+            </EditableText>
+            {long && (
+              <button className="link-btn" onClick={() => setExpanded((x) => !x)}>
+                {expanded ? 'Show less' : 'Read more'}
+              </button>
+            )}
+          </section>
+        )}
+
+        {text && !canEdit && (
           <section className="panel-section">
             <h4>{group ? 'Description' : 'About'}</h4>
             <p className={`panel-text${long && !expanded ? ' clamped' : ''}`}>{text}</p>
@@ -216,20 +259,26 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
             )}
             <ul className="member-list">
               {members.map((m) => (
-                <li key={m.key}>
+                <li key={m.key} className="member-row">
                   <button className="member" onClick={() => openMember(m)} disabled={m.key === 'self'} title={m.key === 'self' ? undefined : `Message ${m.name}`}>
                     <Avatar name={m.name} seed={String(m.number ?? m.name)} size={40} src={m.avatar} />
                     <span className="member-text">
-                      <strong>{m.name}</strong>
+                      <strong>
+                        {m.name}
+                        {(labels[m.key] ?? m.label) && <span className="member-label">{labels[m.key] ?? m.label}</span>}
+                      </strong>
                       <small>{m.about || m.number || (m.username ? '@' + m.username : m.name === 'Unknown' ? 'Not in your contacts' : '')}</small>
                     </span>
                     {m.admin && <span className="admin-badge">Group admin</span>}
                   </button>
+                  {m.key !== 'self' && g.details?.admin && g.details.member && <MemberMenu member={m} group={g} onMessage={() => void openMember(m)} />}
                 </li>
               ))}
             </ul>
           </section>
         )}
+
+        {group && <GroupManageSections conversation={conversation} group={g} members={info?.members ?? []} />}
 
         {!group && conversation.network === 'whatsapp' && conversation.number && <WaContactSection conversation={conversation} />}
         {!group && conversation.network === 'whatsapp' && <BlockSection conversation={conversation} />}

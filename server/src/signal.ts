@@ -6,7 +6,7 @@ import { config } from './config.js';
 import { broadcast } from './events.js';
 import { handleEnvelope, ingestHooks } from './ingest.js';
 import { signalApi } from './signal-api.js';
-import { conversationDto, getOrCreateGroup, listConversationRows, self, setSelfProfile, upsertContact } from './store.js';
+import { conversationDto, getOrCreateGroup, mergeGroupSettings, listConversationRows, self, setSelfProfile, upsertContact } from './store.js';
 
 /** Names and group details may have changed: push fresh chat-list rows to open browsers. */
 function broadcastAllConversations() {
@@ -171,7 +171,12 @@ export async function refreshDirectory() {
   }
   for (const g of groups) {
     if (g.blocked || g.member === false) continue;
-    getOrCreateGroup(g.internal_id, g.name, g.members, { description: g.description || null, admins: g.admins ?? [] });
+    const conv = getOrCreateGroup(g.internal_id, g.name, g.members, { description: g.description || null, admins: g.admins ?? [] });
+    // "edit_group" isn't reported correctly by the API (it repeats send_messages): leave that one alone.
+    if (g.permissions) {
+      const who = (x?: string) => (x ? (x === 'only-admins' ? 'admins' : 'all') : undefined);
+      mergeGroupSettings(conv.id, { sendMessages: who(g.permissions.send_messages), addMembers: who(g.permissions.add_members) });
+    }
   }
   broadcastAllConversations();
   log.info(`signal: directory refreshed (${contacts.length} contacts, ${groups.length} groups)`);

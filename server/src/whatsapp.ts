@@ -36,6 +36,7 @@ import {
   self,
   setConversationFlags,
   setGroupDescription,
+  mergeGroupSettings,
   setWaAbout,
   setWaBlocked,
   setWaGroupMembers,
@@ -433,12 +434,35 @@ function refreshGroupSoon(jid: string) {
     setTimeout(() => {
       groupRefreshPending.delete(jid);
       const conv = getOrCreateWaChat(jid);
-      refreshGroup(conv).then(() => emitConversation(conv.id)).catch(() => {});
+      groupNameTried.delete(jid); // a change came in: name, description and settings fresh too
+      Promise.all([refreshGroup(conv).catch(() => {}), refreshGroupName(conv).catch(() => {})]).then(() => (emitConversation(conv.id), groupChanged(conv.id)));
     }, 2000),
   );
 }
 
-async function refreshGroup(conv: ConversationRow) {
+/** Open group-info panels reload (join requests, labels, settings changed). */
+export function groupChanged(conversationId: number) {
+  broadcast({ type: 'group', conversationId });
+}
+
+/** You left or were removed: you're no longer among the members (WhatsApp Web stops reporting them). */
+export function dropSelfFromGroup(conv: ConversationRow) {
+  const c = getConversation(conv.id)!;
+  const members: string[] = c.group_members ? JSON.parse(c.group_members) : [];
+  const admins: string[] = c.group_admins ? JSON.parse(c.group_admins) : [];
+  setWaGroupMembers(c.id, members.filter((k) => k !== 'self'), admins.filter((k) => k !== 'self'));
+  emitConversation(c.id);
+}
+
+/** After a change you made: members, admins, name and description fresh, now. */
+export async function refreshWaGroupNow(conv: ConversationRow) {
+  groupNameTried.delete(conv.wa_id!);
+  await Promise.all([refreshGroup(conv).catch((e) => log.warn(`whatsapp: group members ${conv.wa_id}: ${(e as Error).message}`)), refreshGroupName(conv).catch(() => {})]);
+  emitConversation(conv.id);
+  groupChanged(conv.id);
+}
+
+export async function refreshGroup(conv: ConversationRow) {
   const parts = await waha.participants(conv.wa_id!);
   const members: string[] = [];
   const admins: string[] = [];
@@ -965,6 +989,13 @@ async function refreshGroupName(conv: ConversationRow) {
   const desc = descriptionOf(g);
   if (desc !== undefined && desc !== conv.group_description) setGroupDescription(conv.id, desc);
   if (name) getOrCreateWaChat(conv.wa_id!, name);
+  const md = g?.groupMetadata ?? g;
+  if (typeof md?.announce === 'boolean' || typeof md?.restrict === 'boolean') {
+    mergeGroupSettings(conv.id, {
+      sendMessages: typeof md.announce === 'boolean' ? (md.announce ? 'admins' : 'all') : undefined,
+      editInfo: typeof md.restrict === 'boolean' ? (md.restrict ? 'admins' : 'all') : undefined,
+    });
+  }
   if (name || desc !== undefined) emitConversation(conv.id);
 }
 
@@ -1119,14 +1150,23 @@ async function handleEvent(e: Json) {
       await recordCall(p.from, String(p.id), !!p.isVideo, outcome, Number(p.timestamp) * 1000 || Date.now());
       return;
     }
+    case 'group.v2.join': // you joined, or made, a group
+    case 'group.v2.leave': // you left or were removed
     case 'group.v2.update':
-    case 'group.v2.participants': {
-      const id = p?.group?.id ?? p?.id;
-      if (typeof id === 'string' && id.endsWith('@g.us')) {
-        if (p?.group?.subject) getOrCreateWaChat(id, p.group.subject);
+    case 'group.v2.participants':
+    case 'group.v2.participants.tag':
+    case 'group.join-request': {
+      const id = bare(p?.group?.id ?? p?.groupId ?? p?.id);
+      if (id.endsWith('@g.us')) {
+        const subject = p?.group?.subject ?? p?.group?.name;
+        if (subject) getOrCreateWaChat(id, subject);
         const desc = descriptionOf(p?.group);
         if (desc !== undefined) setGroupDescription(getOrCreateWaChat(id).id, desc);
-        refreshGroupSoon(id);
+        const conv = getOrCreateWaChat(id);
+        const removed = e.event === 'group.v2.leave' || (p?.type === 'leave' || p?.type === 'remove') && (p?.participants ?? []).some((x: Json) => self.isWa(bare(x?.id ?? x)));
+        if (removed) dropSelfFromGroup(conv);
+        else refreshGroupSoon(id);
+        groupChanged(conv.id);
       }
       return;
     }
@@ -1881,6 +1921,13 @@ let avatarWarnings = 0;
 export function waAvatarCached(jid: string): string | null {
   const file = path.join(avatarDir, 'wa-' + crypto.createHash('sha256').update(jid).digest('hex').slice(0, 32));
   return fs.existsSync(file) ? file : null;
+}
+
+/** A picture was changed here: drop the cached copy (and bump its URL so browsers do too). */
+export function forgetWaAvatar(jid: string) {
+  const file = path.join(avatarDir, 'wa-' + crypto.createHash('sha256').update(jid).digest('hex').slice(0, 32));
+  for (const f of [file, file + '.none', file + '.fail']) fs.rmSync(f, { force: true });
+  kvSet(`wa_avatar_rev:${jid}`, String(Number(kvGet(`wa_avatar_rev:${jid}`) ?? 0) + 1));
 }
 
 export function waAvatar(jid: string): Promise<string | null> {

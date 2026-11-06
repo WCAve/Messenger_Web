@@ -43,6 +43,8 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - One sticker picker for every chat: Signal packs, your own packs and recent stickers. A **sticker manager** (⋮ menu, or the gear in the picker) puts WhatsApp stickers into your own packs: received ones, ones imported from the backup folder, or your own images. Signal packs go as Signal stickers in Signal chats and as WhatsApp stickers in WhatsApp chats; your own packs go as WhatsApp stickers in WhatsApp chats and as a picture in Signal chats (Signal's API can't upload packs)
 - Settings: your profile (picture, first name, about), theme (System, Light, Dark blue, or Dark green with WhatsApp-like colours), Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
 - Change a group's picture from Group info (if the group lets you)
+- Groups, the same on Signal and WhatsApp: make a new group (⋮ → New group, or New chat → New group); in Group info change the name, description and picture, add and remove people, make or dismiss admins, choose who may edit the info, send messages and add members, approve new members, the invite link, join requests, and leaving. Joining with a link is WhatsApp only (Signal's API can't); Signal's API also can't make a new invite link or remove a group picture
+- WhatsApp member labels: shown next to names in Group info; set your own there
 - Resizable chat list: drag the divider, or double-click it to reset
 - Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
 - Group and contact info: description, members and admins, profile pictures, shared media, docs and links
@@ -236,6 +238,7 @@ server/src
   avatars.ts      profile pictures and group avatars, cached on disk
   stickers.ts     sticker packs: keys from signal-cli, download + decrypt from Signal's CDN, disk cache
   stickerpacks.ts your own sticker packs (WhatsApp stickers grouped for the picker)
+  groups.ts       group management for both networks (create, join, members, admins, settings, link, requests, labels)
   settings.ts     server-wide settings (env defaults, overridable from the UI)
   store.ts        SQLite access and the JSON shapes sent to the browser
   signal-api.ts   signal-cli-rest-api client

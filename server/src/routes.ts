@@ -9,6 +9,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { waha } from './waha-api.js';
+import { groupRoutes } from './groups.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
@@ -1177,5 +1178,6 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     sendFile(ctx.res, file, headers, ctx.req.method === 'HEAD');
   });
 
+  groupRoutes(r);
   return r;
 }

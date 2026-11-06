@@ -3200,3 +3200,289 @@ button.stk-pack-head {
 .stk-link input {
   flex: 1;
 }
+
+/* ---------- group management ---------- */
+.editable {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+.panel-section .editable {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.panel-section .editable > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.editable.editing {
+  width: 100%;
+}
+.editable.editing input,
+.editable.editing textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 0;
+  border-bottom: 2px solid var(--ultra);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+}
+.editable.editing small {
+  font-size: 11px;
+}
+.icon-btn.small {
+  width: 32px;
+  height: 32px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+}
+.member-row > .member {
+  flex: 1;
+  min-width: 0;
+}
+.member-label {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--haze);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+.member-menu-wrap {
+  position: relative;
+}
+.member-menu-btn {
+  opacity: 0.6;
+}
+.member-row:hover .member-menu-btn,
+.member-menu-btn[aria-expanded='true'] {
+  opacity: 1;
+}
+.member-menu {
+  right: 0;
+  top: 100%;
+  min-width: 200px;
+}
+.row-menu .danger,
+.member.danger {
+  color: var(--danger, #d93025);
+}
+.round-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--ultra);
+  color: #fff;
+  flex: none;
+}
+.member.danger .round-icon {
+  background: none;
+  color: inherit;
+}
+.add-member-btn,
+.member.danger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  background: none;
+  padding: 6px 0;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.add-member-btn strong {
+  color: var(--ultra);
+  font-weight: 500;
+}
+.action-row .round-icon {
+  width: 49px;
+  height: 49px;
+}
+.request-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.request-row .member {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.btn.small {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+.link-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+.link-row .link-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ultra);
+}
+.group-settings .setting-row select {
+  padding: 4px 8px;
+  border: 1px solid var(--mist);
+  border-radius: 8px;
+  background: var(--porcelain);
+  color: inherit;
+}
+.setting-text {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+.setting-text small {
+  color: var(--ink-3);
+}
+.label-row {
+  display: flex;
+  gap: 8px;
+}
+.label-row input,
+.group-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--mist);
+  border-radius: 8px;
+  background: var(--porcelain);
+  color: inherit;
+  font: inherit;
+}
+.people-picker {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.add-members .people-picker {
+  max-height: 420px;
+}
+.people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.add-members .person {
+  padding: 8px 0;
+}
+.person:hover,
+.person.on {
+  background: var(--haze);
+}
+.person input {
+  accent-color: var(--ultra);
+  width: 18px;
+  height: 18px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  border-radius: 14px;
+  border: 0;
+  background: var(--haze);
+  color: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.network-switch {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+.network-switch button {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--mist);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.network-switch button.on {
+  background: var(--ultra);
+  border-color: var(--ultra);
+  color: #fff;
+}
+.sticky-actions {
+  padding: 12px 16px;
+  border-top: 1px solid var(--mist);
+  display: flex;
+  justify-content: flex-end;
+}
+.new-group-form {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px 16px;
+}
+.new-group-form .group-name-input {
+  width: 100%;
+}
+.new-group-form .profile-photo img {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.new-group-form small {
+  text-align: center;
+}
+.join-link {
+  padding: 4px 0 10px;
+  border-bottom: 1px solid var(--mist);
+}
+.join-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+.join-preview .member-text {
+  flex: 1;
+  min-width: 0;
+}
+.panel-section .panel-note {
+  padding: 4px 0;
+}
+.panel-section h4 {
+  margin-top: 0;
+}

@@ -66,7 +66,19 @@ export interface ApiGroup {
   blocked: boolean;
   member?: boolean;
   admins?: string[];
+  pending_invites?: string[];
+  pending_requests?: string[];
+  invite_link?: string;
+  permissions?: Partial<SignalGroupPermissions>;
 }
+
+export type SignalPermission = 'only-admins' | 'every-member';
+export interface SignalGroupPermissions {
+  add_members: SignalPermission;
+  edit_group: SignalPermission;
+  send_messages: SignalPermission;
+}
+export type SignalLinkState = 'disabled' | 'enabled' | 'enabled-with-approval';
 
 export const signalApi = {
   about: () => call<About>('GET', '/v1/about', undefined, 10_000),
@@ -108,8 +120,17 @@ export const signalApi = {
   /** Note: the API removes your profile picture when base64_avatar is left out. */
   updateProfile: (number: string, body: { name: string; about?: string; base64_avatar?: string }) =>
     call<void>('PUT', `/v1/profiles/${enc(number)}`, body, 120_000),
-  updateGroup: (number: string, groupId: string, body: { base64_avatar?: string; name?: string; description?: string; expiration_time?: number }) =>
+  updateGroup: (number: string, groupId: string, body: { base64_avatar?: string; name?: string; description?: string; expiration_time?: number; group_link?: SignalLinkState; permissions?: Partial<SignalGroupPermissions> }) =>
     call<void>('PUT', `/v1/groups/${enc(number)}/${enc(groupId)}`, body, 120_000),
+  group: (number: string, groupId: string) => call<ApiGroup>('GET', `/v1/groups/${enc(number)}/${enc(groupId)}`, undefined, 30_000),
+  createGroup: (number: string, body: { name: string; members: string[]; description?: string; group_link?: SignalLinkState; permissions?: SignalGroupPermissions }) =>
+    call<{ id: string }>('POST', `/v1/groups/${enc(number)}`, body, 120_000),
+  /** Adding someone who asked to join through the link approves them; removing them turns them down. */
+  groupMembers: (number: string, groupId: string, add: boolean, members: string[]) =>
+    call<void>(add ? 'POST' : 'DELETE', `/v1/groups/${enc(number)}/${enc(groupId)}/members`, { members }, 120_000),
+  groupAdmins: (number: string, groupId: string, add: boolean, admins: string[]) =>
+    call<void>(add ? 'POST' : 'DELETE', `/v1/groups/${enc(number)}/${enc(groupId)}/admins`, { admins }, 120_000),
+  quitGroup: (number: string, groupId: string) => call<void>('POST', `/v1/groups/${enc(number)}/${enc(groupId)}/quit`, undefined, 120_000),
 
   /** Note: in json-rpc mode a timer of 0 is dropped by the API, so this can't switch the timer off. */
   updateContact: (number: string, body: { recipient: string; expiration_in_seconds?: number }) =>

@@ -46,6 +46,7 @@ export interface State {
   forwarding: Message | null;
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
+  groupTick: Record<number, number>; // bumped when a group's details change
   /** The sticker manager is open (in the chat list column). */
   stickerManager: boolean;
 }
@@ -64,6 +65,7 @@ let state: State = {
   activeId: null,
   panel: null,
   receiptTick: 0,
+  groupTick: {},
   stickerManager: false,
   drafts: loadDrafts(),
   forwarding: null,
@@ -174,6 +176,9 @@ export function applyEvent(e: ServerEvent) {
       break;
     case 'remove':
       removeMessage(e.conversationId, e.messageId);
+      break;
+    case 'group':
+      setState((s) => ({ groupTick: { ...s.groupTick, [e.conversationId]: (s.groupTick[e.conversationId] ?? 0) + 1 } }));
       break;
     case 'receipt':
       setState((s) => ({ receiptTick: s.receiptTick + 1 }));

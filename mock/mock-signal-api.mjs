@@ -43,6 +43,16 @@ const GROUP = {
 const SEND_DELAY_MS = 1200; // like a real group send: receipts start arriving before it returns
 const GROUP_REST_ID = 'group.' + Buffer.from(GROUP.internal_id).toString('base64');
 
+// Groups by REST id. The API reports "edit group" with the "send messages" value (an upstream bug), like the real one.
+const sgroups = new Map([[GROUP_REST_ID, { id: GROUP_REST_ID, internal_id: GROUP.internal_id, name: GROUP.name, description: GROUP.description,
+  members: [SELF.number, PEOPLE.alice.number, PEOPLE.bob.number, PEOPLE.carol.number, DAVE.uuid, STRANGER_UUID], admins: [SELF.number, PEOPLE.bob.number],
+  pending_requests: [], pending_invites: [], link: 'disabled', permissions: { add_members: 'every-member', edit_group: 'every-member', send_messages: 'every-member' }, member: true }]]);
+function groupJson(g) {
+  return { name: g.name, description: g.description, id: g.id, internal_id: g.internal_id, members: g.members, blocked: false, member: g.member, admins: g.admins,
+    pending_requests: g.pending_requests, pending_invites: g.pending_invites, invite_link: g.link === 'disabled' ? '' : `https://signal.group/#Cj${g.internal_id.slice(0, 12)}`,
+    permissions: { add_members: g.permissions.add_members, edit_group: g.permissions.send_messages, send_messages: g.permissions.send_messages } };
+}
+
 let linked = process.env.MOCK_LINKED === '1';
 const sockets = new Set();
 const sent = [];
@@ -361,16 +371,60 @@ const server = http.createServer(async (req, res) => {
       sent.push({ path: p, method: m, name: b.name, about: b.about, avatarBytes: selfAvatar?.length ?? 0 });
       return json(res, 204);
     }
-    if (p.startsWith('/v1/groups/') && m === 'PUT') {
-      const b = await body(req);
-      if (b.base64_avatar) groupAvatar = Buffer.from(b.base64_avatar, 'base64');
-      if (b.expiration_time) timers.group = b.expiration_time;
-      sent.push({ path: p, method: m, avatarBytes: b.base64_avatar ? groupAvatar.length : 0, expiration_time: b.expiration_time });
-      return json(res, 204);
+    // ---------- groups (stateful) ----------
+    const gp = p.match(/^\/v1\/groups\/[^/]+(?:\/([^/]+))?(?:\/(members|admins|quit))?$/);
+    if (gp) {
+      const g = gp[1] ? sgroups.get(decodeURIComponent(gp[1])) : null;
+      if (gp[1] && !g) return json(res, 404, { error: 'No group with this id' });
+      const isAdmin = g && g.admins.includes(SELF.number);
+      const b = m === 'GET' ? {} : await body(req);
+      if (m === 'GET') return json(res, 200, g ? groupJson(g) : [...sgroups.values()].map(groupJson));
+      if (!g && m === 'POST') {
+        sent.push({ path: p, method: m, ...b });
+        const internal = Buffer.from('mockgroup' + sgroups.size + Date.now()).toString('base64');
+        const id = 'group.' + Buffer.from(internal).toString('base64');
+        sgroups.set(id, { id, internal_id: internal, name: b.name, description: b.description ?? '', members: [SELF.number, ...b.members], admins: [SELF.number], pending_requests: [], pending_invites: [], link: b.group_link ?? 'disabled', permissions: { add_members: 'every-member', edit_group: 'every-member', send_messages: 'every-member', ...(b.permissions ?? {}) }, member: true });
+        return json(res, 201, { id });
+      }
+      sent.push({ path: p, method: m, ...b, base64_avatar: undefined, avatarBytes: b.base64_avatar ? Buffer.from(b.base64_avatar, 'base64').length : 0 });
+      const deny = () => json(res, 400, { error: 'Failed to update group: Not allowed (permission denied)' });
+      if (gp[2] === 'quit') { g.members = g.members.filter((x) => x !== SELF.number); g.admins = g.admins.filter((x) => x !== SELF.number); g.member = false; return json(res, 204); }
+      if (gp[2] === 'members') {
+        if (m === 'POST' && !isAdmin && g.permissions.add_members !== 'every-member') return deny();
+        if (m === 'DELETE' && !isAdmin) return deny();
+        for (const x of b.members ?? []) {
+          g.pending_requests = g.pending_requests.filter((r) => r !== x);
+          if (m === 'POST' && !g.members.includes(x)) g.members.push(x);
+          if (m === 'DELETE') g.members = g.members.filter((r) => r !== x);
+        }
+        return json(res, 204);
+      }
+      if (gp[2] === 'admins') {
+        if (!isAdmin) return deny();
+        for (const x of b.admins ?? []) {
+          if (m === 'POST' && !g.admins.includes(x)) g.admins.push(x);
+          if (m === 'DELETE') g.admins = g.admins.filter((r) => r !== x);
+        }
+        return json(res, 204);
+      }
+      if (m === 'PUT') {
+        if ((b.name || b.description !== undefined || b.base64_avatar) && !isAdmin && g.permissions.edit_group === 'only-admins') return deny();
+        if ((b.permissions || b.group_link) && !isAdmin) return deny();
+        if (b.base64_avatar) groupAvatar = Buffer.from(b.base64_avatar, 'base64');
+        if (b.expiration_time) timers.group = b.expiration_time;
+        if (b.name) g.name = b.name;
+        if (typeof b.description === 'string') g.description = b.description;
+        if (b.group_link) g.link = b.group_link;
+        if (b.permissions) g.permissions = { ...g.permissions, ...b.permissions };
+        return json(res, 204);
+      }
     }
-    if (p.startsWith('/v1/groups/'))
-      return json(res, 200, [{ name: GROUP.name, description: GROUP.description, id: GROUP_REST_ID, internal_id: GROUP.internal_id,
-        members: [SELF.number, PEOPLE.alice.number, PEOPLE.bob.number, PEOPLE.carol.number, DAVE.uuid, STRANGER_UUID], blocked: false, member: true, admins: [SELF.number, PEOPLE.bob.number] }]);
+    if (p === '/mock/signal-join-request' && m === 'POST') {
+      const b = await body(req); // {who}
+      sgroups.get(GROUP_REST_ID).pending_requests.push(b.who);
+      return json(res, 201, {});
+    }
+    if (p === '/mock/signal-groups') return json(res, 200, Object.fromEntries(sgroups));
     if (p.startsWith('/v1/attachments/')) {
       const id = decodeURIComponent(p.split('/').pop());
       const [type, body] = id === 'mockgif1.mp4' ? ['video/mp4', GIF_MP4] : id === 'mockclip1.mp4' ? ['video/mp4', CLIP_MP4] : ['image/png', PHOTO];

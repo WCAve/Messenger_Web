@@ -40,6 +40,8 @@ export interface WaFile {
   data: string; // base64
 }
 
+export type WaGroupSetting = 'info-admin-only' | 'messages-admin-only' | 'member-add-mode' | 'membership-approval';
+
 export const waha = {
   version: () => call<{ version: string; engine: string; tier?: string }>('GET', '/api/server/version', undefined, 10_000),
   session: () => call<{ name: string; status: string; me?: { id: string; pushName?: string; lid?: string } | null; engine?: { engine?: string } }>(
@@ -78,6 +80,29 @@ export const waha = {
   groups: () => call<Json>('GET', `/api/${enc(S())}/groups`, undefined, 60_000),
   group: (groupId: string) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(groupId)}`, undefined, 20_000),
   participants: (groupId: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(groupId)}/participants/v2`),
+  // Group management. Participants are sent as [{id}] (a @c.us or @lid id).
+  createGroup: (name: string, ids: string[]) => call<Json>('POST', `/api/${enc(S())}/groups`, { name, participants: ids.map((id) => ({ id })) }, 120_000),
+  setGroupSubject: (g: string, subject: string) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/subject`, { subject }, 30_000),
+  setGroupDescription: (g: string, description: string) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/description`, { description }, 30_000),
+  setGroupPicture: (g: string, file: WaFile) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/picture`, { file }, 60_000),
+  deleteGroupPicture: (g: string) => call<Json>('DELETE', `/api/${enc(S())}/groups/${enc(g)}/picture`, undefined, 30_000),
+  groupMembers: (g: string, action: 'add' | 'remove', ids: string[]) =>
+    call<Json>('POST', `/api/${enc(S())}/groups/${enc(g)}/participants/${action}`, { participants: ids.map((id) => ({ id })) }, 60_000),
+  groupAdmins: (g: string, action: 'promote' | 'demote', ids: string[]) =>
+    call<Json>('POST', `/api/${enc(S())}/groups/${enc(g)}/admin/${action}`, { participants: ids.map((id) => ({ id })) }, 60_000),
+  groupSetting: (g: string, setting: WaGroupSetting) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(g)}/settings/security/${setting}`, undefined, 15_000),
+  setGroupSetting: (g: string, setting: WaGroupSetting, body: Json) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/settings/security/${setting}`, body, 30_000),
+  inviteCode: (g: string) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(g)}/invite-code`, undefined, 15_000),
+  revokeInviteCode: (g: string) => call<Json>('POST', `/api/${enc(S())}/groups/${enc(g)}/invite-code/revoke`, undefined, 30_000),
+  joinRequests: (g: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(g)}/participants/join-requests`, undefined, 15_000),
+  answerJoinRequests: (g: string, action: 'approve' | 'reject', ids: string[]) =>
+    call<Json>('POST', `/api/${enc(S())}/groups/${enc(g)}/participants/join-requests/${action}`, { participants: ids.map((id) => ({ id })) }, 60_000),
+  leaveGroup: (g: string) => call<Json>('POST', `/api/${enc(S())}/groups/${enc(g)}/leave`, undefined, 30_000),
+  joinInfo: (code: string) => call<Json>('GET', `/api/${enc(S())}/groups/join-info?code=${enc(code)}`, undefined, 20_000),
+  joinGroup: (code: string) => call<Json>('POST', `/api/${enc(S())}/groups/join`, { code }, 60_000),
+  // Member labels ("tags")
+  groupTags: (g: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(g)}/participants/v2/tags`, undefined, 15_000),
+  setMyGroupTag: (g: string, tag: string | null) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/participants/v2/tags/my`, { tag }, 30_000),
   chatPicture: (chatId: string) => call<{ url?: string | null }>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/picture`, undefined, 20_000),
   subscribePresence: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/presence/${enc(chatId)}/subscribe`, undefined, 15_000),
   checkExists: (phone: string) =>
@@ -131,7 +156,7 @@ export const waha = {
   },
 
   wsUrl(): string {
-    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'call.received', 'call.accepted', 'call.rejected', 'engine.event', 'chat.archive'];
+    const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'group.v2.join', 'group.v2.leave', 'group.v2.participants.tag', 'group.join-request', 'call.received', 'call.accepted', 'call.rejected', 'engine.event', 'chat.archive'];
     const q = new URLSearchParams({ session: S(), events: events.join(',') });
     if (config.wahaApiKey) q.set('x-api-key', config.wahaApiKey);
     return config.wahaUrl.replace(/^http/, 'ws') + '/ws?' + q.toString();

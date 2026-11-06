@@ -529,7 +529,8 @@ export function previewText(m: MessageRow): string {
 export function conversationDto(row: ConversationRow) {
   const conv = convById.get(row.id) ?? row; // always use the current row, callers may hold a stale one
   const last = lastMessageStmt.get(conv.id);
-  const members = conv.kind === 'group' ? groupMembers(conv).map((m) => ({ key: m.key, name: m.name })) : undefined;
+  const all = conv.kind === 'group' ? groupMembers(conv) : undefined;
+  const members = all?.map((m) => ({ key: m.key, name: m.name }));
   const peer = conv.kind === 'direct' ? findContact(conv.peer_uuid, conv.peer_number) : undefined;
   return {
     id: conv.id,
@@ -556,12 +557,35 @@ export function conversationDto(row: ConversationRow) {
     pinnedAt: conv.pinned_at ?? null,
     mutedUntil: conv.muted_until > Date.now() ? conv.muted_until : 0,
     expireTimer: conv.expire_timer || 0,
+    ...(all ? groupFlags(conv, all) : {}),
+  };
+}
+
+/** Group settings as last seen (group info shows them fresh; this keeps the composer right meanwhile). */
+export function mergeGroupSettings(conversationId: number, patch: Record<string, unknown>) {
+  const cur = kvGet(`gset:${conversationId}`);
+  const base = cur ? JSON.parse(cur) : { editInfo: 'all', sendMessages: 'all', addMembers: 'all', approveMembers: false };
+  const next = { ...base, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
+  if (JSON.stringify(next) !== JSON.stringify(base) || !cur) kvSet(`gset:${conversationId}`, JSON.stringify(next));
+}
+
+/** For the composer: are you still in the group, an admin, and may everyone send? */
+function groupFlags(conv: ConversationRow, all: GroupMember[]) {
+  const me = all.find((m) => m.key === 'self');
+  const settings = kvGet(`gset:${conv.id}`);
+  return {
+    left: !!conv.group_members && !me,
+    admin: !!me?.admin,
+    sendAdminsOnly: settings ? JSON.parse(settings).sendMessages === 'admins' : false,
   };
 }
 export type ConversationDto = ReturnType<typeof conversationDto>;
 
 function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string | null {
-  if (conv.network === 'whatsapp') return `/api/avatars/wa/${encodeURIComponent(conv.wa_id!)}.jpg`;
+  if (conv.network === 'whatsapp') {
+    const rev = kvGet(`wa_avatar_rev:${conv.wa_id}`);
+    return `/api/avatars/wa/${encodeURIComponent(conv.wa_id!)}.jpg${rev ? `?v=${rev}` : ''}`;
+  }
   // Groups: always offered; it 404s (and that is cached) when the group has no picture.
   if (conv.kind === 'group') return `/api/avatars/conversation/${conv.id}.jpg?v=${avatarRev('group', groupRecipientId(conv.group_id!))}`;
   const id = conv.peer_uuid || conv.peer_number;
@@ -576,6 +600,7 @@ export interface GroupMember {
   about: string | null;
   admin: boolean;
   avatar: string | null;
+  label?: string | null;
 }
 
 /** Group members: "You" first, then admins, then everyone else alphabetically; unknown people last. */
@@ -625,6 +650,11 @@ function waGroupMembers(conv: ConversationRow): GroupMember[] {
     };
   });
   const rank = (m: GroupMember) => (m.key === 'self' ? 0 : m.name === 'Unknown' ? 3 : m.admin ? 1 : 2);
+  const labels = kvGet(`glabels:${conv.id}`);
+  if (labels) {
+    const l: Record<string, string> = JSON.parse(labels);
+    for (const m of list) (m as GroupMember).label = l[m.key] ?? null;
+  }
   return list.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 

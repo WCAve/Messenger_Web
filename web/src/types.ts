@@ -54,7 +54,49 @@ export interface Conversation {
   expireTimer: number; // disappearing messages, seconds; 0 = off
   pinnedAt: number | null;
   mutedUntil: number; // ms; 0 = not muted
+  // groups only
+  left?: boolean; // you're no longer in it
+  admin?: boolean; // you're an admin
+  sendAdminsOnly?: boolean; // only admins may send messages
 }
+
+export type Who = 'all' | 'admins';
+export interface GroupSettings {
+  editInfo: Who;
+  sendMessages: Who;
+  addMembers: Who;
+  approveMembers: boolean;
+}
+export interface GroupPerson {
+  key: string;
+  name: string;
+  number: string | null;
+  avatar: string | null;
+}
+export interface GroupDetails {
+  network: Network;
+  member: boolean;
+  admin: boolean;
+  canEditInfo: boolean;
+  canAddMembers: boolean;
+  settings: GroupSettings | null;
+  inviteLink: string | null;
+  linkEnabled: boolean;
+  canResetLink: boolean;
+  requests: GroupPerson[];
+  invited: GroupPerson[];
+  labels: Record<string, string>;
+  myLabel: string | null;
+  labelsSupported: boolean;
+}
+export type GroupAction =
+  | { action: 'rename'; name: string }
+  | { action: 'describe'; description: string }
+  | { action: 'settings'; settings: Partial<GroupSettings> }
+  | { action: 'add' | 'remove' | 'promote' | 'demote' | 'approve' | 'reject'; members: string[] }
+  | { action: 'link'; op: 'reset' | 'enable' | 'disable' }
+  | { action: 'leave' }
+  | { action: 'label'; label: string | null };
 
 export interface Attachment {
   id: string;
@@ -79,6 +121,7 @@ export interface Member {
   about: string | null;
   admin: boolean;
   avatar: string | null;
+  label?: string | null; // member label (WhatsApp)
 }
 
 export interface MediaItem {
@@ -213,4 +256,5 @@ export type ServerEvent =
   | { type: 'typing'; conversationId: number; author: string; authorName: string; started: boolean; recording?: boolean }
   | { type: 'presence'; conversationId: number; online: boolean; lastSeen: number | null }
   | { type: 'receipt'; messageId: number }
-  | { type: 'remove'; conversationId: number; messageId: number };
+  | { type: 'remove'; conversationId: number; messageId: number }
+  | { type: 'group'; conversationId: number };

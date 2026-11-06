@@ -9,6 +9,7 @@ import { type NotifyState, notifyState, requestNotifications } from '../notifica
 import { setPrefs, usePrefs } from '../prefs';
 import { SettingsView } from './Settings';
 import { StickerManager } from './StickerManager';
+import { JoinByLink, NewGroup } from './GroupManage';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 import { Emojified } from '../emoji/render';
 
@@ -25,7 +26,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const typing = useStore((s) => s.typing);
   const account = useStore((s) => [s.signal.account, s.whatsapp.me].filter(Boolean).join(" · "));
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState<'list' | 'new' | 'settings' | 'archived'>('list');
+  const [mode, setMode] = useState<'list' | 'new' | 'group' | 'settings' | 'archived'>('list');
   const drafts = useStore((s) => s.drafts);
   const [menu, setMenu, menuRef] = useMenu();
   const [found, setFound] = useState<SearchResult[] | null>(null);
@@ -89,7 +90,8 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
     },
   };
 
-  if (mode === 'new') return <NewChat onClose={() => setMode('list')} />;
+  if (mode === 'new') return <NewChat onClose={() => setMode('list')} onNewGroup={() => setMode('group')} />;
+  if (mode === 'group') return <NewGroup onClose={() => setMode('list')} />;
   if (stickerManager) return <StickerManager />;
   if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
 
@@ -131,6 +133,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           </button>
           {menu && (
             <div className="menu" role="menu">
+              <button role="menuitem" onClick={() => (setMode('group'), setMenu(false))}>
+                <Icon name="group" size={18} /> New group
+              </button>
               <button role="menuitem" onClick={() => (setMode('settings'), setMenu(false))}>
                 <Icon name="gear" size={18} /> Settings
               </button>
@@ -534,7 +539,8 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
   );
 }
 
-function NewChat({ onClose }: { onClose: () => void }) {
+function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () => void }) {
+  const [joining, setJoining] = useState(false);
   const [dir, setDir] = useState<Awaited<ReturnType<typeof api.directory>> | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -591,6 +597,29 @@ function NewChat({ onClose }: { onClose: () => void }) {
       </form>
       {error && <p className="form-error pad">{error}</p>}
       <nav className="chat-list">
+        {!query && (
+          <>
+            <button className="chat-row action-row" onClick={onNewGroup}>
+              <span className="round-icon">
+                <Icon name="group" size={22} />
+              </span>
+              <span className="chat-row-main">
+                <span className="chat-title">New group</span>
+              </span>
+            </button>
+            {waOn && (
+              <button className="chat-row action-row" onClick={() => setJoining((j) => !j)} aria-expanded={joining}>
+                <span className="round-icon">
+                  <Icon name="link" size={22} />
+                </span>
+                <span className="chat-row-main">
+                  <span className="chat-title">Join a WhatsApp group with a link</span>
+                </span>
+              </button>
+            )}
+            {joining && <JoinByLink onJoined={onClose} />}
+          </>
+        )}
         {looksLikeNumber && signalOn && (
           <button className="chat-row" onClick={() => open({ number: typed })}>
             <Avatar name="#" seed={q} network={multi ? 'signal' : undefined} />
