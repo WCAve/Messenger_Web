@@ -22,7 +22,7 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 ## What works
 
 - Linking via QR code, right in the web UI
-- Chat list with unread counts, typing and delivery state
+- Chat list with unread counts, typing and delivery state; the unread total in the tab title and as a badge on the tab icon (muted chats left out)
 - Search: chats and messages from the chat list, or inside one chat (magnifier in the chat header); a result opens the chat at that message
 - Go to date: pick a day in the chat's search panel, or *Go to date…* in the chat menu, to jump to that day's first message
 - 1:1 and group chats, with history stored in SQLite

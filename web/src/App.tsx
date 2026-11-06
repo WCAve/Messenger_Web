@@ -1,4 +1,5 @@
 import { type CSSProperties, useEffect, useState } from 'react';
+import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';
 import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
 import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
@@ -73,9 +74,10 @@ function Main({ onLogout }: { onLogout: () => void }) {
     };
   }, []);
 
-  // Unread count in the tab title
+  // Unread count in the tab title and on the tab icon (muted chats don't count)
   useEffect(() => {
     document.title = totalUnread ? `(${totalUnread}) Messenger Web` : 'Messenger Web';
+    setFaviconCount(totalUnread);
   }, [totalUnread]);
 
   // A chat picked from "new chat" may not be in the list yet
