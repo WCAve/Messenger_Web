@@ -53,7 +53,7 @@ export const api = {
     call<{ sentAt: number | null; first: number | null; last: number | null }>('GET', `/api/conversations/${id}/date${ts !== undefined ? `?ts=${ts}` : ''}`),
   replyable: (messageId: number) => call<{ linkable: boolean }>('GET', `/api/messages/${messageId}/replyable`),
   backupInfo: () => call<{ file: BackupFile | null; folder: string; mediaWaiting: number }>('GET', '/api/whatsapp/backup'),
-  backupImport: (key?: string) => call<{ started: true }>('POST', '/api/whatsapp/backup/import', key ? { key } : {}),
+  backupImport: (key?: string, labelsOnly = false) => call<{ started: true }>('POST', '/api/whatsapp/backup/import', { ...(key ? { key } : {}), ...(labelsOnly ? { labelsOnly } : {}) }),
   backupMedia: () => call<{ started: true }>('POST', '/api/whatsapp/backup/media'),
   backupCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/backup/cancel'),
   whatsappImportCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/import/cancel'),

@@ -18,6 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { type Ctx, HttpError } from './http.js';
 import { localPath } from './attachments.js';
 import { config } from './config.js';
+import { applyWaLabels, recordBackupLabels, refreshWaLabels } from './groups.js';
 import { db } from './db.js';
 import {
   type Attachment,
@@ -25,6 +26,8 @@ import {
   type Reaction,
   freeTimestamp,
   getMessage,
+  findWaChat,
+  getConversation as getConversationRow,
   getOrCreateWaChat,
   insertMessage,
   nameForKey,
@@ -298,8 +301,62 @@ export function cancelBackupImport() {
   if (busy) stopRequested = true;
 }
 
+/**
+ * Member labels from the backup: WhatsApp Web (and so WAHA) only has labels set after it was linked;
+ * the phone has them all. Kept as the fallback: what WAHA reports, and live changes, win.
+ */
+export async function importMemberLabels(file: string): Promise<{ labels: number; groups: number }> {
+  const src = new DatabaseSync(file, { readOnly: true });
+  try {
+    const has = (t: string) => !!src.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+    if (!has('group_participant_user') || !columns(src, 'group_participant_user').has('label')) return { labels: 0, groups: 0 };
+    const pnOf = has('jid_map')
+      ? "(SELECT p.user || '@' || p.server FROM jid_map jm JOIN jid p ON p._id = jm.jid_row_id WHERE jm.lid_row_id = m._id LIMIT 1)"
+      : 'NULL';
+    const rows = src
+      .prepare(
+        `SELECT u.label AS label, g.user AS guser, g.server AS gserver, m.user AS muser, m.server AS mserver, ${pnOf} AS pn
+         FROM group_participant_user u JOIN jid g ON g._id = u.group_jid_row_id JOIN jid m ON m._id = u.user_jid_row_id
+         WHERE u.label IS NOT NULL AND u.label <> ''`,
+      )
+      .all() as { label: string; guser: string; gserver: string; muser: string; mserver: string; pn: string | null }[];
+    const perGroup = new Map<number, Record<string, string>>();
+    const pairs: [string, string][] = [];
+    let count = 0;
+    for (const r of rows) {
+      if (r.gserver !== 'g.us') continue;
+      const conv = findWaChat(`${r.guser}@g.us`);
+      if (!conv) continue;
+      const map = perGroup.get(conv.id) ?? {};
+      if (r.mserver === 'lid_me') map.self = r.label;
+      else {
+        const id = r.mserver === 'lid' ? `${r.muser}@lid` : `${r.muser}@c.us`;
+        map[id] = r.label;
+        const pn = r.pn ? bare(r.pn) : null;
+        if (pn && r.mserver === 'lid') {
+          map[pn] = r.label;
+          pairs.push([id, pn]);
+        }
+      }
+      perGroup.set(conv.id, map);
+      count++;
+    }
+    if (pairs.length) seedLids(pairs);
+    for (const [id, map] of perGroup) {
+      recordBackupLabels(id, map);
+      const conv = getConversationRow(id);
+      if (!conv) continue;
+      if (getWaState().status === 'connected') await refreshWaLabels(conv).catch(() => {});
+      else await applyWaLabels(conv, [], null).catch(() => {});
+    }
+    return { labels: count, groups: perGroup.size };
+  } finally {
+    src.close();
+  }
+}
+
 /** Start the import (decrypt first when needed). Runs in the background; progress in the WhatsApp state. */
-export function startBackupImport(keyHex: string | undefined) {
+export function startBackupImport(keyHex: string | undefined, labelsOnly = false) {
   if (busy) throw new HttpError(409, 'A backup import is already running');
   const file = currentFile();
   if (!file) throw new HttpError(400, 'Upload the backup file first');
@@ -319,12 +376,20 @@ export function startBackupImport(keyHex: string | undefined) {
         await decryptBackup(file, out, keyHex!, (done, total) => setBackup({ progress: { done, total } }));
       }
       setBackup({ stage: 'importing', progress: { done: 0, total: 0 } });
+      if (labelsOnly) {
+        const l = await importMemberLabels(out);
+        log.info(`whatsapp backup: ${l.labels} member labels in ${l.groups} groups`);
+        if (!plain) fs.rmSync(out, { force: true }); // the backup file stays, for a full import later
+        setBackup({ stage: 'done', progress: undefined, result: { chats: 0, messages: 0, reactions: 0, files: 0, skipped: 0, labelsOnly: true, labels: l.labels, labelGroups: l.groups }, file: backupFileInfo() });
+        return;
+      }
       const result = await importDatabase(out, (done, total) => setBackup({ progress: { done, total } }));
-      log.info(`whatsapp backup: ${result.messages} messages from ${result.chats} chats imported (${result.skipped} already here), ${result.reactions} reactions, ${result.files} files to add`);
+      const l = await importMemberLabels(out).catch((e) => (log.warn(`whatsapp backup: member labels: ${(e as Error).message}`), { labels: 0, groups: 0 }));
+      log.info(`whatsapp backup: ${result.messages} messages from ${result.chats} chats imported (${result.skipped} already here), ${result.reactions} reactions, ${result.files} files to add, ${l.labels} member labels`);
       // The decrypted database holds all your chats in the clear: don't keep it. Nor the backup.
       fs.rmSync(out, { force: true });
       fs.rmSync(file, { force: true });
-      setBackup({ stage: 'done', progress: undefined, result, file: backupFileInfo() });
+      setBackup({ stage: 'done', progress: undefined, result: { ...result, labels: l.labels, labelGroups: l.groups }, file: backupFileInfo() });
     } catch (e) {
       if (!plain) fs.rmSync(out, { force: true });
       const msg = (e as Error).message;

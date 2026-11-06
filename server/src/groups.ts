@@ -220,6 +220,8 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
   const g = c.wa_id!;
   // Labels come keyed by privacy id (@lid); members may be keyed by number. Match on every spelling we know.
   const byId = new Map<string, string>();
+  const backup = backupLabels(c.id);
+  for (const [id, tag] of Object.entries(backup)) if (id !== 'self') byId.set(id, tag); // the oldest source: overridden below
   const list = Array.isArray(tags) ? tags : [];
   for (const t of list) {
     const tag = t?.tag ?? t?.label;
@@ -236,6 +238,7 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
   let myTag = typeof mine === 'string' ? mine : typeof (mine as Json)?.tag === 'string' ? (mine as Json).tag : null;
   const myEvent = self.waIds.map((id) => labelEvents(c.id)[id]).find((v) => v !== undefined);
   if (myEvent !== undefined) myTag = myEvent;
+  else if (!myTag && backup.self && !self.waIds.some((id) => list.some((t: Json) => bare(t?.id ?? '') === id))) myTag = backup.self;
   const labels: Record<string, string> = {};
   for (const m of groupMembers(c)) {
     if (m.key === 'self' || !byId.size) continue;
@@ -257,6 +260,15 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
   if (tags !== null) labelLog(g, `${list.length} member label${list.length === 1 ? '' : 's'} from WhatsApp, ${Object.keys(labels).length} matched to members${myTag ? ' (yours included)' : ''}${list.length && Object.keys(labels).length < list.filter((t: Json) => t?.tag).length ? `; unmatched ids e.g. ${list.slice(0, 3).map((t: Json) => bare(t?.id ?? t?.participant?.id ?? '')).join(', ')}` : ''}`);
   storeLabels(c.id, labels);
   return { labels, myLabel };
+}
+
+function backupLabels(conversationId: number): Record<string, string> {
+  const v = kvGet(`glabels_bk:${conversationId}`);
+  return v ? JSON.parse(v) : {};
+}
+/** Labels read from an Android backup (id → label; "self" for yours): the fallback for what WAHA doesn't have. */
+export function recordBackupLabels(conversationId: number, map: Record<string, string>) {
+  kvSet(`glabels_bk:${conversationId}`, JSON.stringify(map));
 }
 
 function labelEvents(conversationId: number): Record<string, string | null> {

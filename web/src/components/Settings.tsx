@@ -339,10 +339,10 @@ function BackupImport() {
           Copy <code>Android/media/com.whatsapp/WhatsApp/Databases/msgstore.db.crypt15</code> from the phone and upload it below. Large file or slow connection? Put it in the
           <code>whatsapp-backup</code> folder inside Messenger Web's data folder instead (in the container: <code>{info?.folder ?? '/data/whatsapp-backup'}</code>).
         </li>
-        <li>Enter the key and import. Messages already here are skipped.</li>
+        <li>Enter the key and import. Messages already here are skipped. Group member labels come along; to get just those, use "Import member labels only".</li>
       </ol>
       <p className="muted setting-note">
-        Keep the key safe: it also opens your Google Drive backups, and without it you can't restore them. Messenger Web doesn't store it. The backup file and its decrypted copy are deleted after the import.
+        Keep the key safe: it also opens your Google Drive backups, and without it you can't restore them. Messenger Web doesn't store it. The decrypted copy is always deleted; the backup file too, after a full import.
       </p>
 
       <div className="setting-actions">
@@ -377,6 +377,14 @@ function BackupImport() {
           <button className="btn primary" disabled={running || (!plain && digits !== 64)} onClick={() => void run(async () => (await api.backupImport(plain ? undefined : key), setKey('')))}>
             Import backup
           </button>
+          <button
+            className="btn"
+            disabled={running || (!plain && digits !== 64)}
+            onClick={() => void run(async () => (await api.backupImport(plain ? undefined : key, true), setKey('')))}
+            title="Only the group member labels, not the messages. Quick, and the backup file stays for a full import later."
+          >
+            Import member labels only
+          </button>
         </div>
       )}
 
@@ -396,11 +404,17 @@ function BackupImport() {
         </p>
       )}
       {b?.stage === 'failed' && b.error && <p className="form-error setting-note">{b.error}</p>}
-      {b?.stage === 'done' && b.result && (
+      {b?.stage === 'done' && b.result?.labelsOnly && (
+        <p className="muted setting-note">
+          Imported {plural(b.result.labels ?? 0, 'member label')} in {plural(b.result.labelGroups ?? 0, 'group')}. Labels changed later on WhatsApp still win.
+        </p>
+      )}
+      {b?.stage === 'done' && b.result && !b.result.labelsOnly && (
         <p className="muted setting-note">
           Imported {b.result.messages.toLocaleString()} messages from {b.result.chats} chats
           {b.result.skipped ? ` (${plural(b.result.skipped, 'was', 'were')} here already)` : ''}
-          {b.result.reactions ? `, ${plural(b.result.reactions, 'reaction')}` : ''}.
+          {b.result.reactions ? `, ${plural(b.result.reactions, 'reaction')}` : ''}
+          {b.result.labels ? `, ${plural(b.result.labels, 'member label')}` : ''}.
           {b.result.mediaFound !== undefined ? ` Media: matched ${plural(b.result.mediaFound, 'file')}${b.result.mediaMissing ? `, ${b.result.mediaMissing.toLocaleString()} not in the folder` : ''}.` : ''}
         </p>
       )}

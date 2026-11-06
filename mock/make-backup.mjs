@@ -18,6 +18,8 @@ const db = new DatabaseSync(tmp);
 db.exec(`
 CREATE TABLE jid (_id INTEGER PRIMARY KEY, user TEXT, server TEXT, agent INTEGER, device INTEGER, type INTEGER, raw_string TEXT);
 CREATE TABLE jid_map (lid_row_id INTEGER PRIMARY KEY, jid_row_id INTEGER);
+CREATE TABLE group_participant_user (_id INTEGER PRIMARY KEY, group_jid_row_id INTEGER, user_jid_row_id INTEGER, rank INTEGER, pending INTEGER, add_timestamp INTEGER, label TEXT, join_method INTEGER, group_history_send_state INTEGER);
+CREATE TABLE group_participant_label_metadata (group_participant_user_row_id INTEGER, edit_time DATETIME);
 CREATE TABLE chat (_id INTEGER PRIMARY KEY, jid_row_id INTEGER UNIQUE, hidden INTEGER, subject TEXT, created_timestamp INTEGER, archived INTEGER);
 CREATE TABLE message (_id INTEGER PRIMARY KEY, chat_row_id INTEGER, from_me INTEGER, key_id TEXT, sender_jid_row_id INTEGER, status INTEGER,
   broadcast INTEGER, recipient_count INTEGER, participant_hash TEXT, origination_flags INTEGER, origin INTEGER, timestamp INTEGER,
@@ -42,6 +44,19 @@ jid.run(4, '77777777777777', 'lid', 0, '77777777777777@lid'); // Kees, by privac
 jid.run(5, '31655500077', 's.whatsapp.net', 0, '31655500077@s.whatsapp.net'); // …and his number
 jid.run(6, 'status', 'broadcast', 11, 'status@broadcast');
 db.prepare('INSERT INTO jid_map VALUES (4, 5)').run();
+// Member labels, keyed like a real phone backup: members by privacy id, you as "lid_me".
+jid.run(7, '33333333333333', 'lid', 0, '33333333333333@lid'); // Jan's privacy id
+db.prepare('INSERT INTO jid_map VALUES (7, 1)').run();
+jid.run(8, '99999999999999', 'lid_me', 0, '99999999999999@lid_me'); // you
+jid.run(9, '120363000000000002', 'g.us', 1, '120363000000000002@g.us'); // Buren
+jid.run(10, '22222222222222', 'lid', 0, '22222222222222@lid'); // Sanne's privacy id (not linked here)
+const gpu = db.prepare('INSERT INTO group_participant_user (_id, group_jid_row_id, user_jid_row_id, rank, pending, add_timestamp, label) VALUES (?, ?, ?, 0, 0, 0, ?)');
+gpu.run(1, 2, 7, 'Chef'); // Jan in Familie
+gpu.run(2, 2, 10, 'Oud label'); // Sanne in Familie: WhatsApp (WAHA) says "Organiser", which wins
+gpu.run(3, 2, 8, 'Oude ik'); // you in Familie: WAHA says "Papa", which wins
+gpu.run(4, 9, 8, 'Buurman'); // you in Buren: only the backup knows
+gpu.run(5, 9, 1, ''); // a removed label
+gpu.run(6, 9, 7, 'Kookt goed'); // Jan in Buren
 const chat = db.prepare('INSERT INTO chat (_id, jid_row_id, subject) VALUES (?, ?, ?)');
 chat.run(1, 1, null);
 chat.run(2, 2, 'Familie');

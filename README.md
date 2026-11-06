@@ -44,7 +44,7 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Settings: your profile (picture, first name, about), theme (System, Light, Dark blue, or Dark green with WhatsApp-like colours), Enter-to-send, notifications and their previews, read receipts and typing indicators, sign out everywhere
 - Change a group's picture from Group info (if the group lets you)
 - Groups, the same on Signal and WhatsApp: make a new group (⋮ → New group, or New chat → New group); in Group info change the name, description and picture, add and remove people, make or dismiss admins, choose who may edit the info, send messages and add members, approve new members, the invite link, join requests, and leaving. Joining with a link is WhatsApp only (Signal's API can't); Signal's API also can't make a new invite link or remove a group picture
-- WhatsApp member labels: shown next to names in Group info; set your own there
+- WhatsApp member labels: shown next to names in Group info and on group messages; set your own there. WhatsApp Web (and so WAHA) only knows labels set after it was linked: the Android backup import brings in the older ones (also on their own: "Import member labels only")
 - Resizable chat list: drag the divider, or double-click it to reset
 - Sending and receiving images, video, audio and files (paste, drag-and-drop or the paperclip)
 - Group and contact info: description, members and admins, profile pictures, shared media, docs and links

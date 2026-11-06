@@ -70,7 +70,7 @@ export interface BackupState {
   stage: 'idle' | 'decrypting' | 'importing' | 'media' | 'done' | 'failed';
   file?: { name: string; size: number; at: number; app?: string } | null;
   progress?: { done: number; total: number; phase?: 'scan' | 'copy' };
-  result?: { chats: number; messages: number; reactions: number; files: number; skipped: number; mediaFound?: number; mediaMissing?: number };
+  result?: { chats: number; messages: number; reactions: number; files: number; skipped: number; mediaFound?: number; mediaMissing?: number; labels?: number; labelGroups?: number; labelsOnly?: boolean };
   error?: string;
 }
 

@@ -439,7 +439,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return { file: backupFileInfo(), folder: backupDir, mediaWaiting: backupMediaWaiting() };
   });
   r.upload('/api/whatsapp/backup/upload', (ctx) => receiveBackupUpload(ctx));
-  r.post('/api/whatsapp/backup/import', (ctx) => startBackupImport(typeof ctx.body?.key === 'string' ? ctx.body.key : undefined));
+  r.post('/api/whatsapp/backup/import', (ctx) => startBackupImport(typeof ctx.body?.key === 'string' ? ctx.body.key : undefined, ctx.body?.labelsOnly === true));
   r.post('/api/whatsapp/backup/media', () => startMediaScan());
   r.post('/api/whatsapp/backup/cancel', () => (cancelBackupImport(), { ok: true }));
   r.post('/api/whatsapp/refresh', async () => {
