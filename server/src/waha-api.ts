@@ -102,6 +102,7 @@ export const waha = {
   joinGroup: (code: string) => call<Json>('POST', `/api/${enc(S())}/groups/join`, { code }, 60_000),
   // Member labels ("tags")
   groupTags: (g: string) => call<Json[]>('GET', `/api/${enc(S())}/groups/${enc(g)}/participants/v2/tags`, undefined, 15_000),
+  myGroupTag: (g: string) => call<Json>('GET', `/api/${enc(S())}/groups/${enc(g)}/participants/v2/tags/my`, undefined, 15_000),
   setMyGroupTag: (g: string, tag: string | null) => call<Json>('PUT', `/api/${enc(S())}/groups/${enc(g)}/participants/v2/tags/my`, { tag }, 30_000),
   chatPicture: (chatId: string) => call<{ url?: string | null }>('GET', `/api/${enc(S())}/chats/${enc(chatId)}/picture`, undefined, 20_000),
   subscribePresence: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/presence/${enc(chatId)}/subscribe`, undefined, 15_000),
@@ -124,6 +125,7 @@ export const waha = {
   archive: (chatId: string, on: boolean) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/${on ? 'archive' : 'unarchive'}`, undefined, 20_000),
   markUnread: (chatId: string) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/unread`, undefined, 15_000),
   about: (contactId: string) => call<{ about?: string | null } | null>('GET', `/api/contacts/about?session=${enc(S())}&contactId=${enc(contactId)}`, undefined, 10_000),
+  phoneToLid: (pn: string) => call<{ lid?: string | null; pn?: string }>('GET', `/api/${enc(S())}/lids/pn/${enc(pn)}`, undefined, 10_000),
   lidToPhone: (lid: string) => call<{ lid: string; pn?: string | null }>('GET', `/api/${enc(S())}/lids/${enc(lid)}`, undefined, 10_000),
 
   sendText: (chatId: string, text: string, opts: { reply_to?: string; mentions?: string[]; linkPreview?: boolean }) =>

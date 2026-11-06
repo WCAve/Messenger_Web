@@ -27,7 +27,7 @@ import {
   self,
 } from './store.js';
 import { type Json, type WaGroupSetting, waha } from './waha-api.js';
-import { bare, dropSelfFromGroup, forgetWaAvatar, getWaState, groupChanged, keyFor, refreshWaGroupNow, resolve } from './whatsapp.js';
+import { bare, dropSelfFromGroup, emitConversation, forgetWaAvatar, getWaState, groupChanged, keyFor, refreshWaGroupNow, resolve } from './whatsapp.js';
 
 type Who = 'all' | 'admins';
 export interface GroupSettings {
@@ -158,12 +158,13 @@ async function waDetails(c: ConversationRow): Promise<GroupDetails> {
   const member = isMember(c);
   const admin = isAdmin(c);
   const settingNames: WaGroupSetting[] = ['info-admin-only', 'messages-admin-only', 'member-add-mode', 'membership-approval'];
-  const [meta, info, msgs, add, appr, link, reqs, tags] = await Promise.all([
+  const [meta, info, msgs, add, appr, link, reqs, tags, mine] = await Promise.all([
     waha.group(g).catch(() => null),
     ...settingNames.map((s) => (member ? waha.groupSetting(g, s).catch(() => null) : Promise.resolve(null))),
     admin ? waha.inviteCode(g).catch(() => null) : Promise.resolve(null),
     admin ? waha.joinRequests(g).catch(() => null) : Promise.resolve(null),
-    member ? waha.groupTags(g).catch(() => null) : Promise.resolve(null),
+    member ? waha.groupTags(g).catch((e) => (labelLog(g, `labels unavailable: ${(e as Error).message}`), null)) : Promise.resolve(null),
+    member ? waha.myGroupTag(g).catch(() => null) : Promise.resolve(null),
   ]);
   const md: Json = (meta as Json)?.groupMetadata ?? meta ?? {};
   const infoAdmins = asBool(info, 'adminsOnly') ?? asBool(md, 'restrict');
@@ -185,17 +186,7 @@ async function waDetails(c: ConversationRow): Promise<GroupDetails> {
     const key = keyFor(jid);
     requests.push({ key, name: nameForKey(key), number: jid.endsWith('@c.us') ? '+' + jid.split('@')[0] : null, avatar: avatarUrlForKey(key) });
   }
-  const labels: Record<string, string> = {};
-  let myLabel: string | null = null;
-  for (const t of Array.isArray(tags) ? tags : []) {
-    const tag = t?.tag ?? t?.label;
-    const jid = await resolve(t?.id ?? t?.participant ?? t?.participantId);
-    if (typeof tag !== 'string' || !tag || !jid) continue;
-    const key = keyFor(jid);
-    labels[key] = tag;
-    if (key === 'self') myLabel = tag;
-  }
-  storeLabels(c.id, labels);
+  const { labels, myLabel } = await applyWaLabels(c, tags, mine);
   return {
     network: 'whatsapp',
     member,
@@ -212,6 +203,59 @@ async function waDetails(c: ConversationRow): Promise<GroupDetails> {
     myLabel,
     labelsSupported: member && tags !== null,
   };
+}
+
+const labelLogged = new Map<string, string>();
+/** One log line per group whenever what we learn about its labels changes (to see why one doesn't show). */
+function labelLog(g: string, text: string) {
+  if (labelLogged.get(g) === text) return;
+  labelLogged.set(g, text);
+  console.log(`whatsapp: ${g}: ${text}`);
+}
+
+
+/** Matches WhatsApp's member labels to the members and remembers them (members list and message names). */
+export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unknown): Promise<{ labels: Record<string, string>; myLabel: string | null }> {
+  const g = c.wa_id!;
+  // Labels come keyed by privacy id (@lid); members may be keyed by number. Match on every spelling we know.
+  const byId = new Map<string, string>();
+  const list = Array.isArray(tags) ? tags : [];
+  for (const t of list) {
+    const tag = t?.tag ?? t?.label;
+    if (typeof tag !== 'string' || !tag) continue;
+    const raw = bare(t?.id ?? t?.participant?.id ?? t?.participant ?? t?.participantId);
+    const pn = bare(t?.pn ?? t?.participant?.pn ?? '');
+    for (const id of [raw, pn, await resolve(raw)]) if (id) byId.set(id, tag);
+  }
+  const myTag = typeof mine === 'string' ? mine : typeof (mine as Json)?.tag === 'string' ? (mine as Json).tag : null;
+  const labels: Record<string, string> = {};
+  for (const m of groupMembers(c)) {
+    if (m.key === 'self' || !byId.size) continue;
+    const jid = m.key.slice(3);
+    let label = [jid, kvGet(`lidof:${jid}`), kvGet(`lid:${jid}`)].map((x) => (x ? byId.get(x) : undefined)).find(Boolean);
+    if (!label && jid.endsWith('@c.us') && kvGet(`lidof:${jid}`) === undefined) {
+      // Not linked yet: ask which privacy id this number has (remembered, so only once per person).
+      const lid = await waha.phoneToLid(jid).then((r) => (r?.lid ? bare(r.lid) : ''), () => null);
+      if (lid !== null) {
+        kvSet(`lidof:${jid}`, lid);
+        if (lid) kvSet(`lid:${lid}`, jid);
+        label = lid ? byId.get(lid) : undefined;
+      }
+    }
+    if (label) labels[m.key] = label;
+  }
+  const myLabel: string | null = myTag || (self.waIds.map((id) => byId.get(id)).find(Boolean) ?? null);
+  if (myLabel) labels.self = myLabel;
+  if (tags !== null) labelLog(g, `${list.length} member label${list.length === 1 ? '' : 's'} from WhatsApp, ${Object.keys(labels).length} matched to members${myTag ? ' (yours included)' : ''}${list.length && Object.keys(labels).length < list.filter((t: Json) => t?.tag).length ? `; unmatched ids e.g. ${list.slice(0, 3).map((t: Json) => bare(t?.id ?? t?.participant?.id ?? '')).join(', ')}` : ''}`);
+  storeLabels(c.id, labels);
+  return { labels, myLabel };
+}
+
+/** Background refresh (group changes, start-up): labels without opening group info. */
+export async function refreshWaLabels(c: ConversationRow) {
+  if (!isMember(c)) return;
+  const [tags, mine] = await Promise.all([waha.groupTags(c.wa_id!).catch(() => null), waha.myGroupTag(c.wa_id!).catch(() => null)]);
+  if (tags !== null) await applyWaLabels(c, tags, mine);
 }
 
 // ---------- Signal ----------
@@ -255,7 +299,10 @@ export function groupLabels(conversationId: number): Record<string, string> {
   return v ? JSON.parse(v) : {};
 }
 function storeLabels(conversationId: number, labels: Record<string, string>) {
-  kvSet(`glabels:${conversationId}`, JSON.stringify(labels));
+  const next = JSON.stringify(labels);
+  if (kvGet(`glabels:${conversationId}`) === next) return;
+  kvSet(`glabels:${conversationId}`, next);
+  emitConversation(conversationId); // message names show labels too
 }
 
 // ---------- actions ----------

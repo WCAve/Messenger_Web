@@ -177,12 +177,13 @@ const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
 const ABOUT = { [PEOPLE.jan.id]: 'Aan het fietsen 🚲' };
+const SANNE_LID = '22222222222222@lid';
 // Group state: the two seeded groups start with you (admin), Jan and Sanne (superadmin).
 const groups = new Map();
 function groupState(id) {
   if (!groups.has(id) && [GROUP.id, GROUP2.id].includes(id)) {
     const base = id === GROUP.id ? GROUP : GROUP2;
-    groups.set(id, { id, name: base.name, parts: [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }], msgAdmins: false, infoAdmins: false, addAll: false, approval: false, invite: 'FamilieInvite1234567' + (id === GROUP.id ? 'A' : 'B'), requests: [], tags: id === GROUP.id ? { [PEOPLE.sanne.id]: 'Organiser' } : {} });
+    groups.set(id, { id, name: base.name, parts: [{ id: ME.id, role: 'admin' }, { id: PEOPLE.jan.id, role: 'participant' }, { id: PEOPLE.sanne.id, role: 'superadmin' }], msgAdmins: false, infoAdmins: false, addAll: false, approval: false, invite: 'FamilieInvite1234567' + (id === GROUP.id ? 'A' : 'B'), requests: [], tags: id === GROUP.id ? { [SANNE_LID]: 'Organiser', [ME.lid]: 'Papa' } : {} });
   }
   return groups.get(id) ?? null;
 }
@@ -453,7 +454,7 @@ const server = http.createServer(async (req, res) => {
           case '/participants/join-requests/approve': for (const x of ids(b)) { g.requests = g.requests.filter((r) => r !== x); g.parts.push({ id: x, role: 'participant' }); } changed('add', ids(b)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
           case '/participants/join-requests/reject': g.requests = g.requests.filter((r) => !ids(b).includes(r)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
           case '/leave': g.parts = g.parts.filter((q) => q.id !== ME.id); setTimeout(() => emit('group.v2.leave', { group: { id: g.id } }), 50); break;
-          case '/participants/v2/tags/my': if (b.tag) g.tags[ME.id] = b.tag; else delete g.tags[ME.id]; setTimeout(() => emit('group.v2.participants.tag', { group: { id: g.id }, participant: ME.id, tag: b.tag }), 50); break;
+          case '/participants/v2/tags/my': if (b.tag) g.tags[ME.lid] = b.tag; else delete g.tags[ME.lid]; setTimeout(() => emit('group.v2.participants.tag', { group: { id: g.id }, participant: ME.id, tag: b.tag }), 50); break;
           default: return json(res, 404, { message: 'mock: unknown group call ' + rest });
         }
         return json(res, 200, { success: true });
@@ -462,7 +463,8 @@ const server = http.createServer(async (req, res) => {
       if (setting) return json(res, 200, { 'info-admin-only': { adminsOnly: g.infoAdmins }, 'messages-admin-only': { adminsOnly: g.msgAdmins }, 'member-add-mode': { membersCanAddNewMember: g.addAll }, 'membership-approval': { newMembersApprovalRequired: g.approval } }[setting[1]] ?? {});
       if (rest === '/invite-code') return amAdmin(g) ? json(res, 200, `https://chat.whatsapp.com/${g.invite}`) : json(res, 403, { message: 'not admin' });
       if (rest === '/participants/join-requests') return json(res, 200, g.requests.map((id) => ({ id: { _serialized: id }, requestMethod: 'InviteLink', t: Math.floor(Date.now() / 1000) })));
-      if (rest === '/participants/v2/tags') return json(res, 200, Object.entries(g.tags).map(([id, tag]) => ({ id, tag })));
+      if (rest === '/participants/v2/tags') return json(res, 200, Object.entries(g.tags).map(([id, tag]) => ({ id, tag, timestamp: 1700000000 })));
+      if (rest === '/participants/v2/tags/my') return json(res, 200, { id: ME.lid, tag: g.tags[ME.lid] ?? null, timestamp: 1700000000 });
       if (rest === '/picture') return json(res, 200, { url: null });
     }
     if (gid && !g) return json(res, 404, { message: 'group not found' });
@@ -481,6 +483,11 @@ const server = http.createServer(async (req, res) => {
       if (b.myRole) for (const q of x.parts) if (q.id === ME.id) q.role = b.myRole;
       emit('group.v2.update', { group: { id: x.id, subject: x.name } });
       return json(res, 201, {});
+    }
+    const bypn = p.match(new RegExp(`^/api/${SESSION}/lids/pn/([^/]+)$`));
+    if (bypn) {
+      const pn = decodeURIComponent(bypn[1]);
+      return json(res, 200, { pn, lid: pn === PEOPLE.sanne.id ? SANNE_LID : pn === ME.id ? ME.lid : null });
     }
     const lid = p.match(new RegExp(`^/api/${SESSION}/lids/([^/]+)$`));
     if (lid) {

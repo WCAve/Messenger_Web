@@ -48,6 +48,7 @@ import {
   waContact,
   waNumberOf,
 } from './store.js';
+import { refreshWaLabels } from './groups.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
 export type WaStatus = 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
@@ -435,7 +436,9 @@ function refreshGroupSoon(jid: string) {
       groupRefreshPending.delete(jid);
       const conv = getOrCreateWaChat(jid);
       groupNameTried.delete(jid); // a change came in: name, description and settings fresh too
-      Promise.all([refreshGroup(conv).catch(() => {}), refreshGroupName(conv).catch(() => {})]).then(() => (emitConversation(conv.id), groupChanged(conv.id)));
+      Promise.all([refreshGroup(conv).catch(() => {}), refreshGroupName(conv).catch(() => {})])
+        .then(() => refreshWaLabels(getConversation(conv.id)!).catch(() => {}))
+        .then(() => (emitConversation(conv.id), groupChanged(conv.id)));
     }, 2000),
   );
 }

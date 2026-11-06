@@ -530,7 +530,7 @@ export function conversationDto(row: ConversationRow) {
   const conv = convById.get(row.id) ?? row; // always use the current row, callers may hold a stale one
   const last = lastMessageStmt.get(conv.id);
   const all = conv.kind === 'group' ? groupMembers(conv) : undefined;
-  const members = all?.map((m) => ({ key: m.key, name: m.name }));
+  const members = all?.map((m) => ({ key: m.key, name: m.name, ...(m.label ? { label: m.label } : {}) }));
   const peer = conv.kind === 'direct' ? findContact(conv.peer_uuid, conv.peer_number) : undefined;
   return {
     id: conv.id,

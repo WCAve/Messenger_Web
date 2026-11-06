@@ -390,6 +390,7 @@ function MessageList({
   const dividerId = openInfo.current.dividerId;
 
   const items: ReactNode[] = [];
+  const labels = new Map((conversation.members ?? []).filter((x) => x.label).map((x) => [x.key, x.label!]));
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
     if (!prev || !sameDay(prev.sentAt, m.sentAt)) {
@@ -415,6 +416,7 @@ function MessageList({
         key={m.id}
         m={m}
         group={conversation.kind === 'group'}
+        label={labels.get(m.author)}
         network={conversation.network}
         continued={continued}
         selected={selected === m.id}
@@ -552,6 +554,7 @@ function GifVideo({ a, onLoad }: { a: Attachment; onLoad?: () => void }) {
 const MessageItem = memo(function MessageItem({
   m,
   group,
+  label,
   network,
   continued,
   selected,
@@ -565,6 +568,7 @@ const MessageItem = memo(function MessageItem({
 }: {
   m: Message;
   group: boolean;
+  label?: string;
   network: Network;
   continued: boolean;
   selected: boolean;
@@ -626,6 +630,7 @@ const MessageItem = memo(function MessageItem({
         {group && !m.outgoing && !continued && (
           <div className="author" style={{ ['--hue' as string]: hueFor(m.author) }}>
             <Emojified text={m.authorName} />
+            {label && <span className="author-label">{label}</span>}
           </div>
         )}
         {!!m.forwarded && !m.deleted && (
