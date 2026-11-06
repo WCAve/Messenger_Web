@@ -487,6 +487,17 @@ export function renderMentions(text: string | null | undefined): string | null {
 
 function mentionName(key: string): string {
   if (key === 'self') return getSelfProfile()?.givenName || 'You';
+  if (key.startsWith('wa:')) {
+    const jid = key.slice(3);
+    const c = waByJid.get(jid);
+    if (!c?.name && !c?.push_name) {
+      // A privacy id (or one stored as if it were a number): the person behind it, once we know.
+      const digits = jid.split('@')[0];
+      const pn = kvGet(`lid:${digits}@lid`);
+      if (pn) return self.isWa(pn) ? getSelfProfile()?.givenName || 'You' : waContactName(pn);
+      if (jid.endsWith('@lid') || !waNumberOf(jid)) return 'Unknown';
+    }
+  }
   return nameForKey(key);
 }
 

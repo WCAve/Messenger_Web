@@ -303,9 +303,18 @@ async function afterConnect() {
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
   kvSet('wa_directory_v1', 'done');
   if (kvGet('wa_hd_pairs_v1') !== 'done') {
-    const n = await mergeStoredHdPairs().catch((e) => (log.warn(`whatsapp: HD pairs: ${(e as Error).message}`), -1));
-    if (n >= 0) kvSet('wa_hd_pairs_v1', 'done');
-    if (n > 0) log.info(`whatsapp: merged ${n} HD photo/video pair${n === 1 ? '' : 's'} that showed twice`);
+    const r = await mergeStoredHdPairs().catch((e) => (log.warn(`whatsapp: HD pairs: ${(e as Error).message}`), null));
+    if (r) {
+      if (!r.unchecked) kvSet('wa_hd_pairs_v1', 'done');
+      log.info(`whatsapp: HD photo/video pairs: ${r.candidates} to check, ${r.merged} merged${r.unchecked ? `, ${r.unchecked} WhatsApp Web couldn't answer for (tried again next start)` : ''}`);
+    }
+  }
+  if (kvGet('wa_mention_lids_v1') !== 'done') {
+    const r = await linkLidsForOldMentions().catch((e) => (log.warn(`whatsapp: mentions: ${(e as Error).message}`), null));
+    if (r) {
+      kvSet('wa_mention_lids_v1', 'done');
+      if (r.groups) log.info(`whatsapp: mentions without a name in ${r.groups} groups: linked ${r.linked} members' privacy ids`);
+    }
   }
   setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
   if (kvGet(HISTORY_KEY) === 'done') return;
@@ -679,28 +688,109 @@ const EXT: Record<string, string> = {
   'video/mp4': '.mp4', 'audio/ogg': '.ogg', 'audio/mpeg': '.mp3', 'audio/mp4': '.m4a', 'application/pdf': '.pdf',
 };
 
+/**
+ * Mentions name people by privacy id, members are often known by number, and WhatsApp Web can't
+ * always say which number a privacy id belongs to. Ask the other way round, for each member of the
+ * group: which privacy id has this number? Remembered, so once per person; then mentions show names.
+ */
+const lidsLinked = new Map<string, number>();
+export async function linkGroupLids(conv: ConversationRow): Promise<number> {
+  const g = conv.wa_id!;
+  if ((lidsLinked.get(g) ?? 0) > Date.now() - 6 * 3600_000) return 0;
+  lidsLinked.set(g, Date.now());
+  const members: string[] = conv.group_members ? JSON.parse(conv.group_members) : [];
+  let linked = 0;
+  for (const k of members) {
+    const jid = k.startsWith('wa:') ? k.slice(3) : '';
+    if (!jid.endsWith('@c.us') || kvGet(`lidof:${jid}`) !== undefined) continue;
+    const lid = await waha.phoneToLid(jid).then((r) => (r?.lid ? bare(r.lid) : ''), () => null);
+    if (lid === null) continue; // try again another time
+    kvSet(`lidof:${jid}`, lid);
+    if (lid) {
+      seedLids([[lid, jid]]);
+      linked++;
+    }
+  }
+  if (linked) {
+    // Messages that show a privacy id get their names now.
+    const rows = db.prepare<[number], { id: number }>("SELECT id FROM messages WHERE conversation_id = ? AND ranges LIKE '%@lid%' ORDER BY id DESC LIMIT 500").all(conv.id);
+    for (const r of rows) {
+      const row = getMessage(r.id);
+      if (row) emitMessage(row);
+    }
+  }
+  return linked;
+}
+
+/**
+ * One-off, once connected: groups with mentions that show a privacy id or a made-up number get their
+ * members' privacy ids looked up.
+ */
+export async function linkLidsForOldMentions() {
+  const rows = db
+    .prepare<[], { conversation_id: number; ranges: string }>("SELECT conversation_id, ranges FROM messages WHERE ranges LIKE '%\"mentions\"%' AND ranges LIKE '%wa:%'")
+    .all();
+  const groups = new Set<number>();
+  for (const r of rows) {
+    try {
+      for (const mm of (JSON.parse(r.ranges).mentions ?? []) as { key: string }[]) {
+        const jid = mm.key?.startsWith('wa:') ? mm.key.slice(3) : '';
+        if (!jid) continue;
+        const c = waContact(jid);
+        if (!c?.name && !c?.push_name && !kvGet(`lid:${jid.split('@')[0]}@lid`)) groups.add(r.conversation_id);
+      }
+    } catch {
+      /* not JSON */
+    }
+  }
+  let linked = 0;
+  for (const id of groups) {
+    const conv = getConversation(id);
+    if (conv?.network === 'whatsapp' && conv.kind === 'group' && state.status === 'connected') linked += await linkGroupLids(conv);
+  }
+  return { groups: groups.size, linked };
+}
+
 /** WhatsApp text → stored body: formatting markers become styles, "@<number>" becomes a real mention. */
-export async function richFromWa(text: string | null | undefined, conv: ConversationRow): Promise<{ body: string | null; ranges: Ranges | null }> {
+export async function richFromWa(
+  text: string | null | undefined,
+  conv: ConversationRow,
+  mentioned?: unknown,
+): Promise<{ body: string | null; ranges: Ranges | null }> {
   if (!text) return { body: text ?? null, ranges: null };
   const { text: plain, styles } = parseWaMarkup(text);
   const found: { start: number; end: number; key: string }[] = [];
   const members = new Set<string>(conv.group_members ? JSON.parse(conv.group_members) : []);
+  // The message says exactly who's mentioned ("…@lid" privacy id, or "…@c.us" number).
+  const listed = new Map<string, string>();
+  for (const x of Array.isArray(mentioned) ? mentioned : []) {
+    const j = bare(x);
+    if (j) listed.set(j.split('@')[0], j);
+  }
+  let unresolved = false;
   for (const m of plain.matchAll(/@(\d{6,20})\b/g)) {
     const digits = m[1];
-    const candidates = [`${digits}@c.us`, `${digits}@lid`];
+    const exact = listed.get(digits);
+    const candidates = exact ? [exact] : [`${digits}@c.us`, `${digits}@lid`];
     let key: string | null = null;
     for (const c of candidates) {
       if (self.isWa(c)) key = 'self';
-      else if (members.has('wa:' + c) || waContact(c)) key = 'wa:' + c;
+      else if (members.has('wa:' + c) || waContact(c)?.name || waContact(c)?.push_name) key = 'wa:' + c;
       if (key) break;
     }
-    if (!key && digits.length >= 15) {
-      const pn = await resolve(`${digits}@lid`);
+    // A privacy id (any length): the number behind it, if WhatsApp or the backup told us.
+    if (!key && (!exact || exact.endsWith('@lid'))) {
+      const pn = kvGet(`lid:${digits}@lid`) || (exact || digits.length >= 13 ? await resolve(`${digits}@lid`) : null);
       if (pn && !pn.endsWith('@lid')) key = keyFor(pn);
+      else if (exact || kvGet(`lid:${digits}@lid`) !== undefined) {
+        key = 'wa:' + `${digits}@lid`; // named once we learn whose it is (see linkGroupLids)
+        unresolved = true;
+      }
     }
-    if (!key && conv.kind === 'group') key = 'wa:' + candidates[0];
+    if (!key && conv.kind === 'group') key = 'wa:' + (exact ?? candidates[0]);
     if (key) found.push({ start: m.index!, end: m.index! + m[0].length, key });
   }
+  if (unresolved && conv.kind === 'group') void linkGroupLids(conv).catch(() => {});
   if (!found.length) return { body: plain, ranges: styles.length ? { styles } : null };
   return placeMentions(plain, styles, found);
 }
@@ -748,7 +838,7 @@ async function mergeHdCopy(parent: MessageRow, m: Json, extId: string, history: 
  * One-off, once connected: HD pairs stored as two messages before they were recognised. Only pairs
  * WhatsApp confirms (the copy names the original) are merged: a photo really sent twice stays.
  */
-export async function mergeStoredHdPairs(): Promise<number> {
+export async function mergeStoredHdPairs(): Promise<{ candidates: number; merged: number; unchecked: number }> {
   const pairs = db
     .prepare<[number], { a: number; b: number; a_ext: string; b_ext: string; chat: string }>(
       `SELECT a.id AS a, b.id AS b, a.ext_id AS a_ext, b.ext_id AS b_ext, c.wa_id AS chat
@@ -761,9 +851,17 @@ export async function mergeStoredHdPairs(): Promise<number> {
     )
     .all(Date.now() - 120 * 86_400_000);
   let merged = 0;
+  let unchecked = 0;
   for (const p of pairs.slice(0, 300)) {
-    if (state.status !== 'connected') break;
+    if (state.status !== 'connected') {
+      unchecked++;
+      continue;
+    }
     const [ma, mb] = await Promise.all([waha.message(p.chat, p.a_ext, false).catch(() => null), waha.message(p.chat, p.b_ext, false).catch(() => null)]);
+    if (!ma?._data || !mb?._data) {
+      unchecked++; // WhatsApp Web didn't answer (or doesn't have them): try again next time
+      continue;
+    }
     const pa = hdParentOf(ma), pb = hdParentOf(mb);
     const [keep, drop] = pb === extRawOf(p.a_ext) ? [p.a, p.b] : pa === extRawOf(p.b_ext) ? [p.b, p.a] : [0, 0];
     if (!keep) continue;
@@ -780,7 +878,7 @@ export async function mergeStoredHdPairs(): Promise<number> {
     emitMessage(getMessage(k.id)!);
     merged++;
   }
-  return merged;
+  return { candidates: pairs.length, merged, unchecked };
 }
 
 /**
@@ -880,7 +978,7 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   const forwarded = m._data?.isForwarded || m.isForwarded ? (Number(m._data?.forwardingScore ?? m.forwardingScore ?? 0) >= 5 ? 2 : 1) : 0;
 
   const poll = pollOf(m);
-  let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv);
+  let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv, m._data?.mentionedJidList ?? m.mentionedIds);
   const attachments: Attachment[] = [];
   const pending: { id: string; chat: string; msg: string }[] = [];
   if (viewOnce) {
@@ -1178,7 +1276,7 @@ async function handleEvent(e: Json) {
       const target = findMessageByExt(p?.editedMessageId);
       if (!target) return;
       const conv = getConversation(target.conversation_id)!;
-      const rich = await richFromWa(p.body, conv);
+      const rich = await richFromWa(p.body, conv, p._data?.mentionedJidList ?? p.mentionedIds);
       emitMessage(updateMessage(target.id, { body: rich.body, ranges: rich.ranges ? JSON.stringify(rich.ranges) : null, edited: 1 }));
       emitConversation(conv.id);
       return;
