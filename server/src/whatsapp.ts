@@ -305,7 +305,10 @@ async function afterConnect() {
   if (kvGet('wa_hd_pairs_v2') !== 'done') {
     const r = await mergeStoredHdPairs().catch((e) => (log.warn(`whatsapp: HD pairs: ${(e as Error).message}`), null));
     if (r) {
-      if (!r.unchecked) kvSet('wa_hd_pairs_v2', 'done');
+      // At most three tries: what WhatsApp Web still can't answer for after that stays as it is.
+      const tries = Number(kvGet('wa_hd_pairs_tries') ?? 0) + 1;
+      kvSet('wa_hd_pairs_tries', String(tries));
+      if (!r.unchecked || tries >= 3) kvSet('wa_hd_pairs_v2', 'done');
       log.info(`whatsapp: HD photo/video pairs: ${r.candidates} to check, ${r.merged} merged${r.unchecked ? `, ${r.unchecked} WhatsApp Web couldn't answer for (tried again next start)` : ''}`);
     }
   }
@@ -840,43 +843,69 @@ async function mergeHdCopy(parent: MessageRow, m: Json, extId: string, history: 
  */
 export async function mergeStoredHdPairs(): Promise<{ candidates: number; merged: number; unchecked: number }> {
   const pairs = db
-    .prepare<[number], { a: number; b: number; a_ext: string; b_ext: string; chat: string }>(
-      `SELECT a.id AS a, b.id AS b, a.ext_id AS a_ext, b.ext_id AS b_ext, c.wa_id AS chat
+    .prepare<[number], { a: number; b: number; a_ext: string; b_ext: string; chat: string; a_att: string; b_att: string }>(
+      `SELECT a.id AS a, b.id AS b, a.ext_id AS a_ext, b.ext_id AS b_ext, c.wa_id AS chat, a.attachments AS a_att, b.attachments AS b_att
        FROM messages a JOIN messages b ON b.conversation_id = a.conversation_id AND b.author = a.author AND b.id > a.id
          AND b.sent_ts >= a.sent_ts AND b.sent_ts < (a.sent_ts / 1000) * 1000 + 1000
        JOIN conversations c ON c.id = a.conversation_id
        WHERE c.network = 'whatsapp' AND a.attachments IS NOT NULL AND b.attachments IS NOT NULL
          AND a.ext_id IS NOT NULL AND b.ext_id IS NOT NULL AND a.deleted = 0 AND b.deleted = 0
-         AND a.received_at > ?`,
+         AND a.received_at > ?
+       ORDER BY b.id DESC`,
     )
-    .all(Date.now() - 120 * 86_400_000);
-  let merged = 0;
-  let unchecked = 0;
-  for (const p of pairs.slice(0, 300)) {
-    if (state.status !== 'connected') {
-      unchecked++;
-      continue;
+    .all(Date.now() - 30 * 86_400_000);
+  const first = (j: string): Attachment | undefined => {
+    try {
+      const l = JSON.parse(j) as Attachment[];
+      return l.length === 1 ? l[0] : undefined;
+    } catch {
+      return undefined;
     }
-    const [ma, mb] = await Promise.all([waha.message(p.chat, p.a_ext, false).catch(() => null), waha.message(p.chat, p.b_ext, false).catch(() => null)]);
-    if (!ma?._data || !mb?._data) {
-      unchecked++; // WhatsApp Web didn't answer (or doesn't have them): try again next time
-      continue;
-    }
-    const pa = hdParentOf(ma), pb = hdParentOf(mb);
-    const [keep, drop] = pb === extRawOf(p.a_ext) ? [p.a, p.b] : pa === extRawOf(p.b_ext) ? [p.b, p.a] : [0, 0];
-    if (!keep) continue;
+  };
+  const merge = (keep: number, drop: number) => {
     const k = getMessage(keep), d = getMessage(drop);
-    if (!k || !d) continue;
+    if (!k || !d) return false;
     const patch: Partial<MessageRow> = {};
     if (!k.reactions && d.reactions) patch.reactions = d.reactions;
-    const ka: Attachment[] = k.attachments ? JSON.parse(k.attachments) : [], da: Attachment[] = d.attachments ? JSON.parse(d.attachments) : [];
-    if (da[0] && !da[0].missing && (!ka[0] || ka[0].missing || Number(da[0].size ?? 0) > Number(ka[0].size ?? 0))) patch.attachments = d.attachments;
+    const ka = first(k.attachments ?? '[]'), da = first(d.attachments ?? '[]');
+    if (da && !da.missing && (!ka || ka.missing || Number(da.size ?? 0) > Number(ka.size ?? 0))) patch.attachments = d.attachments;
     if (Object.keys(patch).length) updateMessage(k.id, patch);
     db.prepare('DELETE FROM messages WHERE id = ?').run(d.id);
     kvSet(`waalias:${extRawOf(d.ext_id!)}`, String(k.id));
     broadcast({ type: 'remove', conversationId: k.conversation_id, messageId: d.id });
     emitMessage(getMessage(k.id)!);
-    merged++;
+    return true;
+  };
+  let merged = 0;
+  let unchecked = 0;
+  let asked = 0;
+  const gone = new Set<number>();
+  for (const p of pairs) {
+    if (gone.has(p.a) || gone.has(p.b)) continue;
+    const aa = first(p.a_att), ba = first(p.b_att);
+    if (!aa || !ba || aa.contentType !== ba.contentType || !/^(image|video)\//.test(aa.contentType)) continue;
+    // The very same file twice, in the same second, from the same person: an HD pair (the HD copy of a
+    // file that was already small enough is identical). No need to ask WhatsApp.
+    if (Number(aa.size) > 0 && aa.size === ba.size && !aa.missing && !ba.missing) {
+      if (merge(p.a, p.b)) (merged++, gone.add(p.b));
+      continue;
+    }
+    // Otherwise only WhatsApp can tell. Ask about a few recent ones, one at a time, gently.
+    if (asked >= 40 || state.status !== 'connected') {
+      unchecked++;
+      continue;
+    }
+    asked++;
+    const ma = await waha.message(p.chat, p.a_ext, false).catch(() => null);
+    const mb = ma?._data ? await waha.message(p.chat, p.b_ext, false).catch(() => null) : null;
+    await pause(1500);
+    if (!ma?._data || !mb?._data) {
+      unchecked++;
+      continue;
+    }
+    const pa = hdParentOf(ma), pb = hdParentOf(mb);
+    const [keep, drop] = pb === extRawOf(p.a_ext) ? [p.a, p.b] : pa === extRawOf(p.b_ext) ? [p.b, p.a] : [0, 0];
+    if (keep && merge(keep, drop)) (merged++, gone.add(drop));
   }
   return { candidates: pairs.length, merged, unchecked };
 }
