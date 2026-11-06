@@ -48,10 +48,10 @@ function Toggle({ checked, onChange, label, hint, disabled }: { checked: boolean
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="settings-section">
-      <h3>{title}</h3>
+      {title && <h3>{title}</h3>}
       {children}
     </section>
   );
@@ -501,7 +501,8 @@ function HistorySettings() {
   );
 }
 
-function WhatsAppSection() {
+/** The WhatsApp connection (link, status, unlink), or its history and backup imports. */
+function WhatsAppSection({ part }: { part: 'connection' | 'history' }) {
   const wa = useStore((s) => s.whatsapp);
   const [nonce, setNonce] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -532,15 +533,67 @@ function WhatsAppSection() {
 
   if (wa.status === 'disabled') {
     return (
-      <Section title="WhatsApp">
+      <Section title={part === 'history' ? 'History' : 'Connection'}>
         <p className="muted setting-note">
           Not set up. Run WAHA next to Messenger Web and set <code>WAHA_URL</code> and <code>WAHA_API_KEY</code> on the Messenger Web container.
         </p>
       </Section>
     );
   }
+  if (part === 'history')
+    return (
+      <>
+        <Section title="History from WhatsApp">
+          {wa.status !== 'connected' && <p className="muted setting-note">Link WhatsApp first (Settings → WhatsApp).</p>}
+          {wa.importing && (
+            <p className="setting-note">
+              <span className="spinner small" />{' '}
+              {wa.importProgress?.waiting
+                ? `WhatsApp Web restarted. The import continues at chat ${wa.importProgress.done + 1} of ${wa.importProgress.total} once it's back…`
+                : wa.importProgress
+                  ? `Importing history from WhatsApp (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})…`
+                  : 'Getting the chat list from WhatsApp…'}{' '}
+              <button className="link-btn" onClick={() => void api.whatsappImportCancel().catch(() => {})}>
+                Stop
+              </button>
+            </p>
+          )}
+          {!wa.importing && wa.lastImport && importAsked && (
+            <p className={wa.lastImport.error ? 'form-error setting-note' : 'muted setting-note'}>
+              {wa.lastImport.error
+                ? `Import failed: ${wa.lastImport.error}`
+                : (wa.lastImport.messages
+                    ? `Imported ${wa.lastImport.messages} messages from ${wa.lastImport.chats} chats.`
+                    : 'No older messages found that weren’t here already.') +
+                  (wa.lastImport.skipped ? ` Skipped ${wa.lastImport.skipped} chat${wa.lastImport.skipped === 1 ? '' : 's'} that made WhatsApp Web crash.` : '')}
+            </p>
+          )}
+          {wa.status === 'connected' && <HistorySettings />}
+          {error && <p className="form-error setting-note">{error}</p>}
+          {wa.status === 'connected' && (
+            <div className="setting-actions">
+              <button
+                className="btn"
+                disabled={busy || wa.importing}
+                onClick={() =>
+                  void run(async () => {
+                    setImportAsked(true);
+                    await api.whatsappImport();
+                  })
+                }
+              >
+                Import history now
+              </button>
+            </div>
+          )}
+        </Section>
+        <Section title="Android backup">
+          <BackupImport />
+        </Section>
+      </>
+    );
   return (
-    <Section title="WhatsApp">
+    <Section title="Connection">
       {wa.status === 'connected' && (
         <dl className="setting-facts">
           <dt>Linked number</dt>
@@ -552,31 +605,6 @@ function WhatsAppSection() {
           <dd>{[wa.version, wa.engine].filter(Boolean).join(', ') || '…'}</dd>
         </dl>
       )}
-      {wa.importing && (
-        <p className="setting-note">
-          <span className="spinner small" />{' '}
-          {wa.importProgress?.waiting
-            ? `WhatsApp Web restarted. The import continues at chat ${wa.importProgress.done + 1} of ${wa.importProgress.total} once it's back…`
-            : wa.importProgress
-              ? `Importing history from WhatsApp (chat ${Math.min(wa.importProgress.done + 1, wa.importProgress.total)} of ${wa.importProgress.total})…`
-              : 'Getting the chat list from WhatsApp…'}{' '}
-          <button className="link-btn" onClick={() => void api.whatsappImportCancel().catch(() => {})}>
-            Stop
-          </button>
-        </p>
-      )}
-      {!wa.importing && wa.lastImport && importAsked && (
-        <p className={wa.lastImport.error ? 'form-error setting-note' : 'muted setting-note'}>
-          {wa.lastImport.error
-            ? `Import failed: ${wa.lastImport.error}`
-            : (wa.lastImport.messages
-                ? `Imported ${wa.lastImport.messages} messages from ${wa.lastImport.chats} chats.`
-                : 'No older messages found that weren’t here already.') +
-              (wa.lastImport.skipped ? ` Skipped ${wa.lastImport.skipped} chat${wa.lastImport.skipped === 1 ? '' : 's'} that made WhatsApp Web crash.` : '')}
-        </p>
-      )}
-      {wa.status === 'connected' && <HistorySettings />}
-      <BackupImport />
       {wa.status === 'scan_qr' && (
         <div className="wa-link">
           <ol>
@@ -606,20 +634,6 @@ function WhatsAppSection() {
         {wa.status === 'connected' && (
           <button className="btn" disabled={busy} onClick={() => void run(() => api.whatsappRefresh(), 'Contacts and groups updated.')}>
             Refresh contacts and groups
-          </button>
-        )}
-        {wa.status === 'connected' && (
-          <button
-            className="btn"
-            disabled={busy || wa.importing}
-            onClick={() =>
-              void run(async () => {
-                setImportAsked(true);
-                await api.whatsappImport();
-              })
-            }
-          >
-            Import history now
           </button>
         )}
         {wa.status === 'failed' && (
@@ -655,7 +669,9 @@ const THEMES: { value: Prefs['theme']; label: string }[] = [
   { value: 'dark-green', label: 'Dark green' },
 ];
 
-export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLogout: () => void }) {
+export type SettingsPage = 'profile' | 'chats' | 'appearance' | 'notifications' | 'privacy' | 'whatsapp' | 'history' | 'account';
+
+export function SettingsView({ onClose, onLogout, initialPage = null }: { onClose: () => void; onLogout: () => void; initialPage?: SettingsPage | null }) {
   const prefs = usePrefs();
   const [server, setServer] = useState<ServerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -664,6 +680,8 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
   const signalOn = useStore((s) => s.signal.status !== 'disabled');
   const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
   const waConnected = useStore((s) => s.whatsapp.status === 'connected');
+  const wa = useStore((s) => s.whatsapp);
+  const [page, setPage] = useState<SettingsPage | null>(initialPage);
 
   useEffect(() => {
     api.settings().then(setServer, (e) => setError(e.message));
@@ -708,181 +726,261 @@ export function SettingsView({ onClose, onLogout }: { onClose: () => void; onLog
 
   const blocked = permission === 'denied';
 
+  const themeLabel = THEMES.find((t) => t.value === prefs.theme)?.label ?? '';
+  const emojiLabel = EMOJI_STYLES.find((e) => e.value === prefs.emoji)?.label ?? '';
+  const pages: { id: SettingsPage; title: string; icon: string; summary: string }[] = [
+    ...(signalOn || waConnected ? [{ id: 'profile' as const, title: 'Profile', icon: 'user', summary: `${[signalOn && 'Signal', waConnected && 'WhatsApp'].filter(Boolean).join(' and ')}: name, about, picture` }] : []),
+    { id: 'chats', title: 'Chats', icon: 'chat', summary: `${prefs.enterToSend ? 'Enter sends' : 'Ctrl+Enter sends'}${waOn ? ` · ${server?.waNativeForward ? 'native' : 'copied'} WhatsApp forwards` : ''}` },
+    { id: 'appearance', title: 'Appearance', icon: 'palette', summary: `${themeLabel} · ${emojiLabel} emoji` },
+    {
+      id: 'notifications',
+      title: 'Notifications',
+      icon: 'bell',
+      summary:
+        permission === 'unsupported' ? 'Not supported in this browser' : permission === 'insecure' ? 'Needs HTTPS' : blocked ? 'Blocked for this site' : prefs.notifications && permission === 'granted' ? (prefs.notificationPreview ? 'On, with message text' : 'On, sender only') : 'Off',
+    },
+    {
+      id: 'privacy',
+      title: 'Privacy',
+      icon: 'lock',
+      summary: server ? `Read receipts ${server.sendReadReceipts ? 'on' : 'off'} · typing ${server.sendTypingIndicators ? 'on' : 'off'} · link previews ${server.sendLinkPreviews ? 'on' : 'off'}` : 'Read receipts, typing, link previews, online',
+    },
+    ...(waOn
+      ? [
+          {
+            id: 'whatsapp' as const,
+            title: 'WhatsApp',
+            icon: 'phone',
+            summary:
+              wa.status === 'connected' ? `Linked: ${wa.me ?? '…'}` : wa.status === 'scan_qr' ? 'Not linked: scan the QR code' : wa.status === 'failed' || wa.status === 'unreachable' ? 'Problem: see details' : 'Starting…',
+          },
+          { id: 'history' as const, title: 'History and backup', icon: 'history', summary: wa.importing ? 'Importing history…' : 'Import history, Android backup, media, member labels' },
+        ]
+      : [{ id: 'whatsapp' as const, title: 'WhatsApp', icon: 'phone', summary: 'Not set up' }]),
+    { id: 'account', title: 'Account', icon: 'logout', summary: `${server?.account ?? 'Signal'}${server?.sessions ? ` · signed in on ${server.sessions} browser${server.sessions === 1 ? '' : 's'}` : ''}` },
+  ];
+
   return (
     <aside className="sidebar settings">
       <header className="side-head">
-        <button className="icon-btn" onClick={onClose} aria-label="Back to chats">
-          <Icon name="back" />
-        </button>
-        <h2>Settings</h2>
+        {page ? (
+          <button className="icon-btn" onClick={() => setPage(null)} aria-label="Back to settings">
+            <Icon name="back" />
+          </button>
+        ) : (
+          <button className="icon-btn" onClick={onClose} aria-label="Back to chats">
+            <Icon name="back" />
+          </button>
+        )}
+        <h2>{page ? pages.find((p) => p.id === page)?.title ?? 'Settings' : 'Settings'}</h2>
       </header>
       <div className="settings-body">
         {error && <p className="form-error pad">{error}</p>}
-
-        {signalOn && <ProfileSection />}
-        {waConnected && <WaProfileSection />}
-
-        <WhatsAppSection />
-
-        <Section title="Appearance">
-          <div className="setting-row">
-            <span className="setting-text">
-              <strong>Theme</strong>
-              <small>Applies to this browser.</small>
-            </span>
-            <div className="segmented" role="radiogroup" aria-label="Theme">
-              {THEMES.map((t) => (
-                <button key={t.value} role="radio" aria-checked={prefs.theme === t.value} className={prefs.theme === t.value ? 'on' : undefined} onClick={() => setPrefs({ theme: t.value })}>
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </Section>
-
-        <Section title="Emoji">
-          <div className="setting-row">
-            <span className="setting-text">
-              <strong>Emoji style</strong>
-              <small>Applies to this browser. Fluent and Twemoji show in messages and lists; the message box uses Noto while you type.</small>
-            </span>
-          </div>
-          <div className="emoji-styles" role="radiogroup" aria-label="Emoji style">
-            {EMOJI_STYLES.map((s) => (
-              <button key={s.value} role="radio" aria-checked={prefs.emoji === s.value} className={prefs.emoji === s.value ? 'on' : undefined} onClick={() => setPrefs({ emoji: s.value })}>
-                <span className="emoji-sample" data-style={s.value}>
-                  {s.value === 'noto' || s.value === 'system' ? '😂👍❤️' : <EmojiSample set={s.value} />}
+        {!page && (
+          <nav className="settings-nav" aria-label="Settings">
+            {pages.map((pg) => (
+              <button key={pg.id} className="settings-nav-row" onClick={() => setPage(pg.id)}>
+                <span className="settings-nav-icon">
+                  <Icon name={pg.icon} size={22} />
                 </span>
-                {s.label}
+                <span className="setting-text">
+                  <strong>{pg.title}</strong>
+                  <small>{pg.summary}</small>
+                </span>
+                <Icon name="chevron" size={18} />
               </button>
             ))}
-          </div>
-          <p className="muted setting-note">
-            Noto: Google, SIL Open Font License. Fluent: Microsoft, MIT. Twemoji graphics: © Twitter, Inc. and other contributors, CC-BY 4.0.
-          </p>
-        </Section>
+          </nav>
+        )}
 
-        <Section title="Chats">
-          <Toggle
-            label="Enter sends the message"
-            hint={prefs.enterToSend ? 'Shift+Enter starts a new line.' : 'Enter starts a new line; Ctrl+Enter sends.'}
-            checked={prefs.enterToSend}
-            onChange={(v) => setPrefs({ enterToSend: v })}
-          />
-        </Section>
+        {page === 'profile' && (
+          <>
+            {signalOn && <ProfileSection />}
+            {waConnected && <WaProfileSection />}
+          </>
+        )}
 
-        <Section title="Notifications">
-          {permission === 'unsupported' ? (
-            <p className="muted setting-note">This browser doesn't support notifications.</p>
-          ) : permission === 'insecure' ? (
-            <InsecureHelp />
-          ) : (
-            <>
+        {page === 'chats' && (
+          <>
+            <Section>
               <Toggle
-                label="Desktop notifications"
-                hint={
-                  blocked
-                    ? 'Blocked for this site. Click the lock or site-settings icon left of the address, allow notifications, and reload.'
-                    : 'For new messages while a Messenger Web tab is open in the background.'
-                }
-                checked={prefs.notifications && permission === 'granted'}
-                disabled={blocked}
-                onChange={(v) => void enableNotifications(v)}
+                label="Enter sends the message"
+                hint={prefs.enterToSend ? 'Shift+Enter starts a new line.' : 'Enter starts a new line; Ctrl+Enter sends.'}
+                checked={prefs.enterToSend}
+                onChange={(v) => setPrefs({ enterToSend: v })}
               />
-              <Toggle
-                label="Show message text"
-                hint="Off shows only who sent something."
-                checked={prefs.notificationPreview}
-                disabled={!prefs.notifications || permission !== 'granted'}
-                onChange={(v) => setPrefs({ notificationPreview: v })}
-              />
-              {permission === 'granted' && prefs.notifications && (
-                <div className="setting-actions">
-                  <button className="btn" onClick={testNotification}>
-                    Send a test notification
-                  </button>
-                </div>
+              {waOn && (
+                <Toggle
+                  label="Forward WhatsApp messages natively"
+                  hint="Forwarding between WhatsApp chats works like on your phone: the message shows as “Forwarded”. Off: a copy is sent instead. Forwards between Signal and WhatsApp are always copies."
+                  checked={!!server?.waNativeForward}
+                  disabled={!server}
+                  onChange={(v) => void saveServer({ waNativeForward: v })}
+                />
               )}
-            </>
-          )}
-        </Section>
+            </Section>
+          </>
+        )}
 
-        <Section title="Privacy">
-          <Toggle
-            label="Send read receipts"
-            hint="Others see when you've read their messages in Messenger Web. Applies to every browser."
-            checked={!!server?.sendReadReceipts}
-            disabled={!server}
-            onChange={(v) => void saveServer({ sendReadReceipts: v })}
-          />
-          <Toggle
-            label="Send typing indicators"
-            hint="Others see when you're typing. Applies to every browser."
-            checked={!!server?.sendTypingIndicators}
-            disabled={!server}
-            onChange={(v) => void saveServer({ sendTypingIndicators: v })}
-          />
-          <Toggle
-            label="Send link previews"
-            hint="When you type a link, the Messenger Web server fetches that page to show its title and picture, like Signal Desktop does. The site sees your server's address."
-            checked={!!server?.sendLinkPreviews}
-            disabled={!server}
-            onChange={(v) => void saveServer({ sendLinkPreviews: v })}
-          />
-          {waOn && (
-            <Toggle
-              label="Show when people are online"
-              hint="WhatsApp: “online” or “last seen …” under the name in a chat (if they share it). Applies to this browser."
-              checked={prefs.showPresence}
-              onChange={(v) => setPrefs({ showPresence: v })}
-            />
-          )}
-          {waOn && (
-            <Toggle
-              label="Show me as online on WhatsApp"
-              hint="While Messenger Web is open and in front in a browser. Off: you never show as online from here (your phone still does when you use it)."
-              checked={!!server?.waShowOnline}
-              disabled={!server}
-              onChange={(v) => void saveServer({ waShowOnline: v })}
-            />
-          )}
-          {waOn && (
-            <Toggle
-              label="Forward WhatsApp messages natively"
-              hint="Forwarding between WhatsApp chats works like on your phone: the message shows as “Forwarded”. Off: a copy is sent instead. Forwards between Signal and WhatsApp are always copies."
-              checked={!!server?.waNativeForward}
-              disabled={!server}
-              onChange={(v) => void saveServer({ waNativeForward: v })}
-            />
-          )}
-        </Section>
+        {page === 'appearance' && (
+          <>
+            <Section title="Theme">
+              <div className="setting-row">
+                <span className="setting-text">
+                  <strong>Theme</strong>
+                  <small>Applies to this browser.</small>
+                </span>
+                <div className="segmented" role="radiogroup" aria-label="Theme">
+                  {THEMES.map((t) => (
+                    <button key={t.value} role="radio" aria-checked={prefs.theme === t.value} className={prefs.theme === t.value ? 'on' : undefined} onClick={() => setPrefs({ theme: t.value })}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </Section>
+            <Section title="Emoji">
+              <div className="setting-row">
+                <span className="setting-text">
+                  <strong>Emoji style</strong>
+                  <small>Applies to this browser. Fluent and Twemoji show in messages and lists; the message box uses Noto while you type.</small>
+                </span>
+              </div>
+              <div className="emoji-styles" role="radiogroup" aria-label="Emoji style">
+                {EMOJI_STYLES.map((s) => (
+                  <button key={s.value} role="radio" aria-checked={prefs.emoji === s.value} className={prefs.emoji === s.value ? 'on' : undefined} onClick={() => setPrefs({ emoji: s.value })}>
+                    <span className="emoji-sample" data-style={s.value}>
+                      {s.value === 'noto' || s.value === 'system' ? '😂👍❤️' : <EmojiSample set={s.value} />}
+                    </span>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="muted setting-note">
+                Noto: Google, SIL Open Font License. Fluent: Microsoft, MIT. Twemoji graphics: © Twitter, Inc. and other contributors, CC-BY 4.0.
+              </p>
+            </Section>
+          </>
+        )}
 
-        <Section title="Account">
-          <dl className="setting-facts">
-            <dt>Signal number</dt>
-            <dd>{server?.account ?? '…'}</dd>
-            <dt>Linked as</dt>
-            <dd>{server?.deviceName ?? '…'}</dd>
-            <dt>Signal API</dt>
-            <dd>{server ? `${server.apiVersion ?? 'unknown version'} (${server.status})` : '…'}</dd>
-            <dt>GIF search</dt>
-            <dd>{server ? (server.giphyConfigured ? 'Giphy key set' : 'No Giphy key set') : '…'}</dd>
-            <dt>Signed-in browsers</dt>
-            <dd>{server?.sessions ?? '…'}</dd>
-          </dl>
-          {notice && <p className="muted setting-note">{notice}</p>}
-          <div className="setting-actions">
-            <button className="btn" onClick={refreshDirectory}>
-              Refresh contacts and groups
-            </button>
-            <button className="btn" onClick={onLogout}>
-              Sign out
-            </button>
-            <button className="btn danger" onClick={logoutAll}>
-              Sign out everywhere
-            </button>
-          </div>
-        </Section>
+        {page === 'notifications' && (
+          <>
+            <Section>
+              {permission === 'unsupported' ? (
+                <p className="muted setting-note">This browser doesn't support notifications.</p>
+              ) : permission === 'insecure' ? (
+                <InsecureHelp />
+              ) : (
+                <>
+                  <Toggle
+                    label="Desktop notifications"
+                    hint={
+                      blocked
+                        ? 'Blocked for this site. Click the lock or site-settings icon left of the address, allow notifications, and reload.'
+                        : 'For new messages while a Messenger Web tab is open in the background.'
+                    }
+                    checked={prefs.notifications && permission === 'granted'}
+                    disabled={blocked}
+                    onChange={(v) => void enableNotifications(v)}
+                  />
+                  <Toggle
+                    label="Show message text"
+                    hint="Off shows only who sent something."
+                    checked={prefs.notificationPreview}
+                    disabled={!prefs.notifications || permission !== 'granted'}
+                    onChange={(v) => setPrefs({ notificationPreview: v })}
+                  />
+                  {permission === 'granted' && prefs.notifications && (
+                    <div className="setting-actions">
+                      <button className="btn" onClick={testNotification}>
+                        Send a test notification
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </Section>
+          </>
+        )}
+
+        {page === 'privacy' && (
+          <>
+            <Section>
+              <Toggle
+                label="Send read receipts"
+                hint="Others see when you've read their messages in Messenger Web. Applies to every browser."
+                checked={!!server?.sendReadReceipts}
+                disabled={!server}
+                onChange={(v) => void saveServer({ sendReadReceipts: v })}
+              />
+              <Toggle
+                label="Send typing indicators"
+                hint="Others see when you're typing. Applies to every browser."
+                checked={!!server?.sendTypingIndicators}
+                disabled={!server}
+                onChange={(v) => void saveServer({ sendTypingIndicators: v })}
+              />
+              <Toggle
+                label="Send link previews"
+                hint="When you type a link, the Messenger Web server fetches that page to show its title and picture, like Signal Desktop does. The site sees your server's address."
+                checked={!!server?.sendLinkPreviews}
+                disabled={!server}
+                onChange={(v) => void saveServer({ sendLinkPreviews: v })}
+              />
+              {waOn && (
+                <Toggle
+                  label="Show when people are online"
+                  hint="WhatsApp: “online” or “last seen …” under the name in a chat (if they share it). Applies to this browser."
+                  checked={prefs.showPresence}
+                  onChange={(v) => setPrefs({ showPresence: v })}
+                />
+              )}
+              {waOn && (
+                <Toggle
+                  label="Show me as online on WhatsApp"
+                  hint="While Messenger Web is open and in front in a browser. Off: you never show as online from here (your phone still does when you use it)."
+                  checked={!!server?.waShowOnline}
+                  disabled={!server}
+                  onChange={(v) => void saveServer({ waShowOnline: v })}
+                />
+              )}
+            </Section>
+          </>
+        )}
+
+        {page === 'whatsapp' && <WhatsAppSection part="connection" />}
+        {page === 'history' && <WhatsAppSection part="history" />}
+
+        {page === 'account' && (
+          <>
+            <Section>
+              <dl className="setting-facts">
+                <dt>Signal number</dt>
+                <dd>{server?.account ?? '…'}</dd>
+                <dt>Linked as</dt>
+                <dd>{server?.deviceName ?? '…'}</dd>
+                <dt>Signal API</dt>
+                <dd>{server ? `${server.apiVersion ?? 'unknown version'} (${server.status})` : '…'}</dd>
+                <dt>GIF search</dt>
+                <dd>{server ? (server.giphyConfigured ? 'Giphy key set' : 'No Giphy key set') : '…'}</dd>
+                <dt>Signed-in browsers</dt>
+                <dd>{server?.sessions ?? '…'}</dd>
+              </dl>
+              {notice && <p className="muted setting-note">{notice}</p>}
+              <div className="setting-actions">
+                <button className="btn" onClick={refreshDirectory}>
+                  Refresh contacts and groups
+                </button>
+                <button className="btn" onClick={onLogout}>
+                  Sign out
+                </button>
+                <button className="btn danger" onClick={logoutAll}>
+                  Sign out everywhere
+                </button>
+              </div>
+            </Section>
+          </>
+        )}
       </div>
     </aside>
   );

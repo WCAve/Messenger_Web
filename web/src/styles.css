@@ -3492,3 +3492,51 @@ button.stk-pack-head {
   color: var(--ink-3);
   font-size: 12px;
 }
+
+/* ---------- settings: main list ---------- */
+.settings-nav {
+  display: grid;
+  padding: 6px 0;
+}
+.settings-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 16px;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-nav-row:hover,
+.settings-nav-row:focus-visible {
+  background: var(--haze);
+}
+.settings-nav-row > .icon:last-child {
+  color: var(--ink-3);
+  flex: none;
+}
+.settings-nav-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: var(--haze);
+  color: var(--ultra);
+  flex: none;
+}
+.settings-nav-row .setting-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-nav {
+  background: var(--sidebar);
+  margin-top: 8px;
+}
+.settings-nav-row > .icon:last-child {
+  transform: rotate(-90deg);
+}

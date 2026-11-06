@@ -7,7 +7,7 @@ import { Highlight } from './InfoPanel';
 import { formatListTime } from '../util';
 import { type NotifyState, notifyState, requestNotifications } from '../notifications';
 import { setPrefs, usePrefs } from '../prefs';
-import { SettingsView } from './Settings';
+import { type SettingsPage, SettingsView } from './Settings';
 import { StickerManager } from './StickerManager';
 import { JoinByLink, NewGroup } from './GroupManage';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
@@ -27,6 +27,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const account = useStore((s) => [s.signal.account, s.whatsapp.me].filter(Boolean).join(" · "));
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'list' | 'new' | 'group' | 'settings' | 'archived'>('list');
+  const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
   const drafts = useStore((s) => s.drafts);
   const [menu, setMenu, menuRef] = useMenu();
   const [found, setFound] = useState<SearchResult[] | null>(null);
@@ -93,7 +94,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   if (mode === 'new') return <NewChat onClose={() => setMode('list')} onNewGroup={() => setMode('group')} />;
   if (mode === 'group') return <NewGroup onClose={() => setMode('list')} />;
   if (stickerManager) return <StickerManager />;
-  if (mode === 'settings') return <SettingsView onClose={() => setMode('list')} onLogout={onLogout} />;
+  if (mode === 'settings') return <SettingsView onClose={() => (setMode('list'), setSettingsPage(null))} onLogout={onLogout} initialPage={settingsPage} />;
 
   if (archivedMode) {
     return (
@@ -152,7 +153,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           )}
         </div>
       </header>
-      <NotifyBanner onOpenSettings={() => setMode('settings')} />
+      <NotifyBanner onOpenSettings={() => (setSettingsPage('notifications'), setMode('settings'))} />
       <div className="search">
         <Icon name="search" size={18} />
         <input
