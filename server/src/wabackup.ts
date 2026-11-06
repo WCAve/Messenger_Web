@@ -205,7 +205,8 @@ function mainKey(hex: string): Buffer {
 }
 
 /** Decrypt to a plain SQLite file. Tries the single-file layout (tag + MD5), then multi-file (tag only). */
-async function decryptBackup(file: string, out: string, keyHex: string, progress: (done: number, total: number) => void) {
+/** Exported for one-off checks run inside the container (e.g. what tables a backup has). */
+export async function decryptBackup(file: string, out: string, keyHex: string, progress: (done: number, total: number) => void) {
   const key = mainKey(keyHex);
   const { dataStart, iv } = readHeader(file);
   const size = fs.statSync(file).size;
