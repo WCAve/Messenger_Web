@@ -725,6 +725,34 @@ export function backfillExtRaw(): number {
   return rows.length;
 }
 
+/**
+ * One-off: messages stored twice (two WAHA events for one message, before that was guarded against).
+ * Keeps the first copy, with reactions from the other if the first has none.
+ */
+export function removeDuplicateWaMessages(): number {
+  const groups = db
+    .prepare<[], { conversation_id: number; ext_raw: string }>(
+      'SELECT conversation_id, ext_raw FROM messages WHERE ext_raw IS NOT NULL GROUP BY conversation_id, ext_raw HAVING COUNT(*) > 1',
+    )
+    .all();
+  const rows = db.prepare<[number, string], { id: number; reactions: string | null }>('SELECT id, reactions FROM messages WHERE conversation_id = ? AND ext_raw = ? ORDER BY id');
+  const setReactions = db.prepare('UPDATE messages SET reactions = ? WHERE id = ?');
+  const del = db.prepare('DELETE FROM messages WHERE id = ?');
+  let removed = 0;
+  db.transaction(() => {
+    for (const g of groups) {
+      const [keep, ...extra] = rows.all(g.conversation_id, g.ext_raw);
+      const reactions = keep.reactions ?? extra.find((r) => r.reactions)?.reactions ?? null;
+      if (reactions !== keep.reactions) setReactions.run(reactions, keep.id);
+      for (const r of extra) {
+        del.run(r.id);
+        removed++;
+      }
+    }
+  })();
+  return removed;
+}
+
 /** WhatsApp timestamps are whole seconds: nudge by a millisecond until (chat, time, author) is free. */
 export function freeTimestamp(conversationId: number, ts: number, author: string): number {
   const taken = db.prepare<[number, number, string], { id: number }>('SELECT id FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ?');

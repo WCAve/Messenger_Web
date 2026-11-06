@@ -8,7 +8,7 @@ import { db, kvGet, kvSet } from './db.js';
 import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
-import { backfillExtRaw, recomputeGroupReadStatuses } from './store.js';
+import { backfillExtRaw, recomputeGroupReadStatuses, removeDuplicateWaMessages } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
 import { startWhatsApp, stopWhatsApp } from './whatsapp.js';
@@ -123,6 +123,15 @@ setTimeout(() => {
     }
   } catch (e) {
     log('warn', `id backfill failed: ${(e as Error).message}`);
+  }
+  try {
+    if (kvGet('wa_dupes_v1') !== 'done') {
+      const n = removeDuplicateWaMessages();
+      kvSet('wa_dupes_v1', 'done');
+      if (n) log('info', `removed ${n} WhatsApp messages that were stored twice`);
+    }
+  } catch (e) {
+    log('warn', `duplicate clean-up failed: ${(e as Error).message}`);
   }
   try {
     if (kvGet('gif_backfill_v1') !== 'done') {

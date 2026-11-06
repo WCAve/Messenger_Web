@@ -36,6 +36,7 @@ import {
   self,
   setConversationFlags,
   setGroupDescription,
+  extRawOf,
   mergeGroupSettings,
   setWaAbout,
   setWaBlocked,
@@ -713,7 +714,23 @@ function describeOther(m: Json): string | null {
 }
 
 /** One WhatsApp message (event or history). Returns the stored row, or undefined when skipped. */
-async function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
+/**
+ * WAHA sends one message as several events ("message" and "message.any"). Processing one can take
+ * seconds (downloading a video), so a second event for the same message waits for the first
+ * instead of storing it again.
+ */
+const ingesting = new Map<string, Promise<MessageRow | undefined>>();
+function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
+  if (!m?.id) return Promise.resolve(undefined);
+  const key = extRawOf(String(m.id));
+  const running = ingesting.get(key);
+  if (running) return running.then(() => undefined);
+  const job = ingestMessageNow(m, opts).finally(() => ingesting.delete(key));
+  ingesting.set(key, job);
+  return job;
+}
+
+async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
   if (!m?.id) return;
   const fromMe = !!m.fromMe;
   const chatRaw = fromMe ? m.to : m.from;

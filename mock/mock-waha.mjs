@@ -172,7 +172,7 @@ function authed(req, url) {
 const blocked = new Set();
 const archivedOnPhone = new Set(); // POST /mock/archive {"jid":…,"archived":true}
 const profile = { name: 'Wouter', status: 'Hallo daar', picture: null };
-const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0 }; // POST /mock/config
+const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0, fileDelayMs: 0 }; // POST /mock/config
 const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
@@ -232,6 +232,8 @@ const server = http.createServer(async (req, res) => {
         const chat = b.group === 'buren' ? GROUP2.id : b.group ? GROUP.id : person.id;
         const mm = msg({ chat, author: b.group ? person.id : undefined, body: b.text ?? 'Hallo!', media: b.media, ...(b.extra ?? {}) });
         emit('message.any', { ...mm, ...(b.payload ?? {}) });
+        // WAHA also sends a separate "message" event for the same message (WEBJS), straight after.
+        for (const ev of b.alsoAs ?? []) emit(ev, { ...mm, ...(b.payload ?? {}) });
         return json(res, 200, mm);
       }
       if (p === '/mock/event') {
@@ -242,8 +244,8 @@ const server = http.createServer(async (req, res) => {
       if (p === '/mock/stats') return json(res, 200, stats);
       if (p === '/mock/history') {
         const b = await body(req); // {"chat":…,"id":…,"body":…}: a message WhatsApp Web has, with exactly this id
-        const mm = msg({ chat: b.chat, body: b.body ?? '' });
-        mm.id = b.id;
+        const mm = b.message ?? msg({ chat: b.chat, body: b.body ?? '' });
+        if (b.id) mm.id = b.id;
         addHistory(mm);
         return json(res, 200, mm);
       }
@@ -501,6 +503,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { lid: l, pn: l === ME.lid ? ME.id : null });
     }
     if (p.startsWith('/api/files/')) {
+      if (mockConfig.fileDelayMs) await new Promise((r) => setTimeout(r, mockConfig.fileDelayMs));
       res.writeHead(200, { 'content-type': 'image/png' });
       return res.end(PHOTO);
     }
