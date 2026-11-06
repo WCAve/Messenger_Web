@@ -210,7 +210,8 @@ const labelLogged = new Map<string, string>();
 function labelLog(g: string, text: string) {
   if (labelLogged.get(g) === text) return;
   labelLogged.set(g, text);
-  console.log(`whatsapp: ${g}: ${text}`);
+  const c = findWaChat(g);
+  console.log(`whatsapp: group “${c?.group_name ?? "?"}” (${g}): ${text}`);
 }
 
 
@@ -227,7 +228,14 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
     const pn = bare(t?.pn ?? t?.participant?.pn ?? '');
     for (const id of [raw, pn, await resolve(raw)]) if (id) byId.set(id, tag);
   }
-  const myTag = typeof mine === 'string' ? mine : typeof (mine as Json)?.tag === 'string' ? (mine as Json).tag : null;
+  // Changes WAHA told us about live win: WhatsApp Web's list can miss labels it never synced.
+  for (const [id, tag] of Object.entries(labelEvents(c.id))) {
+    if (tag) byId.set(id, tag);
+    else byId.delete(id);
+  }
+  let myTag = typeof mine === 'string' ? mine : typeof (mine as Json)?.tag === 'string' ? (mine as Json).tag : null;
+  const myEvent = self.waIds.map((id) => labelEvents(c.id)[id]).find((v) => v !== undefined);
+  if (myEvent !== undefined) myTag = myEvent;
   const labels: Record<string, string> = {};
   for (const m of groupMembers(c)) {
     if (m.key === 'self' || !byId.size) continue;
@@ -249,6 +257,17 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
   if (tags !== null) labelLog(g, `${list.length} member label${list.length === 1 ? '' : 's'} from WhatsApp, ${Object.keys(labels).length} matched to members${myTag ? ' (yours included)' : ''}${list.length && Object.keys(labels).length < list.filter((t: Json) => t?.tag).length ? `; unmatched ids e.g. ${list.slice(0, 3).map((t: Json) => bare(t?.id ?? t?.participant?.id ?? '')).join(', ')}` : ''}`);
   storeLabels(c.id, labels);
   return { labels, myLabel };
+}
+
+function labelEvents(conversationId: number): Record<string, string | null> {
+  const v = kvGet(`glabels_ev:${conversationId}`);
+  return v ? JSON.parse(v) : {};
+}
+/** A label change WAHA reported (or one you made here): remembered per id until it changes again. */
+export function recordLabelEvent(conversationId: number, ids: (string | null | undefined)[], tag: string | null) {
+  const ev = labelEvents(conversationId);
+  for (const id of ids) if (id) ev[bare(id)] = tag || null;
+  kvSet(`glabels_ev:${conversationId}`, JSON.stringify(ev));
 }
 
 /** Background refresh (group changes, start-up): labels without opening group info. */
@@ -438,6 +457,7 @@ export async function groupAction(conversationId: number, a: Action): Promise<vo
       const label = a.label == null ? null : String(a.label).trim() || null;
       if (label && (label.length < 2 || label.length > 30)) throw new HttpError(400, 'A label is 2 to 30 characters');
       await run(() => waha.setMyGroupTag(g, label));
+      recordLabelEvent(c.id, self.waIds, label);
       const labels = groupLabels(c.id);
       if (label) labels.self = label;
       else delete labels.self;

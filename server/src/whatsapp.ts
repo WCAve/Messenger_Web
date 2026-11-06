@@ -48,7 +48,7 @@ import {
   waContact,
   waNumberOf,
 } from './store.js';
-import { refreshWaLabels } from './groups.js';
+import { recordLabelEvent, refreshWaLabels } from './groups.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
 export type WaStatus = 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
@@ -1166,6 +1166,10 @@ async function handleEvent(e: Json) {
         const desc = descriptionOf(p?.group);
         if (desc !== undefined) setGroupDescription(getOrCreateWaChat(id).id, desc);
         const conv = getOrCreateWaChat(id);
+        if (e.event === 'group.v2.participants.tag') {
+          const who = p?.participant;
+          recordLabelEvent(conv.id, [idString(who?.id ?? who), idString(who?.pn)], typeof p?.tag === 'string' ? p.tag : null);
+        }
         const removed = e.event === 'group.v2.leave' || (p?.type === 'leave' || p?.type === 'remove') && (p?.participants ?? []).some((x: Json) => self.isWa(bare(x?.id ?? x)));
         if (removed) dropSelfFromGroup(conv);
         else refreshGroupSoon(id);

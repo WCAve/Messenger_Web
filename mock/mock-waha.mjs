@@ -454,7 +454,7 @@ const server = http.createServer(async (req, res) => {
           case '/participants/join-requests/approve': for (const x of ids(b)) { g.requests = g.requests.filter((r) => r !== x); g.parts.push({ id: x, role: 'participant' }); } changed('add', ids(b)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
           case '/participants/join-requests/reject': g.requests = g.requests.filter((r) => !ids(b).includes(r)); return json(res, 201, ids(b).map((x) => ({ requesterId: x, success: true })));
           case '/leave': g.parts = g.parts.filter((q) => q.id !== ME.id); setTimeout(() => emit('group.v2.leave', { group: { id: g.id } }), 50); break;
-          case '/participants/v2/tags/my': if (b.tag) g.tags[ME.lid] = b.tag; else delete g.tags[ME.lid]; setTimeout(() => emit('group.v2.participants.tag', { group: { id: g.id }, participant: ME.id, tag: b.tag }), 50); break;
+          case '/participants/v2/tags/my': if (b.tag) g.tags[ME.lid] = b.tag; else delete g.tags[ME.lid]; setTimeout(() => emit('group.v2.participants.tag', { group: { id: g.id }, participant: { id: ME.lid, pn: ME.id }, tag: b.tag ?? null, timestamp: Math.floor(Date.now() / 1000) }), 50); break;
           default: return json(res, 404, { message: 'mock: unknown group call ' + rest });
         }
         return json(res, 200, { success: true });
@@ -476,6 +476,12 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, {});
     }
     if (p === '/mock/groups') return json(res, 200, Object.fromEntries(groups));
+    // Someone changes their label on their phone; WhatsApp Web's own list doesn't pick it up (like WEBJS with unsynced labels).
+    if (p === '/mock/label-event' && m === 'POST') {
+      const b = await body(req); // {group, id, pn, tag}
+      emit('group.v2.participants.tag', { group: { id: b.group }, participant: { id: b.id, pn: b.pn ?? null }, tag: b.tag, timestamp: Math.floor(Date.now() / 1000) });
+      return json(res, 201, {});
+    }
     if (p === '/mock/group-set' && m === 'POST') {
       const b = await body(req); // {group, patch: {msgAdmins…}, myRole}
       const x = groupState(b.group);
