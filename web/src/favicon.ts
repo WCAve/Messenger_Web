@@ -9,15 +9,16 @@ const ICON_BODY =
 
 export function faviconSvg(count: number): string {
   if (count <= 0) return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${ICON_BODY}</svg>`;
+  // Like WhatsApp: the count takes the place of the three dots in the bubble, in the app's own blue.
   const text = count > 9 ? '9+' : String(count);
   const wide = text.length > 1;
-  // A white ring keeps the badge readable on dark and light tab bars.
-  // Big enough to read at 16px, the size most tab bars use.
-  const badge = wide
-    ? `<rect x="10" y="1.5" width="52.5" height="41" rx="20.5" fill="#E5352B" stroke="#fff" stroke-width="3"/>`
-    : `<circle cx="41" cy="23" r="21.5" fill="#E5352B" stroke="#fff" stroke-width="3"/>`;
-  const label = `<text x="${wide ? 36 : 41}" y="${wide ? 22 : 23}" dy=".36em" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="${wide ? 32 : 36}" fill="#fff">${text}</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${ICON_BODY}${badge}${label}</svg>`;
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
+    `<rect width="64" height="64" rx="16" fill="#3A5BD9"/>` +
+    `<path d="M32 9c-12.4 0-22 8.7-22 19.8 0 5.6 2.5 10.6 6.5 14.2l-1.9 8.6 8.4-4.1c2.8.9 5.8 1.4 9 1.4 12.4 0 22-8.8 22-20.1S44.4 9 32 9z" fill="#fff"/>` +
+    `<text x="32" y="29" dy=".36em" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="${wide ? 26 : 32}" letter-spacing="${wide ? -1 : 0}" fill="#3A5BD9">${text}</text>` +
+    `</svg>`
+  );
 }
 
 let shown = -1;
