@@ -708,7 +708,11 @@ export function findMessageByExt(id: string | null | undefined): MessageRow | un
   if (exact) return exact;
   const raw = extRawOf(id);
   if (raw === id && !/^[A-Za-z0-9]{6,}$/.test(raw)) return undefined;
-  return db.prepare<[string], MessageRow>('SELECT * FROM messages WHERE ext_raw = ?').get(raw);
+  const row = db.prepare<[string], MessageRow>('SELECT * FROM messages WHERE ext_raw = ?').get(raw);
+  if (row) return row;
+  // WhatsApp's HD copy of a photo or video: shown as (and reacted to on) the original.
+  const alias = kvGet(`waalias:${raw}`);
+  return alias ? db.prepare<[number], MessageRow>('SELECT * FROM messages WHERE id = ?').get(Number(alias)) : undefined;
 }
 
 /** "false_<chat>_<RAW>[_<author>]" → RAW; ids without that shape are their own raw id. */

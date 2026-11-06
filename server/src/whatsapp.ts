@@ -302,6 +302,11 @@ async function afterConnect() {
   if (state.status !== 'connected') return;
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
   kvSet('wa_directory_v1', 'done');
+  if (kvGet('wa_hd_pairs_v1') !== 'done') {
+    const n = await mergeStoredHdPairs().catch((e) => (log.warn(`whatsapp: HD pairs: ${(e as Error).message}`), -1));
+    if (n >= 0) kvSet('wa_hd_pairs_v1', 'done');
+    if (n > 0) log.info(`whatsapp: merged ${n} HD photo/video pair${n === 1 ? '' : 's'} that showed twice`);
+  }
   setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
   if (kvGet(HISTORY_KEY) === 'done') return;
   // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
@@ -714,6 +719,70 @@ function describeOther(m: Json): string | null {
 }
 
 /** One WhatsApp message (event or history). Returns the stored row, or undefined when skipped. */
+/** The original's raw id, when this message is WhatsApp's HD copy of a photo or video. */
+function hdParentOf(m: Json): string | null {
+  const d = m?._data;
+  if (!/DUAL_UPLOAD/.test(String(d?.associationType ?? ''))) return null;
+  const k = d?.parentMsgKey;
+  const id = typeof k === 'string' ? k : idString(k?.id) ?? idString(k?._serialized) ?? idString(k);
+  return id ? extRawOf(id) : null;
+}
+
+/** The HD copy: its id points to the original; its file replaces the original's if it's bigger. */
+async function mergeHdCopy(parent: MessageRow, m: Json, extId: string, history: boolean): Promise<MessageRow> {
+  kvSet(`waalias:${extRawOf(extId)}`, String(parent.id));
+  const atts: Attachment[] = parent.attachments ? JSON.parse(parent.attachments) : [];
+  const size = Number(m?._data?.size ?? m?.media?.size ?? 0);
+  const current = atts[0];
+  const better = !!m.hasMedia && (!current || !!current.missing || (size > 0 && size > Number(current.size ?? 0)));
+  if (!better || history) return parent;
+  const a = await downloadMedia(m, extId).catch(() => null);
+  if (!a) return parent;
+  if (current?.caption) a.caption = current.caption;
+  const row = updateMessage(parent.id, { attachments: JSON.stringify([a]) });
+  if (row) emitMessage(row);
+  return row ?? parent;
+}
+
+/**
+ * One-off, once connected: HD pairs stored as two messages before they were recognised. Only pairs
+ * WhatsApp confirms (the copy names the original) are merged: a photo really sent twice stays.
+ */
+export async function mergeStoredHdPairs(): Promise<number> {
+  const pairs = db
+    .prepare<[number], { a: number; b: number; a_ext: string; b_ext: string; chat: string }>(
+      `SELECT a.id AS a, b.id AS b, a.ext_id AS a_ext, b.ext_id AS b_ext, c.wa_id AS chat
+       FROM messages a JOIN messages b ON b.conversation_id = a.conversation_id AND b.author = a.author AND b.id > a.id
+         AND b.sent_ts >= a.sent_ts AND b.sent_ts < (a.sent_ts / 1000) * 1000 + 1000
+       JOIN conversations c ON c.id = a.conversation_id
+       WHERE c.network = 'whatsapp' AND a.attachments IS NOT NULL AND b.attachments IS NOT NULL
+         AND a.ext_id IS NOT NULL AND b.ext_id IS NOT NULL AND a.deleted = 0 AND b.deleted = 0
+         AND a.received_at > ?`,
+    )
+    .all(Date.now() - 120 * 86_400_000);
+  let merged = 0;
+  for (const p of pairs.slice(0, 300)) {
+    if (state.status !== 'connected') break;
+    const [ma, mb] = await Promise.all([waha.message(p.chat, p.a_ext, false).catch(() => null), waha.message(p.chat, p.b_ext, false).catch(() => null)]);
+    const pa = hdParentOf(ma), pb = hdParentOf(mb);
+    const [keep, drop] = pb === extRawOf(p.a_ext) ? [p.a, p.b] : pa === extRawOf(p.b_ext) ? [p.b, p.a] : [0, 0];
+    if (!keep) continue;
+    const k = getMessage(keep), d = getMessage(drop);
+    if (!k || !d) continue;
+    const patch: Partial<MessageRow> = {};
+    if (!k.reactions && d.reactions) patch.reactions = d.reactions;
+    const ka: Attachment[] = k.attachments ? JSON.parse(k.attachments) : [], da: Attachment[] = d.attachments ? JSON.parse(d.attachments) : [];
+    if (da[0] && !da[0].missing && (!ka[0] || ka[0].missing || Number(da[0].size ?? 0) > Number(ka[0].size ?? 0))) patch.attachments = d.attachments;
+    if (Object.keys(patch).length) updateMessage(k.id, patch);
+    db.prepare('DELETE FROM messages WHERE id = ?').run(d.id);
+    kvSet(`waalias:${extRawOf(d.ext_id!)}`, String(k.id));
+    broadcast({ type: 'remove', conversationId: k.conversation_id, messageId: d.id });
+    emitMessage(getMessage(k.id)!);
+    merged++;
+  }
+  return merged;
+}
+
 /**
  * WAHA sends one message as several events ("message" and "message.any"). Processing one can take
  * seconds (downloading a video), so a second event for the same message waits for the first
@@ -739,6 +808,22 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   if (!chatId) return;
   const extId = String(m.id);
   if (findMessageByExt(extId)) return; // already have it (our own send, or a repeat)
+
+  // HD photos and videos come as two messages: the normal one, and an HD copy linked to it. WhatsApp
+  // shows one; so do we.
+  const parentRaw = hdParentOf(m);
+  if (parentRaw) {
+    const parent = findMessageByExt(parentRaw);
+    if (parent) return mergeHdCopy(parent, m, extId, !!opts.history);
+    kvSet(`wahd_wait:${parentRaw}`, extId); // the original isn't here yet: keep this one until it is
+  } else {
+    const copy = kvGet(`wahd_wait:${extRawOf(extId)}`);
+    const child = copy ? findMessageByExt(copy) : undefined;
+    if (child) {
+      kvSet(`waalias:${extRawOf(extId)}`, String(child.id));
+      return child;
+    }
+  }
 
   const isGroup = chatId.endsWith('@g.us');
   const conv = getOrCreateWaChat(chatId);
