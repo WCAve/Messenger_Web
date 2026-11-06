@@ -302,10 +302,10 @@ async function afterConnect() {
   if (state.status !== 'connected') return;
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
   kvSet('wa_directory_v1', 'done');
-  if (kvGet('wa_hd_pairs_v1') !== 'done') {
+  if (kvGet('wa_hd_pairs_v2') !== 'done') {
     const r = await mergeStoredHdPairs().catch((e) => (log.warn(`whatsapp: HD pairs: ${(e as Error).message}`), null));
     if (r) {
-      if (!r.unchecked) kvSet('wa_hd_pairs_v1', 'done');
+      if (!r.unchecked) kvSet('wa_hd_pairs_v2', 'done');
       log.info(`whatsapp: HD photo/video pairs: ${r.candidates} to check, ${r.merged} merged${r.unchecked ? `, ${r.unchecked} WhatsApp Web couldn't answer for (tried again next start)` : ''}`);
     }
   }
