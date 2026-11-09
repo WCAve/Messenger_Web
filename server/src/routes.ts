@@ -88,6 +88,7 @@ import {
   getOrCreateDirect,
   insertMessage,
   listContacts,
+  listConversationRows,
   listConversations,
   listGroups,
   listMessages,
@@ -356,6 +357,41 @@ function settingsDto() {
     deviceName: config.deviceName,
     giphyConfigured: !!config.giphyApiKey,
     sessions: activeSessionCount(),
+  };
+}
+
+/**
+ * Marks a chat read here and returns the job that tells the other side (read receipts, and clearing a
+ * "marked unread" on the phone), or null when there's nothing to send.
+ */
+function markRead(c: ConversationRow): (() => Promise<void>) | null {
+  const unread = unreadMessages(c.id);
+  const wasMarked = !!c.marked_unread;
+  if (wasMarked) setConversationFlags(c.id, { markedUnread: false });
+  if (!unread.length) {
+    if (!wasMarked) return null;
+    emitConversation(getConversation(c.id)!);
+    // Opening a chat you marked as unread on your phone clears the mark there too.
+    if (isWa(c) && getSettings().sendReadReceipts && getWaState().status === 'connected') return () => markReadWa(c, []).catch(() => {});
+    return null;
+  }
+  markConversationRead(c.id);
+  emitConversation(getConversation(c.id)!);
+  if (isWa(c)) {
+    if (getSettings().sendReadReceipts && getWaState().status === 'connected') return () => markReadWa(c, unread).catch(() => {});
+    return null;
+  }
+  const account = self.number;
+  if (!getSettings().sendReadReceipts || !account || getState().status !== 'connected') return null;
+  return async () => {
+    for (const m of unread.slice(-30)) {
+      if (m.author === 'self') continue;
+      try {
+        await signalApi.receipt(account, { recipient: addressForKey(m.author), receipt_type: 'read', timestamp: m.sent_ts });
+      } catch {
+        /* receipts are best effort */
+      }
+    }
   };
 }
 
@@ -1019,38 +1055,29 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
   // Mark a conversation read (+ send read receipts to the senders)
   r.post('/api/conversations/:id/read', (ctx) => {
-    const c = conv(ctx);
-    const unread = unreadMessages(c.id);
-    const wasMarked = !!c.marked_unread;
-    if (wasMarked) setConversationFlags(c.id, { markedUnread: false });
-    if (!unread.length) {
-      if (wasMarked) {
-        emitConversation(getConversation(c.id)!);
-        // Opening a chat you marked as unread on your phone clears the mark there too.
-        if (isWa(c) && getSettings().sendReadReceipts && getWaState().status === 'connected') markReadWa(c, []).catch(() => {});
-      }
-      return { ok: true };
-    }
-    markConversationRead(c.id);
-    emitConversation(getConversation(c.id)!);
-    if (isWa(c)) {
-      if (getSettings().sendReadReceipts && getWaState().status === 'connected') markReadWa(c, unread).catch(() => {});
-      return { ok: true };
-    }
-    const account = self.number;
-    if (getSettings().sendReadReceipts && account && getState().status === 'connected') {
-      void (async () => {
-        for (const m of unread.slice(-30)) {
-          if (m.author === 'self') continue;
-          try {
-            await signalApi.receipt(account, { recipient: addressForKey(m.author), receipt_type: 'read', timestamp: m.sent_ts });
-          } catch {
-            /* receipts are best effort */
-          }
-        }
-      })();
-    }
+    const job = markRead(conv(ctx));
+    if (job) void job();
     return { ok: true };
+  });
+
+  // Every chat with unread messages (or marked unread) at once. Read receipts go out one chat at a
+  // time in the background, so WhatsApp Web isn't flooded.
+  r.post('/api/conversations/read-all', () => {
+    const jobs: (() => Promise<void>)[] = [];
+    let chats = 0;
+    for (const c of listConversationRows()) {
+      if (!c.marked_unread && !unreadMessages(c.id).length) continue;
+      chats++;
+      const job = markRead(c);
+      if (job) jobs.push(job);
+    }
+    void (async () => {
+      for (const job of jobs) {
+        await job().catch(() => {});
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    })();
+    return { ok: true, chats };
   });
 
   // Block / unblock a WhatsApp contact (Signal's API can't block people).

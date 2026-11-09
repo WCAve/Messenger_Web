@@ -23,6 +23,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const conversations = useStore((s) => s.conversations);
   const activeId = useStore((s) => s.activeId);
   const stickerManager = useStore((s) => s.stickerManager);
+  const anyUnread = Object.values(conversations).some((c) => c.unread > 0 || c.markedUnread);
   const typing = useStore((s) => s.typing);
   const account = useStore((s) => [s.signal.account, s.whatsapp.me].filter(Boolean).join(" · "));
   const [query, setQuery] = useState('');
@@ -136,6 +137,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
             <div className="menu" role="menu">
               <button role="menuitem" onClick={() => (setMode('group'), setMenu(false))}>
                 <Icon name="group" size={18} /> New group
+              </button>
+              <button role="menuitem" disabled={!anyUnread} onClick={() => (setMenu(false), void api.markAllRead().catch(() => {}))}>
+                <Icon name="read" size={18} /> Mark all as read
               </button>
               <button role="menuitem" onClick={() => (setMode('settings'), setMenu(false))}>
                 <Icon name="gear" size={18} /> Settings

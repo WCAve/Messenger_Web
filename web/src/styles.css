@@ -3540,3 +3540,7 @@ button.stk-pack-head {
 .settings-nav-row > .icon:last-child {
   transform: rotate(-90deg);
 }
+.row-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
