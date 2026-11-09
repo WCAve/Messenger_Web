@@ -3,7 +3,7 @@
  * join a WhatsApp group by link), New group (GroupManage.tsx), Settings (Settings.tsx), and the sticker
  * manager when `stickerManager` is set in the store. The chat list: pinned chats first (drag to
  * reorder), search across chats, the ⋮ menu (New group, Mark all as read, Settings, Sticker manager,
- * refresh, sign out), per-row menus (pin, mute, archive, mark unread), the notifications banner, and the
+ * What's new, refresh, sign out), per-row menus (pin, mute, archive, mark unread), the notifications banner, and the
  * resizer on its right edge.
  */
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -154,6 +154,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
               </button>
               <button role="menuitem" onClick={() => (setState({ stickerManager: true }), setMenu(false))}>
                 <Icon name="sticker" size={18} /> Sticker manager
+              </button>
+              <button role="menuitem" onClick={() => (setState({ whatsNew: 'all' }), setMenu(false))}>
+                <Icon name="info" size={18} /> What’s new
               </button>
               <button role="menuitem" onClick={() => (api.refreshDirectory().catch(() => {}), setMenu(false))}>
                 <Icon name="refresh" size={18} /> Refresh contacts and groups

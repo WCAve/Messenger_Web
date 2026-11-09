@@ -17,6 +17,7 @@ with a comment saying what it does; this is the map.
 | `jump.ts` | Opening a chat at a particular message |
 | `notifications.ts` | Browser notifications (permission state, pictures with initials) |
 | `favicon.ts` | Unread count inside the tab icon |
+| `changelog.ts` | What's new, in plain words; shown after an update (`components/WhatsNew.tsx`). Add a line for every change people notice |
 | `util.ts` | Small helpers (hues, initials, images, safe links) |
 | `emoji/` | Emoji data (`curated.ts` hand-picked with shortcodes, `extra.ts` generated), search, usage, rendering in the chosen style |
 | **components/** | |

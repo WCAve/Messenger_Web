@@ -6,7 +6,7 @@ import type { Message } from '../types';
 import { Avatar, Icon } from './ui';
 import { Emojified } from '../emoji/render';
 
-function Dialog({ title, onClose, children, label }: { title: string; onClose: () => void; children: ReactNode; label?: string }) {
+export function Dialog({ title, onClose, children, label }: { title: string; onClose: () => void; children: ReactNode; label?: string }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);

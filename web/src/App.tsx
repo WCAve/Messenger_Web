@@ -2,13 +2,14 @@
  * The app shell: login check → link screen (no Signal account yet) → the main layout (Sidebar, chat,
  * side panel). Also owns the live connection (useLiveEvents: Server-Sent Events from /api/events, with
  * a full resync on every reconnect), browser notifications for new messages, the tab title and the
- * tab-icon count. Layout: sidebar left; chat in the middle; the info/search panel right (`panel` in the
+ * tab-icon count, and the What's new window after an update. Layout: sidebar left; chat in the middle; the info/search panel right (`panel` in the
  * store); on phones one of them at a time (`chat-open`).
  */
 import { type CSSProperties, useEffect, useState } from 'react';
 import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';
 import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
+import { WhatsNew, useWhatsNewAfterUpdate } from './components/WhatsNew';
 import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
 import { ForwardDialog } from './components/Extras';
@@ -57,6 +58,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   }, [activeId]);
 
   useLiveEvents();
+  useWhatsNewAfterUpdate();
   useEffect(() => void loadUsage(), []);
 
   // Tell the server while this browser is open and in front (WhatsApp "show me as online").
@@ -158,6 +160,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
       {active && panel?.kind === 'search' && <SearchPanel conversation={active} date={!!panel.date} />}
       {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}
+      <WhatsNew />
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );

@@ -18,6 +18,9 @@ do update these docs when you change how something works.
 - **Never** ask for or paste the WAHA API key, the app password or the 64-digit backup key in chat.
   For checks on the server, give `docker exec signal-web …` commands that read secrets from the
   container's own environment, or that prompt for them locally (`read -s`).
+- **Every change the owner will notice gets a line in `web/src/changelog.ts`** (newest first, plain
+  words, a new entry id for a new day), in the same commit. It's shown in a "What's new" window after
+  each update.
 - Plain language in everything the owner reads (UI text, replies): no jargon where a normal word works.
 - The owner keeps a to-do list (TODO.md) in a folder they connect to the session; keep it up to date
   when it's connected (tick off, add, move to "Done").

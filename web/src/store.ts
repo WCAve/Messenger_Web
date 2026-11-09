@@ -49,6 +49,7 @@ export interface State {
   groupTick: Record<number, number>; // bumped when a group's details change
   /** The sticker manager is open (in the chat list column). */
   stickerManager: boolean;
+  whatsNew: 'unseen' | 'all' | null; // the What's new window
 }
 
 let state: State = {
@@ -67,6 +68,7 @@ let state: State = {
   receiptTick: 0,
   groupTick: {},
   stickerManager: false,
+  whatsNew: null,
   drafts: loadDrafts(),
   forwarding: null,
 };
