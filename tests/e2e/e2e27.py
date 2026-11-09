@@ -101,7 +101,7 @@ with sync_playwright() as p:
     page.click(panel + ' button:has-text("Leave group")')
     page.wait_for_selector('.blocked-bar:has-text("no longer in this group")', timeout=10000)
     page.wait_for_selector(panel + ' :text("You\'re no longer in this group")')
-    page.click('button[aria-label="New chat"]')
+    page.click('button[aria-label="New WhatsApp chat"]')
     page.click('.chat-row:has-text("Join a WhatsApp group with a link")')
     wa('/mock/group-set', {'group': FAM, 'patch': {'approval': False}})
     page.fill('input[aria-label="WhatsApp group link"]', 'https://' + link)
@@ -143,8 +143,8 @@ with sync_playwright() as p:
     page.wait_for_selector('.blocked-bar:has-text("no longer in this group")', timeout=10000)
     print('signal leave ok')
     # new Signal group
-    page.click('button[aria-label="New chat"]'); page.click('.chat-row:has-text("New group")')
-    page.click('.network-switch button:has-text("Signal group")')
+    page.click('button[aria-label="New Signal chat"]'); page.click('.chat-row:has-text("New Signal group")')
+    assert page.locator('.network-switch').count() == 0  # the + already said which network
     page.click('.person:has-text("Alice de Vries")'); page.click('.person:has-text("Bob Jansen")')
     page.click('.sticky-actions button:has-text("Next (2)")')
     page.fill('input[aria-label="Group name"]', 'Picknick'); page.click('button:has-text("Create group")')

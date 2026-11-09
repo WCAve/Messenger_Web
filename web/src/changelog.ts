@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-09',
     date: '9 November 2026',
     items: [
+      'Two + buttons at the top of the chat list: one for a new Signal chat or group, one for WhatsApp.',
       'What’s new: this window, after every update. See it again any time under ⋮ → What’s new.',
       'Filter the chat list: All, Signal or WhatsApp, with the unread count for each. Your choice is remembered.',
       'Mark all as read, in the ⋮ menu: every chat on both networks at once.',

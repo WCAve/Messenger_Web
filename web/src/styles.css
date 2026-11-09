@@ -3672,3 +3672,16 @@ button.stk-pack-head {
   text-align: center;
   padding: 24px 16px;
 }
+
+/* the + per network: the same S / W badge as on chat pictures */
+.new-chat-btn {
+  position: relative;
+}
+.new-chat-btn .net-badge {
+  right: 1px;
+  bottom: 1px;
+  width: 13px;
+  height: 13px;
+  font-size: 8px;
+  border-color: var(--sidebar);
+}

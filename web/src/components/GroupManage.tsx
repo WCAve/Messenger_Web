@@ -468,10 +468,13 @@ function MyLabel({ group }: { group: GroupHandle }) {
 // ---------------------------------------------------------------------------
 // New group (sidebar view)
 
-export function NewGroup({ onClose }: { onClose: () => void }) {
+export function NewGroup({ onClose, initialNetwork }: { onClose: () => void; initialNetwork?: Network | null }) {
   const signalOn = useStore((s) => s.signal.status !== 'disabled');
   const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
-  const [network, setNetwork] = useState<Network>(signalOn ? 'signal' : 'whatsapp');
+  // From a network's own + button: that network, no switch. From the ⋮ menu: a choice.
+  const [network, setNetwork] = useState<Network>(initialNetwork ?? (signalOn ? 'signal' : 'whatsapp'));
+  const fixed = !!initialNetwork;
+  const netName = network === 'signal' ? 'Signal' : 'WhatsApp';
   const [step, setStep] = useState<'people' | 'details'>('people');
   const [chosen, setChosen] = useState<Candidate[]>([]);
   const [name, setName] = useState('');
@@ -503,11 +506,11 @@ export function NewGroup({ onClose }: { onClose: () => void }) {
         <button className="icon-btn" onClick={() => (step === 'details' ? setStep('people') : onClose())} aria-label="Back">
           <Icon name="back" />
         </button>
-        <h2>{step === 'people' ? 'Add group members' : 'New group'}</h2>
+        <h2>{step === 'people' ? (fixed ? `Add ${netName} group members` : 'Add group members') : fixed ? `New ${netName} group` : 'New group'}</h2>
       </header>
       {step === 'people' ? (
         <>
-          {signalOn && waOn && (
+          {signalOn && waOn && !fixed && (
             <div className="network-switch" role="radiogroup" aria-label="Network">
               {(['signal', 'whatsapp'] as const).map((n) => (
                 <button key={n} role="radio" aria-checked={network === n} className={network === n ? 'on' : undefined} onClick={() => (setNetwork(n), setChosen([]))}>

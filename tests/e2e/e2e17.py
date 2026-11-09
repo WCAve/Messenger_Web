@@ -32,7 +32,7 @@ with sync_playwright() as p:
     page.wait_for_selector(row('Familie'), timeout=20000); time.sleep(8)
 
     # 6. number check
-    page.click('button[aria-label="New chat"]'); page.fill('input[aria-label="Name or phone number"]', '+31699990000')
+    page.click('button[aria-label="New WhatsApp chat"]'); page.fill('input[aria-label="Name or phone number"]', '+31699990000')
     page.click('.chat-row:has-text("on WhatsApp")')
     page.wait_for_selector("text=isn't on WhatsApp", timeout=8000)
     page.fill('input[aria-label="Name or phone number"]', '+31699991234')

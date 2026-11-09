@@ -1,5 +1,6 @@
 /**
- * The left column. Modes: the chat list, archived chats, New chat (search, start by number, New group,
+ * The left column. Modes: the chat list, archived chats, New chat (one + per network when both are set
+ * up: search, start by number, New group,
  * join a WhatsApp group by link), New group (GroupManage.tsx), Settings (Settings.tsx), and the sticker
  * manager when `stickerManager` is set in the store. The chat list: pinned chats first (drag to
  * reorder), All / Signal / WhatsApp filter buttons, search across chats, the ⋮ menu (New group, Mark all as read, Settings, Sticker manager,
@@ -9,7 +10,7 @@
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { getState, setState, upsertConversation, useStore } from '../store';
-import type { Conversation, SearchResult } from '../types';
+import type { Conversation, Network, SearchResult } from '../types';
 import { jumpToMessage } from '../jump';
 import { Highlight } from './InfoPanel';
 import { formatListTime } from '../util';
@@ -18,7 +19,7 @@ import { setPrefs, usePrefs } from '../prefs';
 import { type SettingsPage, SettingsView } from './Settings';
 import { StickerManager } from './StickerManager';
 import { JoinByLink, NewGroup } from './GroupManage';
-import { Avatar, Icon, StatusMark, useMenu } from './ui';
+import { Avatar, Icon, NetworkBadge, StatusMark, useMenu } from './ui';
 import { Emojified } from '../emoji/render';
 
 type TypingKind = 'typing' | 'recording' | null;
@@ -37,6 +38,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const [query, setQuery] = useState('');
   const [mode, setMode] = useState<'list' | 'new' | 'group' | 'settings' | 'archived'>('list');
   const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
+  const [newNetwork, setNewNetwork] = useState<Network | null>(null); // which + was clicked
   const drafts = useStore((s) => s.drafts);
   const [menu, setMenu, menuRef] = useMenu();
   const [found, setFound] = useState<SearchResult[] | null>(null);
@@ -58,6 +60,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   const archivedMode = mode === 'archived';
   // Only Signal / only WhatsApp (remembered in this browser). Offered when both are set up.
   const bothNetworks = useStore((s) => s.signal.status !== 'disabled' && s.whatsapp.status !== 'disabled');
+  const signalOnly = useStore((s) => s.whatsapp.status === 'disabled');
   const [netFilter, setNetFilterState] = useState<NetFilter>(readNetFilter);
   const setNetFilter = (f: NetFilter) => {
     setNetFilterState(f);
@@ -117,8 +120,8 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
     },
   };
 
-  if (mode === 'new') return <NewChat onClose={() => setMode('list')} onNewGroup={() => setMode('group')} />;
-  if (mode === 'group') return <NewGroup onClose={() => setMode('list')} />;
+  if (mode === 'new') return <NewChat network={newNetwork} onClose={() => setMode('list')} onNewGroup={() => setMode('group')} />;
+  if (mode === 'group') return <NewGroup onClose={() => setMode('list')} initialNetwork={newNetwork} />;
   if (stickerManager) return <StickerManager />;
   if (mode === 'settings') return <SettingsView onClose={() => (setMode('list'), setSettingsPage(null))} onLogout={onLogout} initialPage={settingsPage} />;
 
@@ -151,16 +154,22 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
             <span>{account}</span>
           </div>
         </div>
-        <button className="icon-btn" onClick={() => setMode('new')} title="New chat" aria-label="New chat">
-          <Icon name="plus" />
-        </button>
+        {(bothNetworks ? (['signal', 'whatsapp'] as const) : [signalOnly ? ('signal' as const) : ('whatsapp' as const)]).map((n) => {
+          const label = bothNetworks ? `New ${n === 'signal' ? 'Signal' : 'WhatsApp'} chat` : 'New chat';
+          return (
+            <button key={n} className="icon-btn new-chat-btn" onClick={() => (setNewNetwork(n), setMode('new'))} title={label} aria-label={label}>
+              <Icon name="plus" />
+              {bothNetworks && <NetworkBadge network={n} />}
+            </button>
+          );
+        })}
         <div className="menu-wrap" ref={menuRef}>
           <button className="icon-btn" onClick={() => setMenu((m) => !m)} aria-label="Menu" aria-expanded={menu}>
             <Icon name="more" />
           </button>
           {menu && (
             <div className="menu" role="menu">
-              <button role="menuitem" onClick={() => (setMode('group'), setMenu(false))}>
+              <button role="menuitem" onClick={() => (setNewNetwork(null), setMode('group'), setMenu(false))}>
                 <Icon name="group" size={18} /> New group
               </button>
               <button role="menuitem" disabled={!anyUnread} onClick={() => (setMenu(false), void api.markAllRead().catch(() => {}))}>
@@ -600,15 +609,17 @@ function ChatRow({ c, active, typing, draft, drag }: { c: Conversation; active: 
   );
 }
 
-function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () => void }) {
+function NewChat({ network, onClose, onNewGroup }: { network: Network | null; onClose: () => void; onNewGroup: () => void }) {
   const [joining, setJoining] = useState(false);
   const [dir, setDir] = useState<Awaited<ReturnType<typeof api.directory>> | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
-  const signalOn = useStore((s) => s.signal.status !== 'disabled');
-  const waOn = useStore((s) => s.whatsapp.status !== 'disabled');
-  const multi = signalOn && waOn;
+  // A + per network: only that network's contacts, groups and numbers.
+  const signalOn = useStore((s) => s.signal.status !== 'disabled') && network !== 'whatsapp';
+  const waOn = useStore((s) => s.whatsapp.status !== 'disabled') && network !== 'signal';
+  const multi = signalOn && waOn; // this view lists both networks
+  const both = useStore((s) => s.signal.status !== 'disabled' && s.whatsapp.status !== 'disabled'); // say which network wherever both exist
 
   useEffect(() => {
     api.directory().then(setDir).catch((e) => setError(e.message));
@@ -633,7 +644,7 @@ function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () 
   const matches = (name: string, number: string | null) => !query || name.toLowerCase().includes(query) || (!!digits && !!number?.replace(/\D/g, '').includes(digits));
   const contacts = signalOn ? (dir?.contacts ?? []).filter((c) => matches(c.name, c.number)) : [];
   const waContacts = waOn ? (dir?.waContacts ?? []).filter((c) => matches(c.name, c.number)) : [];
-  const groups = (dir?.groups ?? []).filter((g) => !query || g.title.toLowerCase().includes(query));
+  const groups = (dir?.groups ?? []).filter((g) => (!network || g.network === network) && (!query || g.title.toLowerCase().includes(query)));
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -650,7 +661,7 @@ function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () 
         <button className="icon-btn" onClick={onClose} aria-label="Back to chats">
           <Icon name="back" />
         </button>
-        <h2>New chat</h2>
+        <h2>{network && !multi ? `New ${network === 'signal' ? 'Signal' : 'WhatsApp'} chat` : 'New chat'}</h2>
       </header>
       <form className="search" onSubmit={submit}>
         <Icon name="search" size={18} />
@@ -665,7 +676,7 @@ function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () 
                 <Icon name="group" size={22} />
               </span>
               <span className="chat-row-main">
-                <span className="chat-title">New group</span>
+                <span className="chat-title">{network && !multi ? `New ${network === 'signal' ? 'Signal' : 'WhatsApp'} group` : 'New group'}</span>
               </span>
             </button>
             {waOn && (
@@ -683,17 +694,17 @@ function NewChat({ onClose, onNewGroup }: { onClose: () => void; onNewGroup: () 
         )}
         {looksLikeNumber && signalOn && (
           <button className="chat-row" onClick={() => open({ number: typed })}>
-            <Avatar name="#" seed={q} network={multi ? 'signal' : undefined} />
+            <Avatar name="#" seed={q} network={both ? 'signal' : undefined} />
             <span className="chat-row-main">
-              <span className="chat-title">Message {typed}{multi ? ' on Signal' : ''}</span>
+              <span className="chat-title">Message {typed}{both ? ' on Signal' : ''}</span>
             </span>
           </button>
         )}
         {looksLikeNumber && waOn && (
           <button className="chat-row" onClick={() => open({ number: typed, network: 'whatsapp' })}>
-            <Avatar name="#" seed={q + 'wa'} network={multi ? 'whatsapp' : undefined} />
+            <Avatar name="#" seed={q + 'wa'} network={both ? 'whatsapp' : undefined} />
             <span className="chat-row-main">
-              <span className="chat-title">Message {typed}{multi ? ' on WhatsApp' : ''}</span>
+              <span className="chat-title">Message {typed}{both ? ' on WhatsApp' : ''}</span>
             </span>
           </button>
         )}

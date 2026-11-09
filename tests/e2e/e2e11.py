@@ -123,7 +123,7 @@ with sync_playwright() as p:
     print('group ok')
 
     # new WhatsApp chat by number
-    page.click('button[aria-label="New chat"]'); page.fill('input[aria-label="Name or phone number"]', '+31655500077')
+    page.click('button[aria-label="New WhatsApp chat"]'); page.fill('input[aria-label="Name or phone number"]', '+31655500077')
     page.click('.chat-row:has-text("on WhatsApp")'); page.wait_for_selector('.chat-head:has-text("+31655500077")')
     page.click('textarea'); page.keyboard.type('Hallo nieuw nummer'); page.keyboard.press('Enter')
     wait(lambda: wsent(lambda x: x['path'] == '/api/sendText' and x['chatId'] == '31655500077@c.us'))
