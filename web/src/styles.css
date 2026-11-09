@@ -3044,7 +3044,8 @@ aside[aria-label='Search messages'] .panel-body > .panel-empty {
 }
 .quote-note {
   font-weight: 400;
-  color: var(--ink-3);
+  color: inherit; /* readable on your own coloured bubbles too */
+  opacity: 0.75;
   font-size: 12px;
 }
 
@@ -3566,4 +3567,26 @@ button.stk-pack-head {
   bottom: -18px;
   padding: 10px 0 6px;
   background: var(--paper);
+}
+
+/* a reply quoting a sticker or photo: thumbnail on the right, like Signal and WhatsApp */
+.quote:has(.quote-thumb) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: center;
+}
+.quote:has(.quote-thumb) > :not(.quote-thumb) {
+  grid-column: 1;
+}
+.quote-thumb {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+.quote-thumb.sticker {
+  object-fit: contain;
+  border-radius: 0;
 }

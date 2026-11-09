@@ -49,6 +49,7 @@ import {
   type Reaction,
   conversationDto,
   findMessageByExt,
+  quotedMedia,
   findWaChat,
   freeTimestamp,
   getConversation,
@@ -1671,7 +1672,10 @@ export async function linkableQuoteId(m: MessageRow): Promise<string | null> {
 /** "> Jan: the quoted text" in WhatsApp's quote formatting, for replies WhatsApp Web can't link. */
 function textQuote(q: MessageRow): string {
   const who = q.outgoing ? 'You' : nameForKey(q.author);
-  const text = (renderBody(q.body, q.ranges)?.text ?? '').replace(/￼/g, '').trim() || (q.attachments ? 'Attachment' : '');
+  const text =
+    (renderBody(q.body, q.ranges)?.text ?? '').replace(/￼/g, '').trim() ||
+    quotedMedia(q.conversation_id, { sentTs: q.sent_ts, author: q.author })?.label ||
+    (q.attachments || q.sticker ? 'Attachment' : '');
   const short = text.length > 160 ? text.slice(0, 157).trimEnd() + '…' : text;
   const lines = short.split('\n').slice(0, 3);
   return `> *${who}:* ${lines[0] ?? ''}\n` + lines.slice(1).map((l) => `> ${l}\n`).join('') + '\n';

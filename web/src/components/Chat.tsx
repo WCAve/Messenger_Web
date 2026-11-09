@@ -661,8 +661,9 @@ const MessageItem = memo(function MessageItem({
               {m.quote.unlinked && <span className="quote-note" title="WhatsApp no longer had this message, so the reply was sent with the quoted text"> · quoted as text</span>}
             </strong>
             <span>
-              <Emojified text={m.quote.text || 'Attachment'} />
+              <Emojified text={m.quote.text || m.quote.media?.label || 'Attachment'} />
             </span>
+            {m.quote.media?.thumb && <img className={`quote-thumb${m.quote.media.kind === 'sticker' ? ' sticker' : ''}`} src={m.quote.media.thumb} alt="" loading="lazy" />}
           </button>
         )}
         {visual.length > 0 && (
@@ -931,6 +932,24 @@ function AttachmentView({ a }: { a: Attachment }) {
       <Icon name="download" size={20} />
     </a>
   );
+}
+
+/** "Sticker", "Photo", "Video" … for a message without text (the bar above the box while replying). */
+function mediaLabel(m: Message): string {
+  if (m.sticker) return 'Sticker';
+  const a = m.attachments[0];
+  if (!a) return '';
+  if (a.sticker) return 'Sticker';
+  if (a.gif) return 'GIF';
+  if (a.contentType.startsWith('image/')) return m.attachments.length > 1 ? `${m.attachments.length} photos` : 'Photo';
+  if (a.contentType.startsWith('video/')) return 'Video';
+  if (a.contentType.startsWith('audio/')) return a.voiceNote ? 'Voice message' : 'Audio';
+  return a.filename || 'File';
+}
+function mediaThumb(m: Message): string | null {
+  if (m.sticker) return m.sticker.url;
+  const a = m.attachments[0];
+  return a && !a.missing && !a.gif && a.contentType.startsWith('image/') ? attachmentUrl(a.id) : null;
 }
 
 export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () => void }) {
@@ -1504,10 +1523,11 @@ function Composer({
           <div>
             <strong>Replying to {replyTo.author === 'self' ? 'yourself' : replyTo.authorName}</strong>
             <span>
-              <Emojified text={replyTo.body || (replyTo.attachments.length ? 'Attachment' : '')} />
+              <Emojified text={replyTo.body || mediaLabel(replyTo)} />
             </span>
             {unlinkable === replyTo.id && <small className="reply-note">Too old to link on WhatsApp: it will be sent with the quoted text</small>}
           </div>
+          {mediaThumb(replyTo) && <img className={`quote-thumb${replyTo.sticker || replyTo.attachments[0]?.sticker ? ' sticker' : ''}`} src={mediaThumb(replyTo)!} alt="" />}
           <button className="icon-btn sm" onClick={clearReply} aria-label="Cancel reply">
             <Icon name="close" size={18} />
           </button>

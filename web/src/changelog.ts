@@ -17,6 +17,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     items: [
       'What’s new: this window, after every update. See it again any time under ⋮ → What’s new.',
       'Mark all as read, in the ⋮ menu: every chat on both networks at once.',
+      'Replies to a sticker or photo show it (a small picture and “Sticker” or “Photo”) instead of just “Attachment”. Also for replies you already had.',
       'Safer sign-in: the limit on wrong passwords can no longer be dodged.',
       'Steadier server: one slow browser tab or one unexpected error no longer affects everyone.',
     ],

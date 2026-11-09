@@ -1046,6 +1046,42 @@ export function attachmentDto(a: Attachment) {
   return { ...a, pending: true };
 }
 
+/**
+ * What a reply quotes, when it's not just text: looked up from the quoted message itself (same chat,
+ * same time and author), so stickers and photos show as a thumbnail and other files by kind. Works
+ * for replies stored before this existed too.
+ */
+export function quotedMedia(conversationId: number, q: Quote): { kind: string; label: string; thumb: string | null } | null {
+  const row =
+    db
+      .prepare<[number, number, string], Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>>(
+        'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ? LIMIT 1',
+      )
+      .get(conversationId, q.sentTs, q.author) ??
+    // WhatsApp may spell the author differently (number or privacy id): the time alone is close enough.
+    db
+      .prepare<[number, number], Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>>(
+        'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1',
+      )
+      .get(conversationId, q.sentTs);
+  if (!row || row.deleted) return null;
+  if (row.sticker) {
+    const st: StickerRef = JSON.parse(row.sticker);
+    return { kind: 'sticker', label: 'Sticker', thumb: stickerUrl(st.packId, st.stickerId) };
+  }
+  const atts: Attachment[] = row.attachments ? JSON.parse(row.attachments) : [];
+  const a = atts[0];
+  if (!a) return null;
+  const url = a.missing ? null : `/api/attachments/${encodeURIComponent(a.id)}`;
+  const t = a.contentType ?? '';
+  if (a.sticker || row.kind === 'sticker') return { kind: 'sticker', label: 'Sticker', thumb: url };
+  if (a.gif) return { kind: 'gif', label: 'GIF', thumb: null };
+  if (t.startsWith('image/')) return { kind: 'image', label: atts.length > 1 ? `${atts.length} photos` : 'Photo', thumb: url };
+  if (t.startsWith('video/')) return { kind: 'video', label: 'Video', thumb: null };
+  if (t.startsWith('audio/')) return { kind: 'audio', label: a.voiceNote ? 'Voice message' : 'Audio', thumb: null };
+  return { kind: 'file', label: a.filename || 'File', thumb: null };
+}
+
 export function messageDto(m: MessageRow) {
   const quote: Quote | null = m.quote ? JSON.parse(m.quote) : null;
   const reactions: Reaction[] = m.reactions ? JSON.parse(m.reactions) : [];
@@ -1071,7 +1107,7 @@ export function messageDto(m: MessageRow) {
     expiresIn: m.expires_in || undefined,
     expiresAt: m.expires_at ?? undefined,
     attachments: m.deleted ? [] : ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]).map(attachmentDto),
-    quote: quote && !m.deleted ? { sentAt: quote.sentTs, author: quote.author, authorName: nameForKey(quote.author), text: renderMentions(quote.text) ?? '', ...(quote.unlinked ? { unlinked: true } : {}) } : null,
+    quote: quote && !m.deleted ? quoteDto(m.conversation_id, quote) : null,
     reactions: reactions.map((r) => ({ emoji: r.emoji, author: r.author, authorName: nameForKey(r.author) })),
     status: m.status === 'viewed' ? 'read' : m.status,
     error: m.error,
@@ -1082,6 +1118,20 @@ export function messageDto(m: MessageRow) {
   };
 }
 export type MessageDto = ReturnType<typeof messageDto>;
+
+function quoteDto(conversationId: number, quote: Quote) {
+  const media = quotedMedia(conversationId, quote);
+  let text = renderMentions(quote.text) ?? '';
+  if (media && (!text || text === 'Attachment')) text = ''; // the media label says it better
+  return {
+    sentAt: quote.sentTs,
+    author: quote.author,
+    authorName: nameForKey(quote.author),
+    text,
+    ...(media ? { media } : {}),
+    ...(quote.unlinked ? { unlinked: true } : {}),
+  };
+}
 
 function pollDto(p: Poll) {
   const voters: { key: string; name: string }[][] = p.options.map(() => []);

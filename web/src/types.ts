@@ -187,7 +187,15 @@ export interface Message {
   kind: 'message' | 'sticker' | 'system' | 'poll';
   body: string | null;
   attachments: Attachment[];
-  quote: { sentAt: number; author: string; authorName: string; text: string; unlinked?: boolean } | null;
+  quote: {
+    sentAt: number;
+    author: string;
+    authorName: string;
+    text: string;
+    /** What the quoted message holds when it's not just text (a thumbnail for stickers and photos). */
+    media?: { kind: 'sticker' | 'gif' | 'image' | 'video' | 'audio' | 'file'; label: string; thumb: string | null };
+    unlinked?: boolean;
+  } | null;
   reactions: { emoji: string; author: string; authorName: string }[];
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | null;
   error: string | null;
