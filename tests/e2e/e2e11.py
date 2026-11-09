@@ -1,5 +1,5 @@
 """WhatsApp basics: chat list, history, send, reactions, edit/delete, attachments, groups, new chat, forward, links, menus, unlinking."""
-import sys, time, json, urllib.request
+import os, sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright
 
 def goto(pg, title): pg.click(f'.settings-nav-row:has(strong:text-is("{title}"))')
@@ -7,6 +7,7 @@ def to_chats(pg):
     if pg.locator('button[aria-label="Back to settings"]').count(): pg.click('button[aria-label="Back to settings"]')
     pg.click('button[aria-label="Back to chats"]')
 S = sys.argv[1]; errors = []
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')  # test files kept in the repo
 def req(base, path, data=None):
     r = urllib.request.Request(base + path, data=json.dumps(data).encode() if data is not None else None, headers={'content-type': 'application/json'}, method='POST' if data is not None else 'GET')
     return json.loads(urllib.request.urlopen(r).read() or b'null')
@@ -95,7 +96,7 @@ with sync_playwright() as p:
     print('edit/delete ok')
 
     # attachment
-    page.set_input_files('input[type=file][multiple]', f'{S}/photo.png'); page.click('textarea'); page.keyboard.type('foto noreply'); page.keyboard.press('Enter')
+    page.set_input_files('input[type=file][multiple]', f'{FIX}/photo.png'); page.click('textarea'); page.keyboard.type('foto noreply'); page.keyboard.press('Enter')
     a = wait(lambda: wsent(lambda x: x['path'] == '/api/sendImage'))[-1]
     assert a['caption'] == 'foto noreply' and a['file']['mimetype'] == 'image/png', a
     print('attachment ok')

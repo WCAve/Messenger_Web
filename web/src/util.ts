@@ -1,3 +1,4 @@
+/** Small helpers: avatar hues and initials, file reading, image resizing, safe links. */
 const HUES = [221, 262, 330, 12, 32, 152, 188, 200, 290, 96];
 
 /** A stable hue per person/chat, used for avatars and sender names in groups. */
@@ -125,4 +126,9 @@ export function untilLabel(ts: number): string {
   if (s < 3600) return `${Math.round(s / 60)} min`;
   if (s < 86400) return `${Math.round(s / 3600)} h`;
   return `${Math.round(s / 86400)} days`;
+}
+
+/** Only web addresses become links: a link from someone else's message never runs anything here. */
+export function safeHref(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url) ? url : undefined;
 }

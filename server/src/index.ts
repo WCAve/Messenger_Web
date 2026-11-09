@@ -1,3 +1,9 @@
+/**
+ * Start-up: refuses to run without APP_PASSWORD, opens the database (migrations), runs one-off
+ * clean-ups (each guarded by a kv flag), starts Signal (signal.ts) and WhatsApp (whatsapp.ts), and
+ * serves the API (routes.ts) and the built web app (web/dist) with security headers (CSP: no inline
+ * scripts, so no eval either). Logs go to stdout: `docker logs signal-web`.
+ */
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -179,5 +185,8 @@ const shutdown = () => {
   db.close();
   process.exit(0);
 };
+// A forgotten .catch() somewhere shouldn't take the whole server down (Node exits on these by default).
+process.on('unhandledRejection', (e) => log('error', `unhandled error (kept running): ${(e as Error)?.stack ?? String(e)}`));
+process.on('uncaughtException', (e) => log('error', `uncaught exception (kept running): ${e.stack ?? String(e)}`));
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);

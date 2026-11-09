@@ -11,7 +11,7 @@
   <Project>https://github.com/WCAve/Messenger_Web</Project>
   <Overview>One web interface for Signal and WhatsApp. Links to your phone as a linked device on each network (through the signal-api container for Signal and WAHA for WhatsApp), stores your chat history locally, and serves a password-protected web UI.&#xD;
 &#xD;
-Needs signal-cli-rest-api (MODE=json-rpc or json-rpc-native) and/or WAHA (devlikeapro/waha). Set SIGNAL_API_URL to off to use WhatsApp only, or leave WAHA URL empty for Signal only. See the project README.</Overview>
+Needs signal-cli-rest-api (MODE=json-rpc or json-rpc-native) and/or WAHA (devlikeapro/waha:chrome with the WEBJS engine). Set SIGNAL_API_URL to off to use WhatsApp only, or leave WAHA URL empty for Signal only. See the project README.</Overview>
   <Category>Network:Messenger Productivity:</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/WCAve/Messenger_Web/main/unraid/messenger-web.xml</TemplateURL>

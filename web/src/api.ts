@@ -1,3 +1,9 @@
+/**
+ * Every call to the server, typed. `call()` does JSON over fetch with the session cookie; a 401
+ * anywhere sends the app back to the login screen (onUnauthorized). Big uploads (Android backups) go
+ * through uploadBackup (XMLHttpRequest, for progress). Server routes: server/src/routes.ts and
+ * groups.ts.
+ */
 import type { BackupFile, GroupAction, GroupDetails, Network, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 

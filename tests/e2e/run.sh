@@ -11,7 +11,7 @@
 set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT="${OUT:-$ROOT/.test-out}"
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$OUT/shots" "$OUT/shots6" "$OUT/b28" # folders some suites write into
 cd "$ROOT"
 
 stop_all() {

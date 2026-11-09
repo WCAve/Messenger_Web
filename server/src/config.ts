@@ -1,3 +1,8 @@
+/**
+ * Everything the container's environment variables control, in one object. The full list with
+ * explanations is in README.md (Configuration). Settings a user can change in the app live in
+ * settings.ts (stored in the database, the environment gives the defaults).
+ */
 import path from 'node:path';
 
 function bool(v: string | undefined, def: boolean): boolean {

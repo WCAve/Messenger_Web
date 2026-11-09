@@ -1,6 +1,7 @@
 /**
- * Unread badge on the tab icon: the app icon with a red count in the corner (9+ above nine),
- * the same count as in the tab title (muted chats don't count).
+ * Unread count in the tab icon, like WhatsApp: the number takes the place of the three dots in the
+ * speech bubble (9+ above nine). Same count as the tab title, so muted chats don't count. The plain
+ * logo (/icon.svg) when nothing's unread. Drawn as SVG and set as a data: URL on <link rel="icon">.
  */
 const ICON_BODY =
   '<rect width="64" height="64" rx="16" fill="#3A5BD9"/>' +

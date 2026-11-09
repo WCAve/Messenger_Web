@@ -1,3 +1,10 @@
+/**
+ * The app shell: login check → link screen (no Signal account yet) → the main layout (Sidebar, chat,
+ * side panel). Also owns the live connection (useLiveEvents: Server-Sent Events from /api/events, with
+ * a full resync on every reconnect), browser notifications for new messages, the tab title and the
+ * tab-icon count. Layout: sidebar left; chat in the middle; the info/search panel right (`panel` in the
+ * store); on phones one of them at a time (`chat-open`).
+ */
 import { type CSSProperties, useEffect, useState } from 'react';
 import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';

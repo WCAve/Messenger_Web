@@ -1,3 +1,11 @@
+/**
+ * The left column. Modes: the chat list, archived chats, New chat (search, start by number, New group,
+ * join a WhatsApp group by link), New group (GroupManage.tsx), Settings (Settings.tsx), and the sticker
+ * manager when `stickerManager` is set in the store. The chat list: pinned chats first (drag to
+ * reorder), search across chats, the ⋮ menu (New group, Mark all as read, Settings, Sticker manager,
+ * refresh, sign out), per-row menus (pin, mute, archive, mark unread), the notifications banner, and the
+ * resizer on its right edge.
+ */
 import { type FormEvent, type PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { getState, setState, upsertConversation, useStore } from '../store';

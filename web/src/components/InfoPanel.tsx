@@ -1,10 +1,16 @@
+/**
+ * The panel on the right: chat info (picture, name, about/description, media and links, members,
+ * group management from GroupManage.tsx, disappearing messages, block, WhatsApp contact actions),
+ * search in the chat (and "go to date"), and message info (who received/read it). Which one is open
+ * is `panel` in the store.
+ */
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import { jumpToMessage } from '../jump';
 import { NETWORK_LABEL, capsFor } from '../networks';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
-import { TIMER_OPTIONS, durationLabel, formatDay, formatListTime, formatSize, formatTime, squareAvatar } from '../util';
+import { durationLabel, formatDay, formatListTime, formatSize, formatTime, safeHref, squareAvatar, TIMER_OPTIONS } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
 import { EditableText, GroupManageSections, MemberMenu, useGroup } from './GroupManage';
 
@@ -231,7 +237,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
             <ul className="panel-list">
               {info.links.map((l, i) => (
                 <li key={i}>
-                  <a className="file" href={l.url} target="_blank" rel="noopener noreferrer">
+                  <a className="file" href={safeHref(l.url)} target="_blank" rel="noopener noreferrer">
                     <Icon name="link" size={22} />
                     <span>
                       <strong>{l.url.replace(/^https?:\/\/(www\.)?/, '')}</strong>

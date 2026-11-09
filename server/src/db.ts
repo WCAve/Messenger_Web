@@ -1,3 +1,10 @@
+/**
+ * SQLite (node:sqlite, no dependencies) in DATA_DIR/signal-web.db. The schema is the MIGRATIONS list
+ * below, applied in order by PRAGMA user_version: never edit an existing entry, add a new one. The
+ * comments in it are the reference for every table and column. `kv` holds small settings and one-off
+ * flags (see docs/ARCHITECTURE.md for the keys). Prepared statements are cached by their SQL text, so
+ * build SQL from fixed strings and pass values as parameters.
+ */
 import fs from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { config } from './config.js';

@@ -1,3 +1,11 @@
+/**
+ * Settings: a main list (SettingsView) with one page per group: Profile (Signal and WhatsApp),
+ * Chats, Appearance, Notifications, Privacy, WhatsApp (link, status, unlink), History and backup
+ * (WhatsApp history import, Android backup import, media folder, member labels), Account. Each row
+ * on the list says what's set. `initialPage` opens a page directly (the notifications banner).
+ * Browser-only settings live in prefs.ts; settings that change what others see go to the server
+ * (server/src/settings.ts).
+ */
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Profile, type ServerSettings, type WaProfile, api, uploadBackup } from '../api';
 import type { BackupFile } from '../types';

@@ -1,6 +1,33 @@
 /**
- * WhatsApp through WAHA: keeps the session linked and running, turns WAHA's websocket events into
- * stored messages, imports recent history once, and sends on behalf of the browser.
+ * WhatsApp through WAHA (WEBJS engine: WhatsApp Web in a browser inside the WAHA container). Keeps the
+ * session linked and running, turns WAHA's websocket events into stored messages, imports history, and
+ * sends on behalf of the browser. waha-api.ts is the thin HTTP client; this is the logic.
+ *
+ * Sections (search for "// ----------"):
+ *   ids          WhatsApp ids: …@c.us (number), …@lid (privacy id), …@g.us (group). resolve() prefers the
+ *                number; lid↔number links are remembered in kv (lid:/lidof:) and come from WAHA, the
+ *                Android backup (seedLids) and group members (linkGroupLids). keyFor() → "wa:<jid>" / "self".
+ *   connection   check() polls the session status; connectWs() opens the event websocket; afterConnect()
+ *                runs once per connect: directory, one-off clean-ups, history import. A FAILED session is
+ *                restarted automatically.
+ *   directory    contacts and groups (names, members, admins); refreshGroupSoon batches member refreshes.
+ *   incoming     ingestMessage(): one entry point for live events AND the history import. A per-message
+ *                lock stops the two from storing the same message twice; HD photo/video copies
+ *                (associationType *_DUAL_UPLOAD) merge into their original. richFromWa() turns WhatsApp
+ *                markup and @mentions into stored text + ranges. Files: downloaded live; for imported
+ *                history only noted (wa_media) and fetched when someone looks (fetchWaMedia).
+ *   handleEvent  the switch over WAHA events (message, ack, reaction, revoked, edited, presence, poll,
+ *                calls, groups, labels, archive, engine.event for unread counts and group lines). Events
+ *                are handled strictly one after another.
+ *   history      importHistory(): pages of 1000 per chat, resumable, skips chats that crash WhatsApp Web.
+ *   outgoing     deliverWa() sends a stored pending message; replies only link when WhatsApp Web has the
+ *                original (linkableQuoteId), otherwise the quote goes as text.
+ *   presence, contacts and profile, stickers, group system lines, calls, avatars, blocking.
+ *
+ * WEBJS quirks worth knowing: getChats is heavy (it looks up every group), so the directory is loaded
+ * once and then patched by events; replies need the quoted message to be known to WhatsApp Web; member
+ * labels only exist for labels set after WAHA was linked (older ones come from the Android backup); video
+ * sending needs WAHA's Chrome image (devlikeapro/waha:chrome).
  */
 import crypto from 'node:crypto';
 import fs from 'node:fs';

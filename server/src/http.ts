@@ -1,6 +1,19 @@
-/** Minimal HTTP router on top of node:http — just what Signal Web needs. */
+/**
+ * Minimal HTTP router on top of node:http (no dependencies). Routes are added with r.get/post/delete
+ * ("/api/x/:id" parameters); auth=true by default (session cookie). Bodies: JSON up to a limit, or raw
+ * streams for big uploads. The client address for rate limiting: see `ip` below.
+ */
 import fs from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+
+/** Loopback, private (RFC 1918), unique-local and link-local addresses: where a reverse proxy would be. */
+export function isPrivateAddress(ip: string): boolean {
+  const v4 = ip.replace(/^::ffff:/, '');
+  if (/^(127\.|10\.|192\.168\.|169\.254\.)/.test(v4)) return true;
+  const m = /^172\.(\d+)\./.exec(v4);
+  if (m && Number(m[1]) >= 16 && Number(m[1]) <= 31) return true;
+  return ip === '::1' || /^f[cd][0-9a-f]{2}:/i.test(ip) || /^fe80:/i.test(ip);
+}
 
 export class HttpError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -167,14 +180,21 @@ export class Router {
     const m = url.pathname.match(route.re)!;
     const params: Record<string, string> = {};
     route.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
-    const fwd = this.opts.trustProxy ? String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() : '';
+    const peer = req.socket.remoteAddress ?? '';
+    // Behind a reverse proxy the peer is the proxy; the client is the LAST X-Forwarded-For entry (the
+    // one the proxy added). Earlier entries come from the client and can say anything, so they never
+    // count, and the header only counts at all when the peer is on your own network (a proxy).
+    const fwd =
+      this.opts.trustProxy && isPrivateAddress(peer)
+        ? String(req.headers['x-forwarded-for'] ?? '').split(',').map((x) => x.trim()).filter(Boolean).pop() ?? ''
+        : '';
     const ctx: Ctx = {
       req,
       res,
       params,
       query: url.searchParams,
       body: undefined,
-      ip: fwd || req.socket.remoteAddress || 'unknown',
+      ip: fwd || peer || 'unknown',
       cookies: parseCookies(req.headers.cookie),
       status: 200,
     };

@@ -1,3 +1,19 @@
+/**
+ * The open chat: header (name, online/typing, menu), the message list and the composer.
+ *
+ *   ChatView      header + list + composer; also the "you left / only admins can send / blocked" bars
+ *   MessageList   paging (older on scroll up, newer when you jumped back in time), day dividers, the
+ *                 unread divider, keeping the scroll position, hover toolbar (react, reply, …)
+ *   RichBody      text with mentions, styles, links and big-emoji; LinkPreviewCard, polls (Extras.tsx)
+ *   AttachmentView / PendingImage / PendingPlayable / MissingMedia
+ *                 files; WhatsApp history files that aren't downloaded yet ask the server and show a
+ *                 placeholder instead of holding a request open (browsers allow only ~6 per site)
+ *   Lightbox      full-screen photos/videos
+ *   Composer      text box (formatting, :shortcodes:, @mentions, drafts), files, voice messages,
+ *                 stickers/emoji/GIFs (Picker.tsx), replies, edits, typing indicator
+ *
+ * What each network can do comes from capsFor (networks.ts); the server decides how to send.
+ */
 import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api, attachmentUrl } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
@@ -9,7 +25,7 @@ import { getPrefs, usePrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, Message, Network } from '../types';
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
-import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, sameDay, untilLabel } from '../util';
+import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { PollDialog, PollView } from './Extras';
 import { ChatRowMenu } from './Sidebar';
@@ -476,7 +492,7 @@ function RichBody({ m }: { m: Message }) {
         }
         if (p.link) {
           node = (
-            <a href={p.link} target="_blank" rel="noopener noreferrer">
+            <a href={safeHref(p.link)} target="_blank" rel="noopener noreferrer">
               {node}
             </a>
           );
@@ -516,7 +532,7 @@ function LinkPreviewCard({ p, onLoad }: { p: LinkPreview; onLoad: () => void }) 
     /* keep the raw url */
   }
   return (
-    <a className={`link-preview${p.image ? ' with-image' : ''}`} href={p.url} target="_blank" rel="noopener noreferrer">
+    <a className={`link-preview${p.image ? ' with-image' : ''}`} href={safeHref(p.url)} target="_blank" rel="noopener noreferrer">
       {p.image && <img src={attachmentUrl(p.image.id)} alt="" loading="lazy" onLoad={onLoad} onError={(e) => (e.currentTarget.style.display = 'none')} />}
       <span className="link-preview-text">
         <strong>{p.title || host}</strong>

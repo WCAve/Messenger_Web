@@ -41,6 +41,8 @@ page.wait_for_selector(row('Familie'), timeout=20000); time.sleep(6)   # let the
   `to_chats(page)` goes back through the list. Both are defined at the top of the suites that use them.
 - Call the app's API with the browser's cookie (see `api()` in e2e27/e2e34).
 - Prove a fix with a test that fails without it (`git stash -- <file>`, build, run, pop).
+- Files a suite reads go in `tests/e2e/fixtures` (use `FIX`); everything a suite writes goes in its
+  output folder (`S`). Never depend on files that only exist on one machine.
 
 ## Test data in the mocks
 

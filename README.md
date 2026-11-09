@@ -107,10 +107,10 @@ Note the host port (the template's default is **8739**).
 
 ### 2. WAHA (skip for Signal only)
 
-Install **WAHA** (`devlikeapro/waha`). Set:
+Install **WAHA** using its Chrome image, `devlikeapro/waha:chrome` (the plain image has Chromium, which can't send videos). Set:
 
 - `WAHA_API_KEY`: a long random key (or use the one WAHA prints in its log on first start).
-- `WHATSAPP_DEFAULT_ENGINE`: `GOWS` is light and stable; `WEBJS` or `WPP` run a real WhatsApp Web in a headless browser (more RAM).
+- `WHATSAPP_DEFAULT_ENGINE`: `WEBJS`. Messenger Web is developed and tested against WEBJS (a real WhatsApp Web in a headless browser); the other engines answer differently in places.
 - Keep its sessions folder (`/app/.sessions`) on appdata so the link survives updates.
 
 Note the host port you gave it (for example **6523**). You don't need to link WhatsApp in WAHA's own dashboard: Messenger Web creates the session and shows the QR code.
@@ -227,31 +227,10 @@ The sample group has a description, admins, an avatar, a member with only a prof
 
 Emoji artwork is in `web/public/emoji`, made by `web/scripts/gen-emoji-assets.py` from the upstream sets (instructions at the top of that script): [Noto Color Emoji](https://github.com/googlefonts/noto-emoji) (SIL OFL 1.1), [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (MIT) and [Twemoji](https://github.com/jdecked/twemoji) (graphics CC-BY 4.0, © Twitter, Inc. and other contributors). Each folder has its license.
 
-### Layout
+### Tests and code guide
 
-```
-server/src
-  index.ts        HTTP server, static files, security headers
-  routes.ts       REST API used by the UI
-  signal.ts       connection to signal-api: status, receive WebSocket, contact/group refresh
-  ingest.ts       turns signal-cli envelopes into stored messages, receipts and live events
-  avatars.ts      profile pictures and group avatars, cached on disk
-  stickers.ts     sticker packs: keys from signal-cli, download + decrypt from Signal's CDN, disk cache
-  stickerpacks.ts your own sticker packs (WhatsApp stickers grouped for the picker)
-  groups.ts       group management for both networks (create, join, members, admins, settings, link, requests, labels)
-  settings.ts     server-wide settings (env defaults, overridable from the UI)
-  store.ts        SQLite access and the JSON shapes sent to the browser
-  signal-api.ts   signal-cli-rest-api client
-  whatsapp.ts     WhatsApp through WAHA: session/linking, events, history import, sending
-  waha-api.ts     WAHA client
-  richtext.ts     mentions and formatting (Signal ranges, WhatsApp markers)
-web/src
-  App.tsx         session, live event stream, notifications
-  components/     Sidebar, Chat (messages + composer), InfoPanel, Picker (emoji/GIF), Login, Setup
-  emoji/          emoji data: curated.ts (shortcodes, keywords) + extra.ts (generated, see web/scripts)
-mock/             fake signal-cli-rest-api and fake WAHA for development and CI
-unraid/           Unraid templates
-```
+- `tests/e2e/run.sh` runs the browser tests against both mocks; see [tests/README.md](tests/README.md).
+- How it works: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Which file does what: [server/README.md](server/README.md), [web/README.md](web/README.md). Notes for AI assistants working on the code: [CLAUDE.md](CLAUDE.md).
 
 Images are built by GitHub Actions and published to `ghcr.io/wcave/messenger_web`.
 

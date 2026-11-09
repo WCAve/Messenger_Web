@@ -29,14 +29,26 @@ export function addClient(req: IncomingMessage, res: ServerResponse, initial: Se
   res.on('error', drop);
 }
 
+/** A tab that stopped reading (asleep, bad network) would otherwise pile events up in memory. */
+const MAX_QUEUED = 4 * 1024 * 1024;
+
+function send(res: ServerResponse, data: string) {
+  if (res.writableLength > MAX_QUEUED) {
+    clients.delete(res);
+    res.destroy(); // the browser reconnects and reloads what it missed
+    return;
+  }
+  res.write(data);
+}
+
 export function broadcast(event: ServerEvent) {
   const data = `data: ${JSON.stringify(event)}\n\n`;
-  for (const res of clients) res.write(data);
+  for (const res of clients) send(res, data);
 }
 
 // Keep idle connections (and any proxy in between) from timing out.
 setInterval(() => {
-  for (const res of clients) res.write(': ping\n\n');
+  for (const res of clients) send(res, ': ping\n\n');
 }, 25_000).unref();
 
 /** Drop every live connection (after "sign out everywhere"); browsers reconnect and hit the login page. */

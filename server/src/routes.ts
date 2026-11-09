@@ -1,3 +1,14 @@
+/**
+ * The HTTP API, one route per thing the browser does. Groups of routes, in order: sign-in and session,
+ * Signal and WhatsApp status/linking, settings, WhatsApp history and Android backup import, pictures
+ * (avatars, stickers), the chat list and messages (send, edit, delete, react, read, flags), files,
+ * profiles, stickers and the sticker manager, search. Group management is in groups.ts (groupRoutes).
+ *
+ * Conventions: `conv(ctx)` loads the chat from :id or 404s; `isWa(c)` picks the network; WhatsApp work
+ * goes through `wa(() => …)` (a clear error when WhatsApp isn't connected); every change is pushed to
+ * open browsers with emitConversation / broadcast. Sending: the message is stored as `pending` first
+ * (queueOutgoing) and delivered in the background, so the browser shows it at once.
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';

@@ -7,7 +7,7 @@ import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import type { Conversation, GroupAction, GroupDetails, GroupPerson, GroupSettings, Member, Network, Who } from '../types';
-import { squareAvatar } from '../util';
+import { safeHref, squareAvatar } from '../util';
 import { Avatar, Icon } from './ui';
 
 /** Loads the group's details and runs actions on it; reloads when the group changes elsewhere. */
@@ -330,7 +330,7 @@ export function GroupManageSections({ conversation, group, members }: { conversa
           {d.inviteLink ? (
             <div className="link-row">
               <Icon name="link" size={20} />
-              <a href={d.inviteLink} target="_blank" rel="noopener noreferrer" className="link-text">
+              <a href={safeHref(d.inviteLink)} target="_blank" rel="noopener noreferrer" className="link-text">
                 {d.inviteLink.replace(/^https?:\/\//, '')}
               </a>
               <button

@@ -1,3 +1,9 @@
+/**
+ * The emoji / sticker / GIF picker under the composer. Stickers: one grid for every chat (Signal's
+ * layout): recent, Signal packs, your own packs (sticker manager), WhatsApp stickers not in a pack, and
+ * on WhatsApp "send an image as a sticker". How a sticker is sent depends on the chat (server). GIFs
+ * come from Giphy when GIPHY_API_KEY is set.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';

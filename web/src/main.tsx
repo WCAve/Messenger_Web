@@ -1,3 +1,4 @@
+/** Entry point: mounts <App/> and the stylesheet. Built by esbuild (web/build.mjs). */
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';

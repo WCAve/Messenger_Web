@@ -1,3 +1,4 @@
+/** The sign-in screen: one password (the container's APP_PASSWORD). */
 import { type FormEvent, useState } from 'react';
 import { api } from '../api';
 

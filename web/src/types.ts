@@ -1,3 +1,7 @@
+/**
+ * The JSON shapes the server sends (conversationDto, messageDto … in server/src/store.ts) and the live
+ * events (ServerEvent, mirrored from server/src/events.ts). Keep both sides in step when changing one.
+ */
 export type SignalStatus = 'starting' | 'unreachable' | 'wrong_mode' | 'unlinked' | 'connecting' | 'connected' | 'disabled';
 
 export type Network = 'signal' | 'whatsapp';

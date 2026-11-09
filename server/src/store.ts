@@ -1,4 +1,14 @@
-/** Data access + the JSON shapes sent to the browser. */
+/**
+ * Data access, and the JSON shapes sent to the browser (conversationDto, messageDto, … mirrored in
+ * web/src/types.ts).
+ *
+ * People are identified by a "key": Signal contacts by uuid (or number when that's all we know),
+ * WhatsApp people as "wa:<jid>" (…@c.us number, or …@lid privacy id), and you as "self". The two
+ * networks never share contacts. Chats are `conversations` rows (network 'signal' or 'whatsapp');
+ * WhatsApp chats have wa_id, Signal groups group_id. Messages: `sent_ts` is Signal's identity on the
+ * wire; WhatsApp messages also have ext_id (the full WhatsApp id) and ext_raw (its message part,
+ * which WhatsApp uses on its own in quotes, edits and deletes) — findMessageByExt matches either.
+ */
 import fs from 'node:fs';
 import { localPath } from './attachments.js';
 import { db, kvGet, kvSet } from './db.js';
@@ -1001,6 +1011,8 @@ export function insertMessage(m: {
   return msgById.get(Number(info.lastInsertRowid));
 }
 
+const UPDATABLE = new Set(['body', 'status', 'error', 'read', 'edited', 'deleted', 'reactions', 'attachments', 'sent_ts', 'ts_confirmed', 'ranges', 'preview', 'expires_at', 'poll', 'ext_id', 'ext_raw', 'forwarded', 'quote']);
+
 export function updateMessage(
   id: number,
   fields: Partial<Pick<MessageRow, 'body' | 'status' | 'error' | 'read' | 'edited' | 'deleted' | 'reactions' | 'attachments' | 'sent_ts' | 'ts_confirmed' | 'ranges' | 'preview' | 'expires_at' | 'poll' | 'ext_id' | 'forwarded' | 'quote'>>,
@@ -1009,6 +1021,8 @@ export function updateMessage(
   if (typeof fields.ext_id === 'string') all.ext_raw = extRawOf(fields.ext_id);
   const keys = Object.keys(all);
   if (!keys.length) return msgById.get(id);
+  // Column names go into the SQL: only ever real ones.
+  for (const k of keys) if (!UPDATABLE.has(k)) throw new Error(`updateMessage: not an updatable field: ${k}`);
   db.prepare(`UPDATE messages SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...all, id });
   return msgById.get(id);
 }

@@ -15,12 +15,12 @@ services:
     # No ports published: only Messenger Web talks to it.
 
   waha:
-    image: devlikeapro/waha:latest
+    image: devlikeapro/waha:chrome # Chrome, not Chromium: needed to send videos
     container_name: waha
     restart: unless-stopped
     environment:
       - WAHA_API_KEY=${WAHA_API_KEY:?set WAHA_API_KEY}
-      - WHATSAPP_DEFAULT_ENGINE=GOWS
+      - WHATSAPP_DEFAULT_ENGINE=WEBJS # what Messenger Web is developed and tested against
     volumes:
       - ./data/waha:/app/.sessions
     # No ports published: only Messenger Web talks to it.

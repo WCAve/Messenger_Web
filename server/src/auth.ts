@@ -1,3 +1,8 @@
+/**
+ * Signing in: one password (APP_PASSWORD), sessions as random tokens in an HttpOnly cookie. The
+ * database stores only a SHA-256 of each token. Failed attempts are limited per client address (see
+ * Router: behind a proxy that's the last X-Forwarded-For entry).
+ */
 import crypto from 'node:crypto';
 import { config } from './config.js';
 import { db } from './db.js';
@@ -53,6 +58,8 @@ export function loginBlocked(ip: string): number {
 }
 
 export function recordLoginFailure(ip: string) {
+  // Forget expired entries, so a flood of addresses can't grow this map forever.
+  if (failures.size > 1000) for (const [k, v] of failures) if (v.until < Date.now()) failures.delete(k);
   const f = failures.get(ip);
   if (!f || f.until < Date.now()) failures.set(ip, { count: 1, until: Date.now() + 15 * 60_000 });
   else f.count++;

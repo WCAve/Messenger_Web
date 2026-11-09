@@ -1,9 +1,10 @@
 """Link previews, polls and votes, forwarding, drafts, pin/mute/archive, the unread divider."""
-import sys, time, json, ssl, threading, urllib.request, base64
+import os, sys, time, json, ssl, threading, urllib.request, base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
-PNG = open(f'{S}/photo.png', 'rb').read()
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')  # test files kept in the repo
+PNG = open(f'{FIX}/photo.png', 'rb').read()
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
@@ -20,6 +21,10 @@ class H(BaseHTTPRequestHandler):
         else:
             self.send_response(404); self.end_headers()
 httpd = HTTPServer(('127.0.0.1', 8443), H)
+if not os.path.exists(f'{S}/cert.pem'):  # a throwaway certificate for the local https page
+    import subprocess
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '30', '-subj', '/CN=localhost',
+                    '-keyout', f'{S}/key.pem', '-out', f'{S}/cert.pem'], check=True, capture_output=True)
 c = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); c.load_cert_chain(f'{S}/cert.pem', f'{S}/key.pem'); httpd.socket = c.wrap_socket(httpd.socket, server_side=True)
 threading.Thread(target=httpd.serve_forever, daemon=True).start()
 

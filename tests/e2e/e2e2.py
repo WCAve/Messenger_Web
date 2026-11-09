@@ -1,8 +1,9 @@
 """Composer and message toolbar: GIFs, hover toolbar, quick reactions, emoji picker search."""
-import sys, time, json, base64
+import os, sys, time, json, base64
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]
-GIF = open(f'{S}/fake.gif','rb').read()
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')  # test files kept in the repo
+GIF = open(f'{FIX}/fake.gif','rb').read()
 errors = []
 def fake_giphy(route):
     url = route.request.url

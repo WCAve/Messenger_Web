@@ -1,5 +1,5 @@
 """Signal profile: name, about, photo, removing it; group picture."""
-import sys, time, json, urllib.request
+import os, sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright
 
 def goto(pg, title): pg.click(f'.settings-nav-row:has(strong:text-is("{title}"))')
@@ -7,6 +7,7 @@ def to_chats(pg):
     if pg.locator('button[aria-label="Back to settings"]').count(): pg.click('button[aria-label="Back to settings"]')
     pg.click('button[aria-label="Back to chats"]')
 S = sys.argv[1]; errors = []
+FIX = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures')  # test files kept in the repo
 def sent(): return json.load(urllib.request.urlopen('http://localhost:8080/mock/sent'))
 with sync_playwright() as p:
     b = p.chromium.launch(); ctx = b.new_context(viewport={'width': 1400, 'height': 900}); page = ctx.new_page()
@@ -20,7 +21,7 @@ with sync_playwright() as p:
         time.sleep(0.2)
     assert page.input_value('.profile-fields input >> nth=0') == 'Wouter'
     page.screenshot(path=f'{S}/shots6/01-profile.png')
-    page.set_input_files('.profile-edit input[type=file]', f'{S}/photo.png')
+    page.set_input_files('.profile-edit input[type=file]', f'{FIX}/photo.png')
     page.wait_for_selector('.profile-photo img[src^="data:image/jpeg"]')
     page.click('button:has-text("Save profile")'); page.wait_for_selector('text=Saved.')
     last = [x for x in sent() if x.get('path', '').startswith('/v1/profiles')][-1]; print('photo save:', last); assert last['avatarBytes'] > 1000
@@ -37,7 +38,7 @@ with sync_playwright() as p:
     to_chats(page)
     page.click('.chat-row:has-text("Weekend")'); page.click('.chat-head-main'); page.wait_for_selector('.panel .profile-photo')
     before = page.locator('.panel .profile-photo img').get_attribute('src')
-    page.set_input_files('.panel-hero input[type=file]', f'{S}/group.png')
+    page.set_input_files('.panel-hero input[type=file]', f'{FIX}/group.png')
     for _ in range(40):
         img = page.locator('.panel .profile-photo img')
         if img.count() and img.get_attribute('src') != before: break

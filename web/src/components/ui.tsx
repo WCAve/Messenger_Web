@@ -1,3 +1,8 @@
+/**
+ * Shared pieces: Icon (all icons as SVG paths, by name), Avatar (lazy: only loads pictures that are
+ * on screen, a few at a time, so they never block the app), NetworkBadge, StatusMark (ticks), and
+ * useMenu (one pop-up menu open at a time).
+ */
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 let closeOpenMenu: (() => void) | null = null;
