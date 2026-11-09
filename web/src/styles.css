@@ -3626,3 +3626,49 @@ button.stk-pack-head {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* ---------- chat list filters (All / Signal / WhatsApp) ---------- */
+.chat-filters {
+  display: flex;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+.chat-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  border: 0;
+  background: var(--haze);
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.chat-filter:hover {
+  color: var(--ink);
+}
+.chat-filter.on {
+  background: var(--ultra);
+  color: #fff;
+}
+.chat-filter-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ultra);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+}
+.chat-filter.on .chat-filter-count {
+  background: #fff;
+  color: var(--ultra);
+}
+.empty-filter {
+  text-align: center;
+  padding: 24px 16px;
+}

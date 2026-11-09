@@ -16,6 +16,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     date: '9 November 2026',
     items: [
       'What’s new: this window, after every update. See it again any time under ⋮ → What’s new.',
+      'Filter the chat list: All, Signal or WhatsApp, with the unread count for each. Your choice is remembered.',
       'Mark all as read, in the ⋮ menu: every chat on both networks at once.',
       'Edit history: click “edited” on a message to see its earlier versions (kept from now on, on both networks).',
       'Replies to a sticker or photo show it (a small picture and “Sticker” or “Photo”) instead of just “Attachment”. Also for replies you already had.',

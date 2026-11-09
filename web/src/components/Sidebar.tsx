@@ -2,7 +2,7 @@
  * The left column. Modes: the chat list, archived chats, New chat (search, start by number, New group,
  * join a WhatsApp group by link), New group (GroupManage.tsx), Settings (Settings.tsx), and the sticker
  * manager when `stickerManager` is set in the store. The chat list: pinned chats first (drag to
- * reorder), search across chats, the ⋮ menu (New group, Mark all as read, Settings, Sticker manager,
+ * reorder), All / Signal / WhatsApp filter buttons, search across chats, the ⋮ menu (New group, Mark all as read, Settings, Sticker manager,
  * What's new, refresh, sign out), per-row menus (pin, mute, archive, mark unread), the notifications banner, and the
  * resizer on its right edge.
  */
@@ -56,9 +56,26 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   }, [query]);
 
   const archivedMode = mode === 'archived';
+  // Only Signal / only WhatsApp (remembered in this browser). Offered when both are set up.
+  const bothNetworks = useStore((s) => s.signal.status !== 'disabled' && s.whatsapp.status !== 'disabled');
+  const [netFilter, setNetFilterState] = useState<NetFilter>(readNetFilter);
+  const setNetFilter = (f: NetFilter) => {
+    setNetFilterState(f);
+    try {
+      localStorage.setItem(NET_FILTER_KEY, f);
+    } catch {
+      /* private window: just for now */
+    }
+  };
+  const filter: NetFilter = bothNetworks ? netFilter : 'all';
+  const unreadBy = useMemo(() => {
+    const n = { signal: 0, whatsapp: 0 };
+    for (const c of Object.values(conversations)) if (!c.archived && (c.unread || c.markedUnread) && !(c.mutedUntil > Date.now())) n[c.network]++;
+    return n;
+  }, [conversations]);
   const { list, archivedCount, archivedUnread } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const all = Object.values(conversations).filter((c) => c.lastMessageAt);
+    const all = Object.values(conversations).filter((c) => c.lastMessageAt && (filter === 'all' || c.network === filter));
     const archived = all.filter((c) => c.archived);
     const shown = all
       // Searching covers archived chats too; otherwise they live in their own list.
@@ -73,7 +90,7 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
         return (b.lastMessageAt ?? 0) - (a.lastMessageAt ?? 0);
       });
     return { list: shown, archivedCount: archived.length, archivedUnread: archived.filter((c) => (c.unread || c.markedUnread) && !(c.mutedUntil > Date.now())).length };
-  }, [conversations, query, archivedMode]);
+  }, [conversations, query, archivedMode, filter]);
 
   useEffect(() => {
     if (archivedMode && !archivedCount) setMode('list');
@@ -184,6 +201,22 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
           </button>
         )}
       </div>
+      {bothNetworks && (
+        <div className="chat-filters" role="radiogroup" aria-label="Show chats from">
+          {(
+            [
+              ['all', 'All', unreadBy.signal + unreadBy.whatsapp],
+              ['signal', 'Signal', unreadBy.signal],
+              ['whatsapp', 'WhatsApp', unreadBy.whatsapp],
+            ] as const
+          ).map(([f, label, n]) => (
+            <button key={f} role="radio" aria-checked={filter === f} className={`chat-filter${filter === f ? ' on' : ''}${f !== 'all' ? ' ' + f : ''}`} onClick={() => setNetFilter(f)}>
+              {label}
+              {n > 0 && <span className="chat-filter-count">{n > 99 ? '99+' : n}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <nav className="chat-list" aria-label="Chats">
         {!query && archivedCount > 0 && (
           <button className="chat-row archived-row" onClick={() => setMode('archived')}>
@@ -207,10 +240,11 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
             drag={!query && c.pinnedAt ? drag : undefined}
           />
         ))}
-        {found && found.length > 0 && (
+        {!query && !list.length && filter !== 'all' && <p className="muted pad empty-filter">No {filter === 'signal' ? 'Signal' : 'WhatsApp'} chats{archivedMode ? ' archived' : ''}.</p>}
+        {found && found.some((r) => filter === 'all' || conversations[r.conversationId]?.network === filter) && (
           <>
             <h3 className="list-heading">Messages</h3>
-            {found.map((r) => (
+            {found.filter((r) => filter === 'all' || conversations[r.conversationId]?.network === filter).map((r) => (
               <button key={r.id} className="chat-row search-hit" onClick={() => void jumpToMessage(r.conversationId, r.sentAt).catch(() => {})}>
                 <span className="chat-row-main">
                   <span className="chat-row-top">
@@ -341,6 +375,17 @@ export function SidebarResizer() {
 }
 
 /** Pinned chats in their order, top first. */
+type NetFilter = 'all' | 'signal' | 'whatsapp';
+const NET_FILTER_KEY = 'sw-chat-filter';
+function readNetFilter(): NetFilter {
+  try {
+    const v = localStorage.getItem(NET_FILTER_KEY);
+    return v === 'signal' || v === 'whatsapp' ? v : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
 function pinnedInOrder(conversations: Record<number, Conversation>): Conversation[] {
   return Object.values(conversations)
     .filter((c) => c.pinnedAt && !c.archived)
