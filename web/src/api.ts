@@ -126,6 +126,8 @@ export const api = {
   block: (id: number, blocked: boolean) => call<Conversation>('POST', `/api/conversations/${id}/block`, { blocked }),
   markUnread: (id: number) => call<Conversation>('POST', `/api/conversations/${id}/unread`),
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
+  messageEdits: (id: number) =>
+    call<{ current: Message; earlier: { body: string; styles?: Message['styles']; mentions?: Message['mentions']; replacedAt: number; original: boolean }[] }>('GET', `/api/messages/${id}/edits`),
   markAllRead: () => call<{ ok: true; chats: number }>('POST', '/api/conversations/read-all'),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };

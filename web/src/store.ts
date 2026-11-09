@@ -44,6 +44,7 @@ export interface State {
   drafts: Record<number, Draft>;
   /** The message being forwarded (the forward dialog is open). */
   forwarding: Message | null;
+  editHistory: Message | null; // the edit history window
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
   groupTick: Record<number, number>; // bumped when a group's details change
@@ -71,6 +72,7 @@ let state: State = {
   whatsNew: null,
   drafts: loadDrafts(),
   forwarding: null,
+  editHistory: null,
 };
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;

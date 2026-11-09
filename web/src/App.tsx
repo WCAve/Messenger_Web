@@ -8,7 +8,7 @@
 import { type CSSProperties, useEffect, useState } from 'react';
 import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';
-import { ChatView, Lightbox, type LightboxItem } from './components/Chat';
+import { ChatView, EditHistory, Lightbox, type LightboxItem } from './components/Chat';
 import { WhatsNew, useWhatsNewAfterUpdate } from './components/WhatsNew';
 import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
@@ -161,6 +161,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       {active && panel?.kind === 'search' && <SearchPanel conversation={active} date={!!panel.date} />}
       {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}
       <WhatsNew />
+      <EditHistory />
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );

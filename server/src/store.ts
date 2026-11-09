@@ -1023,6 +1023,13 @@ export function updateMessage(
   if (!keys.length) return msgById.get(id);
   // Column names go into the SQL: only ever real ones.
   for (const k of keys) if (!UPDATABLE.has(k)) throw new Error(`updateMessage: not an updatable field: ${k}`);
+  // An edit: keep the text it replaces (edit history). Every edit, from either network or from here, comes through here.
+  if (all.edited && 'body' in all) {
+    const cur = msgById.get(id);
+    if (cur && !cur.deleted && (cur.body !== all.body || cur.ranges !== (all.ranges ?? null))) {
+      db.prepare('INSERT INTO message_edits (message_id, body, ranges, replaced_at, original) VALUES (?, ?, ?, ?, ?)').run(id, cur.body, cur.ranges, Date.now(), cur.edited ? 0 : 1);
+    }
+  }
   db.prepare(`UPDATE messages SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...all, id });
   return msgById.get(id);
 }
@@ -1113,11 +1120,34 @@ export function messageDto(m: MessageRow) {
     error: m.error,
     read: !!m.read,
     edited: !!m.edited,
+    // how many earlier versions we kept (edits before edit history existed weren't kept)
+    editVersions: m.edited && !m.deleted ? editCount.get(m.id)!.n : 0,
     deleted: !!m.deleted,
     forwarded: m.deleted ? 0 : m.forwarded || 0,
   };
 }
 export type MessageDto = ReturnType<typeof messageDto>;
+
+const editCount = db.prepare<[number], { n: number }>('SELECT COUNT(*) AS n FROM message_edits WHERE message_id = ?');
+
+/** Earlier versions of an edited message, newest first, rendered like a message body. */
+export function messageEdits(messageId: number) {
+  return db
+    .prepare<[number], { body: string | null; ranges: string | null; replaced_at: number; original: number }>(
+      'SELECT body, ranges, replaced_at, original FROM message_edits WHERE message_id = ? ORDER BY replaced_at DESC, id DESC',
+    )
+    .all(messageId)
+    .map((e) => {
+      const rich = renderBody(e.body, e.ranges);
+      return {
+        body: rich?.text ?? '',
+        styles: rich?.styles.length ? rich.styles : undefined,
+        mentions: rich?.mentions.length ? rich.mentions : undefined,
+        replacedAt: e.replaced_at,
+        original: !!e.original,
+      };
+    });
+}
 
 function quoteDto(conversationId: number, quote: Quote) {
   const media = quotedMedia(conversationId, quote);

@@ -201,6 +201,7 @@ export interface Message {
   error: string | null;
   read: boolean;
   edited: boolean;
+  editVersions: number; // earlier versions kept (edit history); 0 for edits from before it existed
   deleted: boolean;
   forwarded?: number; // WhatsApp: 1 = forwarded, 2 = forwarded many times
   /** Ranges in UTF-16 offsets over body (which already has "@Name" for each mention). */

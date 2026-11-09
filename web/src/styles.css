@@ -3590,3 +3590,39 @@ button.stk-pack-head {
   object-fit: contain;
   border-radius: 0;
 }
+
+/* ---------- edit history ---------- */
+.edited-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.edit-history ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.edit-history li {
+  display: grid;
+  gap: 3px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--haze);
+}
+.edit-history li.current {
+  border-left: 3px solid var(--ultra);
+}
+.edit-history small {
+  color: var(--ink-3);
+}
+.edit-history .edit-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

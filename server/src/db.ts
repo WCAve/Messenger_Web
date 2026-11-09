@@ -217,6 +217,19 @@ const MIGRATIONS: string[] = [
   -- Where the file sat on the phone (from an Android backup), to match it when you add the media folder.
   ALTER TABLE wa_media ADD COLUMN backup_path TEXT;
   `,
+  `
+  -- Edit history: the text a message had before each edit (kept from when this was added; Signal and
+  -- WhatsApp only ever send the newest text). Shown when you click "edited".
+  CREATE TABLE message_edits (
+    id INTEGER PRIMARY KEY,
+    message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    body TEXT,                   -- the text as it was (same form as messages.body)
+    ranges TEXT,                 -- its mentions and styles (same form as messages.ranges)
+    replaced_at INTEGER NOT NULL, -- ms: when the next version replaced it
+    original INTEGER NOT NULL DEFAULT 0 -- 1 = this was the message as first sent (it hadn't been edited before)
+  );
+  CREATE INDEX message_edits_message ON message_edits(message_id, replaced_at);
+  `,
 ];
 
 function migrate() {

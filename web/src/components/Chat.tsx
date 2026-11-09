@@ -27,7 +27,7 @@ import type { Attachment, Conversation, LinkPreview, Message, Network } from '..
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
-import { PollDialog, PollView } from './Extras';
+import { Dialog, PollDialog, PollView } from './Extras';
 import { ChatRowMenu } from './Sidebar';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 
@@ -731,7 +731,14 @@ const MessageItem = memo(function MessageItem({
               <Icon name="timer" size={12} />
             </span>
           )}
-          {m.edited && <span>edited</span>}
+          {m.edited &&
+            (m.editVersions > 0 ? (
+              <button className="edited-btn" onClick={() => setState({ editHistory: m })} title="See earlier versions">
+                edited
+              </button>
+            ) : (
+              <span title="Edited before edit history was kept">edited</span>
+            ))}
           <time dateTime={new Date(m.sentAt).toISOString()}>{formatTime(m.sentAt)}</time>
           {m.outgoing && <StatusMark status={m.status} />}
         </span>
@@ -950,6 +957,47 @@ function mediaThumb(m: Message): string | null {
   if (m.sticker) return m.sticker.url;
   const a = m.attachments[0];
   return a && !a.missing && !a.gif && a.contentType.startsWith('image/') ? attachmentUrl(a.id) : null;
+}
+
+/** Edit history: the message as it is now, then each earlier version, newest first. */
+export function EditHistory() {
+  const m = useStore((s) => s.editHistory);
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.messageEdits>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    if (m) api.messageEdits(m.id).then(setData, (e) => setError(e.message));
+  }, [m?.id, m?.rev]);
+  if (!m) return null;
+  const close = () => setState({ editHistory: null });
+  const version = (body: Pick<Message, 'body' | 'styles' | 'mentions'>) => <RichBody m={{ ...m, ...body }} />;
+  return (
+    <Dialog title="Edit history" onClose={close}>
+      <div className="dialog-body edit-history">
+        {error && <p className="form-error">{error}</p>}
+        {!data && !error && <div className="spinner" aria-label="Loading" />}
+        {data && (
+          <ol>
+            <li className="current">
+              <small>Now</small>
+              <div className="edit-text">{version(data.current)}</div>
+            </li>
+            {data.earlier.map((e, i) => (
+              <li key={i}>
+                <small>
+                  {e.original ? 'Original' : 'Earlier'}, until{' '}
+                  {new Date(e.replacedAt).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                </small>
+                <div className="edit-text">{version({ body: e.body, styles: e.styles, mentions: e.mentions })}</div>
+              </li>
+            ))}
+          </ol>
+        )}
+        <p className="muted setting-note">Versions from before Messenger Web kept edit history, or edited while it wasn't running, can't be shown.</p>
+      </div>
+    </Dialog>
+  );
 }
 
 export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () => void }) {

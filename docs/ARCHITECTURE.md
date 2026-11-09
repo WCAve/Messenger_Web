@@ -52,7 +52,8 @@ and come from WAHA, from the Android backup (`jid_map`) and from looking up grou
 
 The schema is `MIGRATIONS` in server/src/db.ts, with a comment on every table and column. Main tables:
 `conversations`, `messages`, `message_receipts` (per-recipient ticks), `contacts` (Signal),
-`wa_contacts`, `wa_media` (WhatsApp history files not downloaded yet), `sessions`, and `kv`.
+`wa_contacts`, `wa_media` (WhatsApp history files not downloaded yet), `message_edits` (earlier
+versions of edited messages, saved in `updateMessage` whenever text changes as an edit), `sessions`, and `kv`.
 
 ### kv keys
 

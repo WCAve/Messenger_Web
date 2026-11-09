@@ -111,6 +111,7 @@ import {
   searchMessages,
   setConversationTimer,
   messageDto,
+  messageEdits,
   messageReceipts,
   recipientFor,
   self,
@@ -613,6 +614,13 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Can WhatsApp link a reply to this message? (Old ones from a backup: WhatsApp Web may not have them.)
+  // Edit history: earlier versions of a message, newest first.
+  r.get('/api/messages/:id/edits', (ctx) => {
+    const m = getMessage(Number(ctx.params.id));
+    if (!m) throw new HttpError(404, 'Message not found');
+    return { current: messageDto(m), earlier: messageEdits(m.id) };
+  });
+
   r.get('/api/messages/:id/replyable', async (ctx) => {
     const m = message(ctx);
     const c = getConversation(m.conversation_id)!;
