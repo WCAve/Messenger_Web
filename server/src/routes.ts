@@ -33,6 +33,7 @@ import {
   catchUpWaNow,
   logoutWhatsApp,
   markReadWa,
+  noteWaRead,
   markUnreadWa,
   archiveWa,
   browserActive,
@@ -379,6 +380,7 @@ function settingsDto() {
  * "marked unread" on the phone), or null when there's nothing to send.
  */
 function markRead(c: ConversationRow): (() => Promise<void>) | null {
+  if (isWa(c)) noteWaRead(c.id); // later copies of anything before this count as read
   const unread = unreadMessages(c.id);
   const wasMarked = !!c.marked_unread;
   if (wasMarked) setConversationFlags(c.id, { markedUnread: false });

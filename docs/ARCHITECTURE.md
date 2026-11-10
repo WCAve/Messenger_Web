@@ -69,6 +69,7 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 | `lid:<lid>`, `lidof:<number>` | WhatsApp privacy id ↔ number links (`''` = asked, none) |
 | `wa_pin:`, `wa_mute:`, `wa_arch:`, `wa_unread:<jid>` | last state seen on the phone, to sync only changes |
 | `wa_history_v2`, `wa_hist_complete:<jid>` | history import progress |
+| `wa_read_at:<convId>` | when you last read a WhatsApp chat (here, or the phone said 0 unread); messages sent before it come in as read |
 | `wa_last_event_at` | when WhatsApp events last came in (catch-up after a restart starts there) |
 | `waquote:<msgId>` | which id spelling WhatsApp Web accepts for replying to a message |
 | `waalias:<raw>` | an HD copy's raw id → the message row it was merged into |
@@ -87,6 +88,8 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   comes as an event; `catchUpWa` (after every connect, and the ↻ button) fetches it: one chat list call,
   then each chat with activity since the last event seen (the button: the last week), back to that
   moment, filling holes too (kv `wa_last_event_at`).
+- **WhatsApp Web hands over old messages again** as new, or counts read ones as unread. Anything sent
+  more than 2 minutes before you last read that chat (`wa_read_at:`) is stored read and WhatsApp is told.
 - **Replies** only link when WhatsApp Web has the quoted message; otherwise they go as a text quote.
 - **HD photos/videos** arrive as two messages; the second has `associationType: *_DUAL_UPLOAD` and
   `parentMsgKey`. They're shown as one.

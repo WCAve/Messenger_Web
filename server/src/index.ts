@@ -17,7 +17,7 @@ import { buildRouter } from './routes.js';
 import { backfillExtRaw, recomputeGroupReadStatuses, removeDuplicateWaMessages } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
-import { startWhatsApp, stopWhatsApp } from './whatsapp.js';
+import { seedWaReadMarks, startWhatsApp, stopWhatsApp } from './whatsapp.js';
 import { refreshBackupInfo, setBackupLogger } from './wabackup.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
@@ -129,6 +129,12 @@ setTimeout(() => {
     }
   } catch (e) {
     log('warn', `id backfill failed: ${(e as Error).message}`);
+  }
+  try {
+    const seeded = seedWaReadMarks();
+    if (seeded) log('info', `noted what's read in ${seeded} WhatsApp chats (old messages coming in again stay read)`);
+  } catch (e) {
+    log('warn', `noting read chats failed: ${(e as Error).message}`);
   }
   try {
     if (kvGet('wa_dupes_v1') !== 'done') {

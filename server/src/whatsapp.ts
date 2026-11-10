@@ -460,7 +460,7 @@ export async function catchUpWa(why: string, since?: number): Promise<{ chats: n
       const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? 0);
       if (unread > 0) {
         const unreadIds = new Set(seenIncoming.sort((a, b) => b.ts - a.ts).slice(0, unread).map((x) => x.id));
-        for (const r of added) if (!r.outgoing && r.ext_id && unreadIds.has(r.ext_id)) updateMessage(r.id, { read: 0 });
+        for (const r of added) if (!r.outgoing && r.ext_id && unreadIds.has(r.ext_id) && !readBefore(r.conversation_id, r.sent_ts)) updateMessage(r.id, { read: 0 });
       }
       for (const r of added) emitMessage(getMessage(r.id));
       const conv = findWaChat(id);
@@ -1183,6 +1183,7 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
 
   const ts = freeTimestamp(conv.id, Math.round(Number(m.timestamp) * 1000) || Date.now(), author);
   const status = fromMe ? STATUS_FOR_ACK[Number(m.ack)] ?? 'sent' : null;
+  const readEarlier = !fromMe && !opts.history && readBefore(conv.id, ts);
   const row = insertMessage({
     conversationId: conv.id,
     sentTs: ts,
@@ -1194,7 +1195,7 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     attachments,
     quote,
     status: status === 'pending' ? 'sent' : status,
-    read: fromMe || !!opts.history,
+    read: fromMe || !!opts.history || readEarlier,
     poll,
     extId,
     forwarded,
@@ -1203,11 +1204,66 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     const add = db.prepare("INSERT OR IGNORE INTO wa_media (id, chat, msg, message_id, ts, state) VALUES (?, ?, ?, ?, ?, 'pending')");
     for (const x of pending) add.run(x.id, x.chat, x.msg, row.id, ts);
   }
+  if (row && readEarlier && extId) queueSeen(conv, extId);
   if (row && !opts.history) {
     emitMessage(row);
     emitConversation(conv.id);
   }
   return row;
+}
+
+/*
+ * Already read: WhatsApp Web sometimes hands over old messages again as new, or counts them as unread
+ * again. A message sent before the last time you read that chat (here, or on the phone as far as
+ * WhatsApp says) is stored as read, and WhatsApp is told so your phone clears it too. The margin keeps
+ * a message that was just being sent while you read the chat unread. "Mark as unread" (the dot) is
+ * separate and not affected.
+ */
+const READ_MARGIN = 2 * 60_000;
+export function noteWaRead(convId: number, at = Date.now()) {
+  kvSet(`wa_read_at:${convId}`, String(at));
+}
+function readBefore(convId: number, ts: number) {
+  const at = Number(kvGet(`wa_read_at:${convId}`) ?? 0);
+  return at > 0 && ts < at - READ_MARGIN;
+}
+/** Once: every WhatsApp chat starts read up to its first unread message (or its newest message). */
+export function seedWaReadMarks() {
+  if (kvGet('wa_read_at_v1')) return 0;
+  const rows = db
+    .prepare<[], { id: number; at: number | null }>(
+      `SELECT c.id, coalesce(
+         (SELECT min(sent_ts) FROM messages m WHERE m.conversation_id = c.id AND m.read = 0 AND m.outgoing = 0),
+         c.last_message_at) AS at
+       FROM conversations c WHERE c.network = 'whatsapp'`,
+    )
+    .all();
+  let n = 0;
+  for (const r of rows) {
+    if (!r.at || kvGet(`wa_read_at:${r.id}`)) continue;
+    noteWaRead(r.id, r.at);
+    n++;
+  }
+  kvSet('wa_read_at_v1', '1');
+  return n;
+}
+const seenQueue = new Map<number, { conv: ConversationRow; ids: Set<string>; timer: NodeJS.Timeout }>();
+function queueSeen(conv: ConversationRow, extId: string) {
+  let q = seenQueue.get(conv.id);
+  if (!q) {
+    q = {
+      conv,
+      ids: new Set(),
+      timer: setTimeout(() => {
+        seenQueue.delete(conv.id);
+        const ids = [...q!.ids];
+        log.info(`whatsapp: ${ids.length} old message${ids.length === 1 ? '' : 's'} came in again as new in ${conv.group_name ?? conv.wa_id}; kept as read`);
+        if (getSettings().sendReadReceipts && state.status === 'connected') waha.seen(conv.wa_id!, ids.slice(-50)).catch(() => {});
+      }, 3000),
+    };
+    seenQueue.set(conv.id, q);
+  }
+  q.ids.add(extId);
 }
 
 /**
@@ -1296,6 +1352,8 @@ async function syncMutes(list?: Json[]) {
  * changes are copied (so a mark you cleared here isn't put back); a live event always is.
  */
 function phoneUnread(conv: ConversationRow, unreadCount: number, live = false) {
+  // Nothing unread on the phone: read up to now, as far as later copies of old messages go.
+  if (unreadCount === 0 && (live || Number(kvGet(`wa_read_at:${conv.id}`) ?? 0) < (conv.last_message_at ?? 0))) noteWaRead(conv.id);
   const marked = unreadCount < 0 ? '1' : '0';
   if (!live && kvGet(`wa_unread:${conv.wa_id}`) === marked) return;
   kvSet(`wa_unread:${conv.wa_id}`, marked);
@@ -1682,7 +1740,7 @@ async function importHistory(
     const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? c._chat?.UnreadCount ?? 0);
     if (unread > 0) {
       const incoming = newest.filter((r) => !r.outgoing).slice(-unread);
-      for (const r of incoming) updateMessage(r.id, { read: 0 });
+      for (const r of incoming) if (!readBefore(r.conversation_id, r.sent_ts)) updateMessage(r.id, { read: 0 });
     }
     emitConversation(conv.id);
     if (state.status !== 'connected' && !cancelRequested) {
