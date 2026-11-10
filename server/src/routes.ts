@@ -93,6 +93,7 @@ import {
   contactByKeyOrId,
   conversationDto,
   conversationInfo,
+  conversationMedia,
   getConversation,
   getMessage,
   getSelfProfile,
@@ -731,6 +732,18 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/directory/refresh', async () => {
     await refreshDirectory();
     return { contacts: listContacts(), groups: listGroups() };
+  });
+
+  // Photos and videos of a chat, for ← → in the viewer: ?around=<messageId>&attachment=<id>, or ?offset=&limit=
+  r.get('/api/conversations/:id/media', (ctx) => {
+    const c = conv(ctx);
+    const num = (k: string) => (/^\d+$/.test(ctx.query.get(k) ?? '') ? Number(ctx.query.get(k)) : undefined);
+    const around = num('around');
+    return conversationMedia(c.id, {
+      around: around !== undefined ? { messageId: around, attachmentId: ctx.query.get('attachment') ?? undefined } : undefined,
+      offset: num('offset'),
+      limit: num('limit'),
+    });
   });
 
   r.get('/api/conversations/:id/date', (ctx) => {

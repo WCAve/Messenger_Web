@@ -155,7 +155,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
         </section>
       )}
       {active && panel?.kind === 'chat' && (
-        <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt) => setLightbox({ att, authorName, sentAt })} />
+        <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt, messageId) => setLightbox({ att, authorName, sentAt, conversationId: active.id, messageId })} />
       )}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
       {active && panel?.kind === 'search' && <SearchPanel conversation={active} date={!!panel.date} />}

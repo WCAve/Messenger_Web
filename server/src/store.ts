@@ -786,6 +786,50 @@ export function freeTimestamp(conversationId: number, ts: number, author: string
   return t;
 }
 
+/**
+ * The chat's photos and videos, oldest first, for stepping through them in the viewer (← →). Not GIFs,
+ * stickers or files WhatsApp couldn't provide. `around` (message id + attachment id) returns a window
+ * around that one; otherwise `offset`/`limit`. `total` and `offset` give "3 of 12".
+ */
+export function conversationMedia(
+  conversationId: number,
+  opts: { around?: { messageId: number; attachmentId?: string }; offset?: number; limit?: number },
+) {
+  const rows = db
+    .prepare<[number], MessageRow>(
+      `SELECT id, sent_ts, author, attachments FROM messages
+       WHERE conversation_id = ? AND deleted = 0 AND attachments IS NOT NULL ORDER BY sent_ts, id`,
+    )
+    .all(conversationId);
+  const all: { messageId: number; sentAt: number; author: string; attachment: Attachment }[] = [];
+  for (const m of rows) {
+    for (const a of JSON.parse(m.attachments!) as Attachment[]) {
+      if (a.missing || a.gif || a.sticker || a.contentType === 'image/gif' || a.contentType === 'image/webp') continue;
+      if (a.contentType.startsWith('image/') || a.contentType.startsWith('video/')) all.push({ messageId: m.id, sentAt: m.sent_ts, author: m.author, attachment: a });
+    }
+  }
+  const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
+  let offset = Math.max(opts.offset ?? 0, 0);
+  let index: number | null = null;
+  if (opts.around) {
+    const { messageId, attachmentId } = opts.around;
+    const i = all.findIndex((x) => x.messageId === messageId && (!attachmentId || x.attachment.id === attachmentId));
+    index = i >= 0 ? i : null;
+    offset = Math.max((i >= 0 ? i : all.length) - Math.floor(limit / 2), 0);
+  }
+  return {
+    total: all.length,
+    offset,
+    index, // position of `around` in the whole list, or null when it isn't one of them
+    items: all.slice(offset, offset + limit).map((x) => ({
+      messageId: x.messageId,
+      sentAt: x.sentAt,
+      authorName: nameForKey(x.author),
+      attachment: attachmentDto(x.attachment) as Attachment,
+    })),
+  };
+}
+
 /** Everything the info panel shows about a chat. */
 export function conversationInfo(conv: ConversationRow) {
   const base = conversationDto(conv);

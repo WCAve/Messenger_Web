@@ -4,7 +4,7 @@
  * through uploadBackup (XMLHttpRequest, for progress). Server routes: server/src/routes.ts and
  * groups.ts.
  */
-import type { BackupFile, GroupAction, GroupDetails, Network, WaContact, WaState } from './types';
+import type { BackupFile, GroupAction, GroupDetails, MediaItem, Network, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -70,6 +70,11 @@ export const api = {
   messages: (id: number, before?: number, limit = 50) =>
     call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}${before ? `&before=${before}` : ''}`),
   messagesAfter: (id: number, after: number, limit = 50) => call<Message[]>('GET', `/api/conversations/${id}/messages?limit=${limit}&after=${after}`),
+  conversationMedia: (id: number, q: { around?: number; attachment?: string; offset?: number; limit?: number }) =>
+    call<{ total: number; offset: number; index: number | null; items: MediaItem[] }>(
+      'GET',
+      `/api/conversations/${id}/media?${new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`,
+    ),
   messagesAround: (id: number, ts: number, limit = 60) =>
     call<{ messages: Message[]; hasOlder: boolean; hasNewer: boolean }>('GET', `/api/conversations/${id}/messages?limit=${limit}&around=${ts}`),
   search: (q: string, conversationId?: number) =>

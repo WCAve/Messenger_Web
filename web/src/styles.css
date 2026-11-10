@@ -1230,11 +1230,64 @@ p {
 .lightbox .icon-btn:hover {
   background: rgba(255, 255, 255, 0.12);
 }
-.lightbox img {
+.lightbox img,
+.lightbox video {
+  grid-row: 2;
+  grid-column: 1;
   max-width: 94vw;
   max-height: calc(100vh - 80px);
   margin: auto;
   object-fit: contain;
+}
+.lightbox-count {
+  margin-left: 12px;
+  opacity: 0.7;
+}
+.lightbox-note {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: end;
+  justify-self: center;
+  margin: 0 0 24px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  font-size: 14px;
+}
+.lightbox-nav {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+.lightbox-nav:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+.lightbox-nav.prev {
+  left: 16px;
+}
+.lightbox-nav.next {
+  right: 16px;
+}
+@media (max-width: 760px) {
+  .lightbox-nav {
+    width: 40px;
+    height: 40px;
+  }
+  .lightbox-nav.prev {
+    left: 6px;
+  }
+  .lightbox-nav.next {
+    right: 6px;
+  }
 }
 
 /* ---------- phones ---------- */

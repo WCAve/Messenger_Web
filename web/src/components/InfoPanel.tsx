@@ -31,7 +31,7 @@ function PanelHead({ title }: { title: string }) {
 
 // ---------------------------------------------------------------------------
 
-export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Conversation; onOpenMedia: (a: Attachment, authorName: string, sentAt: number) => void }) {
+export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Conversation; onOpenMedia: (a: Attachment, authorName: string, sentAt: number, messageId: number) => void }) {
   const [info, setInfo] = useState<ConversationInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'media' | 'files' | 'links'>('media');
@@ -189,7 +189,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
               {info.media.map((m) => (
                 <button
                   key={m.attachment.id}
-                  onClick={() => (m.attachment.pending ? void api.fetchAttachment(m.attachment.id).catch(() => {}) : onOpenMedia(m.attachment, m.authorName, m.sentAt))}
+                  onClick={() => (m.attachment.pending ? void api.fetchAttachment(m.attachment.id).catch(() => {}) : onOpenMedia(m.attachment, m.authorName, m.sentAt, m.messageId))}
                   aria-label={`Open ${m.attachment.filename ?? 'media'}`}
                   title={m.attachment.pending ? 'Not on the server yet: click to get it from WhatsApp' : undefined}
                 >

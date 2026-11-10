@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-10',
     date: '10 November 2026',
     items: [
+      'Step through a chat’s photos and videos in the viewer: ← → keys, the ‹ › buttons, or swipe on a phone. Shows “3 of 12”; closing takes the chat to the photo you ended on.',
       'WhatsApp messages that came in while the app or WhatsApp was restarting are now fetched by themselves once WhatsApp is back.',
       'Check WhatsApp for missed messages: the ↻ button next to the chat filters (also in the ⋮ menu). Read or unread, as on your phone.',
     ],

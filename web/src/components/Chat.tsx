@@ -8,7 +8,7 @@
  *   AttachmentView / PendingImage / PendingPlayable / MissingMedia
  *                 files; WhatsApp history files that aren't downloaded yet ask the server and show a
  *                 placeholder instead of holding a request open (browsers allow only ~6 per site)
- *   Lightbox      full-screen photos/videos
+ *   Lightbox      full-screen photos/videos; ← → step through the chat's photos and videos (GET /media)
  *   Composer      text box (formatting, :shortcodes:, @mentions, drafts), files, voice messages,
  *                 stickers/emoji/GIFs (Picker.tsx), replies, edits, typing indicator
  *
@@ -23,7 +23,7 @@ import { type ComposerMention, composerToRich, messageToComposer, pieces } from 
 import { jumpToMessage, loadLatest } from '../jump';
 import { getPrefs, usePrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
-import type { Attachment, Conversation, LinkPreview, Message, Network } from '../types';
+import type { Attachment, Conversation, LinkPreview, MediaItem, Message, Network } from '../types';
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
@@ -40,6 +40,9 @@ export interface LightboxItem {
   att: Attachment;
   authorName: string;
   sentAt: number;
+  /** Where it came from: with these, ← → step through the chat's other photos and videos. */
+  conversationId?: number;
+  messageId?: number;
 }
 
 const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal allows edits for 24 hours
@@ -208,7 +211,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           onReply={(m) => (setEditing(null), setReplyTo(m))}
           onEdit={(m) => (setReplyTo(null), setEditing(m))}
           onMoreReactions={setReactTo}
-          onOpenImage={(att, msg) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt })}
+          onOpenImage={(att, msg) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt, conversationId: conversation.id, messageId: msg.id })}
         />
       )}
 
@@ -1000,37 +1003,165 @@ export function EditHistory() {
   );
 }
 
+const MEDIA_PAGE = 40;
+
+/**
+ * Full-screen photo or video. When it's from a chat, ← → (keys, the ‹ › buttons, or swiping) step
+ * through all the chat's photos and videos, oldest to newest, loading more from the server as needed.
+ * Closing after stepping jumps the chat to the one you ended on.
+ */
 export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () => void }) {
-  const { att } = item;
+  const { conversationId, messageId } = item;
+  const cache = useRef(new Map<number, MediaItem>()); // position in the chat's list → item
+  const loading = useRef(new Set<number>()); // page offsets being fetched
+  const [total, setTotal] = useState(0);
+  const [pos, setPos] = useState<number | null>(null);
+  const [, setVersion] = useState(0);
+
+  const store = (r: { offset: number; items: MediaItem[]; total: number }) => {
+    r.items.forEach((x, i) => cache.current.set(r.offset + i, x));
+    setTotal(r.total);
+    setVersion((v) => v + 1);
+  };
+  const load = useCallback(
+    async (at: number) => {
+      if (conversationId === undefined || cache.current.has(at)) return;
+      const offset = Math.max(0, at - MEDIA_PAGE / 2);
+      if (loading.current.has(offset)) return;
+      loading.current.add(offset);
+      try {
+        store(await api.conversationMedia(conversationId, { offset, limit: MEDIA_PAGE }));
+      } finally {
+        loading.current.delete(offset);
+      }
+    },
+    [conversationId],
+  );
+
   useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && onClose();
+    if (conversationId === undefined || messageId === undefined) return;
+    let cancelled = false;
+    api
+      .conversationMedia(conversationId, { around: messageId, attachment: item.att.id, limit: MEDIA_PAGE })
+      .then((r) => {
+        if (cancelled || r.index === null) return; // a GIF or sticker: shown on its own
+        store(r);
+        setPos(r.index);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, messageId, item.att.id]);
+
+  const current = pos !== null ? cache.current.get(pos) : undefined;
+  const shown = current ? { att: current.attachment, authorName: current.authorName, sentAt: current.sentAt } : item;
+  const canPrev = pos !== null && pos > 0;
+  const canNext = pos !== null && pos < total - 1;
+
+  const go = useCallback(
+    async (d: number) => {
+      if (pos === null) return;
+      const next = pos + d;
+      if (next < 0 || next >= total) return;
+      if (!cache.current.has(next)) await load(next).catch(() => {});
+      if (!cache.current.has(next)) return;
+      setPos(next);
+      // Keep a few ahead loaded in the direction you're going.
+      const ahead = next + d * 5;
+      if (ahead >= 0 && ahead < total && !cache.current.has(ahead)) void load(ahead).catch(() => {});
+    },
+    [pos, total, load],
+  );
+
+  const close = useCallback(() => {
+    if (current && conversationId !== undefined && current.messageId !== messageId) void jumpToMessage(conversationId, current.sentAt);
+    onClose();
+  }, [current, conversationId, messageId, onClose]);
+
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault(); // not seeking in a video: these step to the previous/next one
+        void go(e.key === 'ArrowLeft' ? -1 : 1);
+      }
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [close, go]);
+
+  const touchX = useRef<number | null>(null);
+  const att = shown.att;
   const video = att.contentType.startsWith('video/');
   return (
-    <div className="lightbox" role="dialog" aria-label={video ? 'Video' : 'Image'} onClick={onClose}>
+    <div
+      className="lightbox"
+      role="dialog"
+      aria-label={video ? 'Video' : 'Image'}
+      onClick={close}
+      onTouchStart={(e) => (touchX.current = e.touches[0]?.clientX ?? null)}
+      onTouchEnd={(e) => {
+        const start = touchX.current;
+        touchX.current = null;
+        const dx = start === null ? 0 : (e.changedTouches[0]?.clientX ?? start) - start;
+        if (Math.abs(dx) > 50) void go(dx > 0 ? -1 : 1); // swipe right: the older one, like turning a page back
+      }}
+    >
       <header onClick={(e) => e.stopPropagation()}>
         <span>
-          <strong>{item.authorName}</strong> {formatDay(item.sentAt)}, {formatTime(item.sentAt)}
+          <strong>{shown.authorName}</strong> {formatDay(shown.sentAt)}, {formatTime(shown.sentAt)}
+          {pos !== null && total > 1 && <span className="lightbox-count">{`${pos + 1} of ${total}`}</span>}
         </span>
         <a className="icon-btn" href={attachmentUrl(att.id, att.filename ?? att.id)} aria-label="Download">
           <Icon name="download" />
         </a>
-        <button className="icon-btn" onClick={onClose} aria-label="Close">
+        <button className="icon-btn" onClick={close} aria-label="Close">
           <Icon name="close" />
         </button>
       </header>
-      {video ? (
-        att.gif ? (
-          <video src={attachmentUrl(att.id)} autoPlay loop muted playsInline onClick={(e) => e.stopPropagation()} />
-        ) : (
-          <video src={attachmentUrl(att.id)} controls autoPlay onClick={(e) => e.stopPropagation()} />
-        )
-      ) : (
-        <img src={attachmentUrl(att.id)} alt={att.caption ?? att.filename ?? 'Image'} onClick={(e) => e.stopPropagation()} />
+      <LightboxMedia key={att.id} att={att} />
+      {canPrev && (
+        <button className="lightbox-nav prev" onClick={(e) => (e.stopPropagation(), void go(-1))} aria-label="Previous photo or video">
+          <Icon name="prev" size={32} />
+        </button>
+      )}
+      {canNext && (
+        <button className="lightbox-nav next" onClick={(e) => (e.stopPropagation(), void go(1))} aria-label="Next photo or video">
+          <Icon name="next" size={32} />
+        </button>
       )}
     </div>
+  );
+}
+
+/** One photo or video in the viewer. Remounted per item, so a playing video stops when you step away. A
+ *  file from imported WhatsApp history that isn't here yet is fetched; it's tried again until it arrives. */
+function LightboxMedia({ att }: { att: Attachment }) {
+  const [tries, setTries] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const retry = () => {
+    if (tries >= 20) return setFailed(true);
+    setTimeout(() => setTries((t) => t + 1), 3000);
+  };
+  const waiting = tries > 0 && !loaded && !failed;
+  const src = attachmentUrl(att.id) + (tries ? `?try=${tries}` : '');
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  if (failed) return <p className="lightbox-note">Couldn’t get this from WhatsApp.</p>;
+  return (
+    <>
+      {att.contentType.startsWith('video/') ? (
+        att.gif ? (
+          <video key={tries} src={src} autoPlay loop muted playsInline onClick={stop} onError={retry} onLoadedData={() => setLoaded(true)} />
+        ) : (
+          <video key={tries} src={src} controls autoPlay onClick={stop} onError={retry} onLoadedData={() => setLoaded(true)} />
+        )
+      ) : (
+        <img key={tries} src={src} alt={att.caption ?? att.filename ?? 'Image'} onClick={stop} onError={retry} onLoad={() => setLoaded(true)} />
+      )}
+      {waiting && <p className="lightbox-note">Getting this from WhatsApp…</p>}
+    </>
   );
 }
 
