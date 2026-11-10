@@ -57,6 +57,21 @@ function Main({ onLogout }: { onLogout: () => void }) {
     setState((s) => (s.panel?.kind === 'message' || s.panel?.kind === 'search' ? { panel: null } : {}));
   }, [activeId]);
 
+  // Ctrl+F (⌘F): search in the open chat (or the chat list when none is open). Pressed again while
+  // already in that search box, it's the browser's own find on the page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key.toLowerCase() !== 'f') return;
+      const box = document.querySelector<HTMLInputElement>(activeId ? 'input[aria-label="Search messages"]' : '.sidebar .search input');
+      if ((box && document.activeElement === box) || (!box && !activeId)) return;
+      e.preventDefault();
+      if (box) return void (box.focus(), box.select());
+      if (activeId) setState({ panel: { kind: 'search' } }); // the search box takes focus when it opens
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [activeId]);
+
   useLiveEvents();
   useWhatsNewAfterUpdate();
   useEffect(() => void loadUsage(), []);

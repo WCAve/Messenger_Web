@@ -412,7 +412,14 @@ export function SearchPanel({ conversation, date = false }: { conversation: Conv
       <div className="panel-body">
         <div className="search panel-search">
           <Icon name="search" size={18} />
-          <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search in ${conversation.title}`} aria-label="Search messages" />
+          <input
+            ref={input}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), q ? setQ('') : setState({ panel: null }))}
+            placeholder={`Search in ${conversation.title}`}
+            aria-label="Search messages"
+          />
         </div>
         <label className="date-jump">
           <Icon name="calendar" size={18} />
