@@ -1,14 +1,13 @@
-/** Disappearing messages: delete each one (and its files) when its timer runs out. */
-import fs from 'node:fs';
-import { isSafeId, localPath } from './attachments.js';
+/**
+ * Disappearing messages: when the timer runs out the message shows as "disappeared", and what it said is
+ * kept, with its files, so it can still be looked at (deleted_messages, click the message).
+ */
 import { broadcast } from './events.js';
-import { signalApi } from './signal-api.js';
 import {
-  type Attachment,
-  type LinkPreview,
   conversationDto,
-  deleteMessageRow,
+  deleteMessageContent,
   expiredMessages,
+  messageDto,
   getConversation,
   nextExpiry,
   storeHooks,
@@ -17,31 +16,20 @@ import {
 let timer: ReturnType<typeof setTimeout> | undefined;
 let log: (msg: string) => void = () => {};
 
-function attachmentIds(m: { attachments: string | null; preview: string | null }): string[] {
-  const ids = ((m.attachments ? JSON.parse(m.attachments) : []) as Attachment[]).map((a) => a.id);
-  const preview: LinkPreview | null = m.preview ? JSON.parse(m.preview) : null;
-  if (preview?.image?.id) ids.push(preview.image.id);
-  return ids.filter(isSafeId);
-}
-
 export function sweepExpired() {
   const now = Date.now();
   const rows = expiredMessages(now);
   const touched = new Set<number>();
   for (const m of rows) {
-    deleteMessageRow(m.id);
+    const row = deleteMessageContent(m.id, 'expired');
     touched.add(m.conversation_id);
-    broadcast({ type: 'remove', conversationId: m.conversation_id, messageId: m.id });
-    for (const id of attachmentIds(m)) {
-      fs.rm(localPath(id), { force: true }, () => {});
-      signalApi.deleteAttachment(id).catch(() => {}); // signal-cli keeps its own copy of received files
-    }
+    if (row) broadcast({ type: 'message', message: messageDto(row) });
   }
   for (const id of touched) {
     const conv = getConversation(id);
     if (conv) broadcast({ type: 'conversation', conversation: conversationDto(conv) });
   }
-  if (rows.length) log(`removed ${rows.length} disappearing message${rows.length === 1 ? '' : 's'}`);
+  if (rows.length) log(`${rows.length} disappearing message${rows.length === 1 ? '' : 's'} disappeared (kept, click to see)`);
   schedule();
 }
 

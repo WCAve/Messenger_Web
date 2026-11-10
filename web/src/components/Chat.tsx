@@ -702,9 +702,16 @@ const MessageItem = memo(function MessageItem({
         ))}
         {!m.deleted && m.preview && <LinkPreviewCard p={m.preview} onLoad={onMediaLoad} />}
         {m.deleted ? (
-          <p className="body">
-            <em>{m.outgoing ? 'You deleted this message' : 'This message was deleted'}</em>
-          </p>
+          m.kept ? (
+            <button className="body deleted-show" onClick={() => setState({ deletedView: m })} title="See what it said">
+              <em>{m.kept === 'expired' ? 'This message disappeared' : 'This message was deleted'}</em>
+              <span className="deleted-show-label">Show</span>
+            </button>
+          ) : (
+            <p className="body">
+              <em>{m.outgoing ? 'You deleted this message' : 'This message was deleted'}</em>
+            </p>
+          )
         ) : waSticker ? (
           waSticker.missing ? (
             <MissingMedia a={waSticker} />
@@ -729,7 +736,7 @@ const MessageItem = memo(function MessageItem({
           )
         )}
         <span className="meta">
-          {!!m.expiresIn && (
+          {!!m.expiresIn && !m.deleted && (
             <span className="expiry" title={m.expiresAt ? `Disappears in ${untilLabel(m.expiresAt)}` : `Disappears ${durationLabel(m.expiresIn)} after you read it`}>
               <Icon name="timer" size={12} />
             </span>
@@ -998,6 +1005,64 @@ export function EditHistory() {
           </ol>
         )}
         <p className="muted setting-note">Versions from before Messenger Web kept edit history, or edited while it wasn't running, can't be shown.</p>
+      </div>
+    </Dialog>
+  );
+}
+
+/** What a deleted message said (someone else deleted it, or a disappearing message ran out). */
+export function DeletedMessage({ onOpenMedia }: { onOpenMedia: (item: LightboxItem) => void }) {
+  const m = useStore((s) => s.deletedView);
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.deletedMessage>> | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    if (m) api.deletedMessage(m.id).then(setData, (e) => setError(e.message));
+  }, [m?.id]);
+  if (!m) return null;
+  const close = () => setState({ deletedView: null });
+  const when = (t: number) => new Date(t).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <Dialog title={m.kept === 'expired' ? 'Disappeared message' : 'Deleted message'} onClose={close}>
+      <div className="dialog-body deleted-view">
+        {error && <p className="form-error">{error}</p>}
+        {!data && !error && <div className="spinner" aria-label="Loading" />}
+        {data && (
+          <>
+            <small className="muted">
+              {m.authorName}, {when(m.sentAt)}
+            </small>
+            {data.sticker && <img className="deleted-sticker" src={data.sticker.url} alt={data.sticker.emoji ?? 'Sticker'} />}
+            {data.attachments.map((a) =>
+              a.contentType.startsWith('image/') && !a.sticker ? (
+                <button key={a.id} className="deleted-media" onClick={() => (close(), onOpenMedia({ att: a, authorName: m.authorName, sentAt: m.sentAt }))}>
+                  <img src={attachmentUrl(a.id)} alt={a.filename ?? 'Photo'} />
+                </button>
+              ) : a.sticker ? (
+                <img key={a.id} className="deleted-sticker" src={attachmentUrl(a.id)} alt="Sticker" />
+              ) : a.contentType.startsWith('video/') ? (
+                <video key={a.id} className="deleted-media" src={attachmentUrl(a.id)} controls={!a.gif} autoPlay={a.gif} loop={a.gif} muted={a.gif} />
+              ) : (
+                <AttachmentView key={a.id} a={a} />
+              ),
+            )}
+            {data.poll && (
+              <p>
+                <strong>Poll:</strong> {data.poll}
+              </p>
+            )}
+            {data.body && (
+              <div className="edit-text">
+                <RichBody m={{ ...m, body: data.body, styles: data.styles, mentions: data.mentions }} />
+              </div>
+            )}
+            {data.preview && !data.body.includes(data.preview.url) && <p className="muted">{data.preview.url}</p>}
+            <p className="muted setting-note">
+              {data.reason === 'expired' ? 'Disappeared' : 'Deleted'} {when(data.deletedAt)}. Only you can see this; for everyone else it's gone.
+            </p>
+          </>
+        )}
       </div>
     </Dialog>
   );

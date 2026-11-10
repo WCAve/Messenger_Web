@@ -3645,6 +3645,56 @@ button.stk-pack-head {
 }
 
 /* ---------- edit history ---------- */
+.deleted-show {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.deleted-show-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ultra);
+}
+.msg.out .deleted-show-label {
+  color: var(--out-text);
+}
+.deleted-show:hover .deleted-show-label {
+  text-decoration: underline;
+}
+.deleted-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.deleted-media {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+  max-width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  align-self: flex-start;
+}
+.deleted-media img,
+video.deleted-media {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+  border-radius: 8px;
+}
+.deleted-sticker {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+}
 .edited-btn {
   border: 0;
   background: none;
@@ -3730,7 +3780,7 @@ button.stk-pack-head {
   color: var(--ink-2);
 }
 .missed-note.error {
-  color: var(--danger, #c0392b);
+  color: var(--alarm);
 }
 .chat-filter.on .chat-filter-count {
   background: #fff;

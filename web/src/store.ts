@@ -45,6 +45,7 @@ export interface State {
   /** The message being forwarded (the forward dialog is open). */
   forwarding: Message | null;
   editHistory: Message | null; // the edit history window
+  deletedView: Message | null; // what a deleted message said
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
   groupTick: Record<number, number>; // bumped when a group's details change
@@ -73,6 +74,7 @@ let state: State = {
   drafts: loadDrafts(),
   forwarding: null,
   editHistory: null,
+  deletedView: null,
 };
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
@@ -208,13 +210,15 @@ function clearTyping(conversationId: number, author: string) {
   setState((s) => ({ typing: { ...s.typing, [conversationId]: list.filter((t) => t.author !== author) } }));
 }
 
-// Typing indicators expire if we never get the "stopped" event. Disappearing messages are removed by
-// the server; this only catches one whose removal we missed while disconnected.
+// Typing indicators expire if we never get the "stopped" event. Disappearing messages are turned into
+// "This message disappeared" by the server; this only catches one whose update we missed while disconnected.
 setInterval(() => {
   const now = Date.now();
   for (const [id, list] of Object.entries(state.messages)) {
     if (list.some((m) => m.expiresAt && m.expiresAt < now - 5000)) {
-      setState((s) => ({ messages: { ...s.messages, [id]: list.filter((m) => !m.expiresAt || m.expiresAt >= now - 5000) } }));
+      const gone = (m: Message): Message =>
+        m.expiresAt && m.expiresAt < now - 5000 ? { ...m, deleted: true, kept: 'expired', body: '', attachments: [], expiresAt: undefined } : m;
+      setState((s) => ({ messages: { ...s.messages, [id]: list.map(gone) } }));
     }
   }
   let changed = false;

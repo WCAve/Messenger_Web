@@ -230,6 +230,16 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX message_edits_message ON message_edits(message_id, replaced_at);
   `,
+  `
+  -- Deleted messages kept: what someone else deleted for everyone, and disappearing messages whose timer
+  -- ran out. The message itself shows "deleted"; clicking it shows this. Your own deletions aren't kept.
+  CREATE TABLE deleted_messages (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    body TEXT, ranges TEXT, attachments TEXT, preview TEXT, poll TEXT, sticker TEXT, -- as in messages
+    reason TEXT NOT NULL,         -- 'deleted' (someone deleted it) or 'expired' (disappearing message)
+    deleted_at INTEGER NOT NULL   -- ms
+  );
+  `,
 ];
 
 function migrate() {

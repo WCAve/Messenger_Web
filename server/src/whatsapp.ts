@@ -73,6 +73,7 @@ import {
   setWaGroupMembers,
   statusRank,
   updateMessage,
+  deleteMessageContent,
   upsertWaContact,
   waAboutCached,
   waBlocked,
@@ -1490,7 +1491,8 @@ async function handleEvent(e: Json) {
       const id = p?.revokedMessageId ?? p?.before?.id;
       const target = findMessageByExt(id);
       if (!target) return;
-      emitMessage(updateMessage(target.id, { deleted: 1, body: null, ranges: null, attachments: null, reactions: null, preview: null }));
+      // Someone else's deletion is kept (click it to see); when you delete your own, it's gone.
+      emitMessage(deleteMessageContent(target.id, target.outgoing ? false : 'deleted'));
       emitConversation(target.conversation_id);
       return;
     }

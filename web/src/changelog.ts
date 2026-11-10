@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-10',
     date: '10 November 2026',
     items: [
+      'Deleted messages can be seen again: click “This message was deleted” → Show, for what others delete on Signal and WhatsApp (from now on). Disappearing messages now say “This message disappeared” and can be opened the same way. What you delete yourself is gone.',
       'WhatsApp no longer makes chats you’ve already read unread again: old messages it hands over a second time stay read (on your phone too). “Mark as unread” works as before.',
       'Step through a chat’s photos and videos in the viewer: ← → keys, the ‹ › buttons, or swipe on a phone. Shows “3 of 12”; closing takes the chat to the photo you ended on.',
       'WhatsApp messages that came in while the app or WhatsApp was restarting are now fetched by themselves once WhatsApp is back.',

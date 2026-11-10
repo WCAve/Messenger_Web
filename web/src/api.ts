@@ -4,7 +4,7 @@
  * through uploadBackup (XMLHttpRequest, for progress). Server routes: server/src/routes.ts and
  * groups.ts.
  */
-import type { BackupFile, GroupAction, GroupDetails, MediaItem, Network, WaContact, WaState } from './types';
+import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -134,6 +134,18 @@ export const api = {
   markRead: (id: number) => call<{ ok: true }>('POST', `/api/conversations/${id}/read`),
   messageEdits: (id: number) =>
     call<{ current: Message; earlier: { body: string; styles?: Message['styles']; mentions?: Message['mentions']; replacedAt: number; original: boolean }[] }>('GET', `/api/messages/${id}/edits`),
+  deletedMessage: (id: number) =>
+    call<{
+      body: string;
+      styles?: Message['styles'];
+      mentions?: Message['mentions'];
+      attachments: Attachment[];
+      preview: LinkPreview | null;
+      poll: string | null;
+      sticker: Message['sticker'];
+      reason: 'deleted' | 'expired';
+      deletedAt: number;
+    }>('GET', `/api/messages/${id}/deleted`),
   markAllRead: () => call<{ ok: true; chats: number }>('POST', '/api/conversations/read-all'),
   typing: (id: number, typing: boolean) => call<{ ok: true }>('POST', `/api/conversations/${id}/typing`, { typing }),
 };

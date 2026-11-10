@@ -23,6 +23,7 @@ import {
   repairOwnTimestamp,
   self,
   updateMessage,
+  deleteMessageContent,
   upsertContact,
 } from './store.js';
 import { db } from './db.js';
@@ -145,7 +146,8 @@ function applyPollClose(conv: ConversationRow, targetTs: number, closer: string)
 function applyDelete(conv: ConversationRow, targetTs: number, deleter: string) {
   const target = findMessage(conv.id, targetTs);
   if (!target || (target.author !== deleter && deleter !== 'admin')) return;
-  emitMessage(updateMessage(target.id, { deleted: 1, body: null, attachments: null, reactions: null }));
+  // Someone else's deletion is kept (click it to see); when you delete your own (from your phone), it's gone.
+  emitMessage(deleteMessageContent(target.id, target.outgoing ? false : 'deleted'));
   emitConversation(conv);
 }
 

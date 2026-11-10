@@ -204,6 +204,8 @@ export interface Message {
   edited: boolean;
   editVersions: number; // earlier versions kept (edit history); 0 for edits from before it existed
   deleted: boolean;
+  /** Deleted, but what it said was kept: someone else deleted it, or a disappearing message ran out. */
+  kept?: 'deleted' | 'expired';
   forwarded?: number; // WhatsApp: 1 = forwarded, 2 = forwarded many times
   /** Ranges in UTF-16 offsets over body (which already has "@Name" for each mention). */
   styles?: StyleRange[];

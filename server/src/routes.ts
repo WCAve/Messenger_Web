@@ -115,6 +115,7 @@ import {
   setConversationTimer,
   messageDto,
   messageEdits,
+  deletedContent,
   messageReceipts,
   recipientFor,
   self,
@@ -624,6 +625,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const m = getMessage(Number(ctx.params.id));
     if (!m) throw new HttpError(404, 'Message not found');
     return { current: messageDto(m), earlier: messageEdits(m.id) };
+  });
+
+  // What a deleted message said: someone else's deletion, or a disappearing message (kept from 10 Nov 2026)
+  r.get('/api/messages/:id/deleted', (ctx) => {
+    const m = getMessage(Number(ctx.params.id));
+    const d = m && deletedContent(m.id);
+    if (!d) throw new HttpError(404, 'Not kept');
+    return d;
   });
 
   r.get('/api/messages/:id/replyable', async (ctx) => {

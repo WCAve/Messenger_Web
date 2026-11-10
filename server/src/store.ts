@@ -1078,6 +1078,49 @@ export function updateMessage(
   return msgById.get(id);
 }
 
+/**
+ * Deleting a message: wipes what it said. With `keep`, the content is saved first (deleted_messages), so
+ * it can still be looked at: someone else's deletion ('deleted') or a disappearing message ('expired').
+ * The files stay on disk either way.
+ */
+export function deleteMessageContent(id: number, keep: false | 'deleted' | 'expired') {
+  const cur = msgById.get(id);
+  if (!cur) return undefined;
+  if (keep && !cur.deleted && (cur.body || cur.attachments || cur.sticker || cur.poll || cur.preview)) {
+    db.prepare(
+      `INSERT OR REPLACE INTO deleted_messages (message_id, body, ranges, attachments, preview, poll, sticker, reason, deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, cur.body, cur.ranges, cur.attachments, cur.preview, cur.poll, cur.sticker, keep, Date.now());
+  }
+  return updateMessage(id, { deleted: 1, body: null, ranges: null, attachments: null, reactions: null, preview: null, poll: null, expires_at: null });
+}
+
+const keptStmt = db.prepare<[number], { reason: string }>('SELECT reason FROM deleted_messages WHERE message_id = ?');
+
+/** What a deleted message said, when it was kept. */
+export function deletedContent(id: number) {
+  const d = db
+    .prepare<[number], { body: string | null; ranges: string | null; attachments: string | null; preview: string | null; poll: string | null; sticker: string | null; reason: string; deleted_at: number }>(
+      'SELECT * FROM deleted_messages WHERE message_id = ?',
+    )
+    .get(id);
+  if (!d) return null;
+  const rich = renderBody(d.body, d.ranges);
+  return {
+    body: rich?.text ?? '',
+    styles: rich?.styles.length ? rich.styles : undefined,
+    mentions: rich?.mentions.length ? rich.mentions : undefined,
+    attachments: ((d.attachments ? JSON.parse(d.attachments) : []) as Attachment[]).map(attachmentDto),
+    preview: d.preview ? (JSON.parse(d.preview) as LinkPreview) : null,
+    poll: d.poll ? (JSON.parse(d.poll) as Poll).question ?? null : null,
+    sticker: d.sticker
+      ? ((st: StickerRef) => ({ ...st, emoji: stickerEmoji(st), url: stickerUrl(st.packId, st.stickerId) }))(JSON.parse(d.sticker))
+      : null,
+    reason: d.reason as 'deleted' | 'expired',
+    deletedAt: d.deleted_at,
+  };
+}
+
 // Monotonic snapshot revision. The same message can reach the browser over HTTP and over the
 // event stream in either order; the client keeps whichever copy has the higher rev.
 let revCounter = 0;
@@ -1167,6 +1210,7 @@ export function messageDto(m: MessageRow) {
     // how many earlier versions we kept (edits before edit history existed weren't kept)
     editVersions: m.edited && !m.deleted ? editCount.get(m.id)!.n : 0,
     deleted: !!m.deleted,
+    kept: m.deleted ? ((keptStmt.get(m.id)?.reason as 'deleted' | 'expired' | undefined) ?? undefined) : undefined,
     forwarded: m.deleted ? 0 : m.forwarded || 0,
   };
 }
@@ -1329,6 +1373,3 @@ export function nextExpiry(): number | null {
   return db.prepare<[], { t: number | null }>('SELECT MIN(expires_at) AS t FROM messages WHERE expires_at IS NOT NULL').get()?.t ?? null;
 }
 
-export function deleteMessageRow(id: number) {
-  db.prepare('DELETE FROM messages WHERE id = ?').run(id);
-}

@@ -119,6 +119,7 @@ with sync_playwright() as p:
     mock('/mock/incoming', {'from': 'alice', 'text': 'poof in 4', 'extra': {'expiresInSeconds': 4}})
     page.wait_for_selector('.msg:has-text("poof in 4")')
     wait(lambda: page.locator('.msg:has-text("poof in 4")').count() == 0, t=12, msg='incoming did not disappear')
+    assert page.locator('.deleted-show:has-text("This message disappeared")').count() >= 1
     print('incoming disappeared')
     wait(lambda: page.locator('.msg.out:has-text("this will vanish")').count() == 0, t=40, msg='outgoing did not disappear')
     print('outgoing disappeared')
