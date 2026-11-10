@@ -3664,6 +3664,21 @@ button.stk-pack-head {
   line-height: 18px;
   text-align: center;
 }
+.missed-check {
+  margin-left: auto;
+  color: var(--ink-2);
+}
+.missed-check.busy svg {
+  animation: spin 0.9s linear infinite;
+}
+.missed-note {
+  margin: -2px 12px 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.missed-note.error {
+  color: var(--danger, #c0392b);
+}
 .chat-filter.on .chat-filter-count {
   background: #fff;
   color: var(--ultra);

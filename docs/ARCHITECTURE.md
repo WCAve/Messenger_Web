@@ -82,6 +82,9 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 
 - **WEBJS is WhatsApp Web in a browser.** Heavy calls (getChats, looking up many messages) make it
   unresponsive for minutes. Never loop over many WAHA calls at once: few, one at a time, with pauses.
+- **Events only flow while both WAHA and this app run.** Anything that arrives during a restart never
+  comes as an event; `catchUpWa` (after every connect, and the ↻ button) fetches it: one chat list call,
+  then only chats WhatsApp has something newer in, back to the first message we already have.
 - **Replies** only link when WhatsApp Web has the quoted message; otherwise they go as a text quote.
 - **HD photos/videos** arrive as two messages; the second has `associationType: *_DUAL_UPLOAD` and
   `parentMsgKey`. They're shown as one.

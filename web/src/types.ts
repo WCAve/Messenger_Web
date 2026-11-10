@@ -30,6 +30,7 @@ export interface WaState {
   importing?: boolean;
   importProgress?: { done: number; total: number; waiting?: boolean };
   lastImport?: { chats: number; messages: number; at: number; error?: string; skipped?: number };
+  catchUp?: { running: boolean; at?: number; chats?: number; messages?: number; error?: string };
   backup?: BackupState;
 }
 

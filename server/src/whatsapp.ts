@@ -20,6 +20,8 @@
  *                calls, groups, labels, archive, engine.event for unread counts and group lines). Events
  *                are handled strictly one after another.
  *   history      importHistory(): pages of 1000 per chat, resumable, skips chats that crash WhatsApp Web.
+ *                catchUpWa(): the light version, after every (re)connect and from the refresh button:
+ *                only chats WhatsApp has newer messages in, only back to the first one we have.
  *   outgoing     deliverWa() sends a stored pending message; replies only link when WhatsApp Web has the
  *                original (linkableQuoteId), otherwise the quote goes as text.
  *   presence, contacts and profile, stickers, group system lines, calls, avatars, blocking.
@@ -91,6 +93,8 @@ export interface WaState {
   importing?: boolean;
   importProgress?: { done: number; total: number; waiting?: boolean };
   lastImport?: { chats: number; messages: number; at: number; error?: string; skipped?: number };
+  /** "Check for missed messages": running now, or the last result. */
+  catchUp?: { running: boolean; at?: number; chats?: number; messages?: number; error?: string };
   backup?: BackupState;
 }
 
@@ -326,7 +330,7 @@ async function afterConnect() {
   // With WEBJS the chat list makes WhatsApp Web look up every group, which keeps it busy for up to a
   // minute. Once contacts are known, let the app load first and do this a little later.
   const known = kvGet('wa_directory_v1') === 'done';
-  if (known) await pause(60_000);
+  if (known) await pause(Number(process.env.WAHA_AFTER_CONNECT_PAUSE_MS) || 60_000);
   if (state.status !== 'connected') return;
   await refreshDirectory().catch((e) => log.warn(`whatsapp: contacts: ${(e as Error).message}`));
   kvSet('wa_directory_v1', 'done');
@@ -348,7 +352,11 @@ async function afterConnect() {
     }
   }
   setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
-  if (kvGet(HISTORY_KEY) === 'done') return;
+  if (kvGet(HISTORY_KEY) === 'done') {
+    // Messages that came in while this app or WAHA was down never arrived as events: fetch them.
+    await catchUpWa('after connecting').catch(() => {});
+    return;
+  }
   // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
   // rounds; messages we already have are skipped, so later rounds only add what arrived since.
   const rounds = (process.env.WAHA_HISTORY_ROUNDS_MS ?? '').split(',').map(Number).filter((n) => n > 0);
@@ -391,6 +399,88 @@ export async function runHistoryImport(): Promise<{ chats: number; messages: num
       .then(() => downloadPendingMedia())
       .catch(() => {});
   }
+}
+
+/**
+ * Missed messages: WAHA only sends events while both it and this app are running, so after a restart
+ * (or a dropped connection) messages can be missing. Asks for the chat list once, then only for chats
+ * whose newest message is newer than ours, newest first, and stops at the first message we already
+ * have. Missed messages keep WhatsApp's read state (unread on the phone = unread here). Files are
+ * fetched when someone looks, like imported history.
+ */
+let catchingUp = false;
+const CATCHUP_CHATS = 100;
+const CATCHUP_PAGE = 50;
+const CATCHUP_MAX_PER_CHAT = 500;
+export async function catchUpWa(why: string): Promise<{ chats: number; messages: number }> {
+  if (catchingUp || importing || state.status !== 'connected') return { chats: 0, messages: 0 };
+  catchingUp = true;
+  setState({ ...state, catchUp: { ...state.catchUp, running: true } });
+  let chatsTouched = 0;
+  let total = 0;
+  try {
+    const chats = (await waha.chats(CATCHUP_CHATS)) ?? [];
+    for (const c of chats) {
+      if (state.status !== 'connected') break;
+      const idRaw = idString(c.id);
+      if (!idRaw || skipChat(idRaw)) continue;
+      const id = await resolve(idRaw);
+      if (!id) continue;
+      const known = findWaChat(id);
+      const theirs = Number(c.timestamp ?? c.conversationTimestamp ?? c._chat?.t ?? 0) * 1000;
+      if (known && theirs && theirs <= (known.last_message_at ?? 0) + 1000) continue; // nothing newer
+      const added: MessageRow[] = [];
+      let offset = 0;
+      while (offset < CATCHUP_MAX_PER_CHAT && state.status === 'connected') {
+        const page = (await waha.messages(idRaw, CATCHUP_PAGE, false, offset)) ?? [];
+        const sorted = [...page].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
+        let reachedKnown = false;
+        for (const m of sorted) {
+          if (m?.id && findMessageByExt(String(m.id))) {
+            reachedKnown = true;
+            continue;
+          }
+          const row = await ingestMessage(m, { history: true }).catch((e) => {
+            log.warn(`whatsapp: missed message ${m?.id}: ${(e as Error).message}`);
+            return undefined;
+          });
+          if (row) added.push(row);
+        }
+        if (reachedKnown || page.length < CATCHUP_PAGE) break;
+        offset += page.length;
+        await pause(200);
+      }
+      if (!added.length) continue;
+      // Same read state as on the phone: its unread count says how many of the newest are unread.
+      const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? 0);
+      const incoming = added.filter((r) => !r.outgoing).sort((a, b) => a.sent_ts - b.sent_ts);
+      if (unread > 0) for (const r of incoming.slice(-unread)) updateMessage(r.id, { read: 0 });
+      for (const r of added) emitMessage(getMessage(r.id));
+      const conv = findWaChat(id);
+      if (conv) emitConversation(conv.id);
+      chatsTouched++;
+      total += added.length;
+      await pause(250);
+    }
+    if (total) log.info(`whatsapp: missed messages (${why}): ${total} from ${chatsTouched} chat${chatsTouched === 1 ? '' : 's'}`);
+    setState({ ...state, catchUp: { running: false, at: Date.now(), chats: chatsTouched, messages: total } });
+    return { chats: chatsTouched, messages: total };
+  } catch (e) {
+    const msg = (e as Error).message;
+    log.warn(`whatsapp: checking for missed messages failed: ${msg}`);
+    setState({ ...state, catchUp: { running: false, at: Date.now(), chats: chatsTouched, messages: total, error: msg } });
+    throw e;
+  } finally {
+    catchingUp = false;
+  }
+}
+
+/** The refresh button: runs in the background, the result arrives with the WhatsApp state. */
+export function catchUpWaNow() {
+  requireWa();
+  if (importing) throw Object.assign(new Error('A history import is running; it fetches these too'), { httpStatus: 409 });
+  if (!catchingUp) catchUpWa('refresh button').catch(() => {});
+  return { started: true };
 }
 
 /** Import again now (button in Settings). Runs in the background: a big import takes many minutes. */

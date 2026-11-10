@@ -63,6 +63,7 @@ export const api = {
   backupMedia: () => call<{ started: true }>('POST', '/api/whatsapp/backup/media'),
   backupCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/backup/cancel'),
   whatsappImportCancel: () => call<{ ok: true }>('POST', '/api/whatsapp/import/cancel'),
+  whatsappCatchUp: () => call<{ started: true }>('POST', '/api/whatsapp/catch-up'),
   whatsappImport: () => call<{ started: true }>('POST', '/api/whatsapp/import'),
   whatsappRefresh: () => call<{ ok: true }>('POST', '/api/whatsapp/refresh'),
   refreshDirectory: () => call<{ contacts: DirectoryContact[]; groups: { id: number; title: string }[] }>('POST', '/api/directory/refresh'),

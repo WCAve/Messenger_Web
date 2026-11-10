@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-10',
+    date: '10 November 2026',
+    items: [
+      'WhatsApp messages that came in while the app or WhatsApp was restarting are now fetched by themselves once WhatsApp is back.',
+      'Check WhatsApp for missed messages: the ↻ button next to the chat filters (also in the ⋮ menu). Read or unread, as on your phone.',
+    ],
+  },
+  {
     id: '2026-11-09',
     date: '9 November 2026',
     items: [

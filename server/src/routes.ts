@@ -30,6 +30,7 @@ import {
   editWa,
   getWaState,
   importHistoryNow,
+  catchUpWaNow,
   logoutWhatsApp,
   markReadWa,
   markUnreadWa,
@@ -479,6 +480,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return getWaState();
   });
   r.post('/api/whatsapp/import', async () => wa(async () => importHistoryNow()));
+  r.post('/api/whatsapp/catch-up', async () => wa(async () => catchUpWaNow()));
   r.post('/api/whatsapp/import/cancel', () => (cancelImportWa(), { ok: true }));
 
   // Android backup (msgstore.db.crypt15 + the 64-digit key), then optionally the media folder.

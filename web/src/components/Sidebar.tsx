@@ -61,6 +61,33 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
   // Only Signal / only WhatsApp (remembered in this browser). Offered when both are set up.
   const bothNetworks = useStore((s) => s.signal.status !== 'disabled' && s.whatsapp.status !== 'disabled');
   const signalOnly = useStore((s) => s.whatsapp.status === 'disabled');
+  // "Check WhatsApp for missed messages": the server runs it in the background; its result comes with
+  // the WhatsApp state. The note under the filters shows for a few seconds after a check asked for here.
+  const waConnected = useStore((s) => s.whatsapp.status === 'connected');
+  const catchUp = useStore((s) => s.whatsapp.catchUp);
+  const [askedAt, setAskedAt] = useState(0);
+  const [missedNote, setMissedNote] = useState<{ text: string; error?: boolean } | null>(null);
+  const checking = !!catchUp?.running || (askedAt > 0 && !missedNote && (catchUp?.at ?? 0) < askedAt);
+  const checkMissed = () => {
+    setMissedNote(null);
+    setAskedAt(Date.now());
+    api.whatsappCatchUp().catch((e) => (setAskedAt(0), setMissedNote({ text: (e as Error).message, error: true })));
+  };
+  useEffect(() => {
+    if (!askedAt || !catchUp || catchUp.running || (catchUp.at ?? 0) < askedAt) return;
+    const n = catchUp.messages ?? 0;
+    setMissedNote(
+      catchUp.error
+        ? { text: `Couldn’t check WhatsApp: ${catchUp.error}`, error: true }
+        : { text: n ? `Found ${n} missed message${n === 1 ? '' : 's'} in ${catchUp.chats} chat${catchUp.chats === 1 ? '' : 's'}.` : 'Nothing missed: everything from WhatsApp is here.' },
+    );
+    setAskedAt(0);
+  }, [catchUp, askedAt]);
+  useEffect(() => {
+    if (!missedNote) return;
+    const t = setTimeout(() => setMissedNote(null), 8000);
+    return () => clearTimeout(t);
+  }, [missedNote]);
   const [netFilter, setNetFilterState] = useState<NetFilter>(readNetFilter);
   const setNetFilter = (f: NetFilter) => {
     setNetFilterState(f);
@@ -184,6 +211,11 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
               <button role="menuitem" onClick={() => (setState({ whatsNew: 'all' }), setMenu(false))}>
                 <Icon name="info" size={18} /> What’s new
               </button>
+              {waConnected && (
+                <button role="menuitem" disabled={checking} onClick={() => (setMenu(false), checkMissed())}>
+                  <Icon name="refresh" size={18} /> Check WhatsApp for missed messages
+                </button>
+              )}
               <button role="menuitem" onClick={() => (api.refreshDirectory().catch(() => {}), setMenu(false))}>
                 <Icon name="refresh" size={18} /> Refresh contacts and groups
               </button>
@@ -224,7 +256,23 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
               {n > 0 && <span className="chat-filter-count">{n > 99 ? '99+' : n}</span>}
             </button>
           ))}
+          {waConnected && (
+            <button
+              className={`icon-btn sm missed-check${checking ? ' busy' : ''}`}
+              onClick={checkMissed}
+              disabled={checking}
+              title="Check WhatsApp for missed messages"
+              aria-label="Check WhatsApp for missed messages"
+            >
+              <Icon name="refresh" size={18} />
+            </button>
+          )}
         </div>
+      )}
+      {missedNote && (
+        <p className={`missed-note${missedNote.error ? ' error' : ''}`} role="status">
+          {missedNote.text}
+        </p>
       )}
       <nav className="chat-list" aria-label="Chats">
         {!query && archivedCount > 0 && (
