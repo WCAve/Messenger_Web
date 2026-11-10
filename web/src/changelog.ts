@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-10',
     date: '10 November 2026',
     items: [
+      'Editing a message (↑) and erasing everything, then Enter: deletes the message for everyone, after asking.',
       'Ctrl+F (⌘F on a Mac) searches the open chat, or the chat list when no chat is open. Esc clears, then closes; Ctrl+F again in the search box is the browser’s own find.',
       'Deleted messages can be seen again: click “This message was deleted” → Show, for what others delete on Signal and WhatsApp (from now on). Disappearing messages now say “This message disappeared” and can be opened the same way. What you delete yourself is gone.',
       'WhatsApp no longer makes chats you’ve already read unread again: old messages it hands over a second time stay read (on your phone too). “Mark as unread” works as before.',

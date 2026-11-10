@@ -1534,7 +1534,27 @@ function Composer({
     const body = replaceShortcodes(text.trim());
     const rich = composerToRich(body, mentions.current);
     if (editing) {
-      if (!body || sending) return;
+      if (sending) return;
+      if (!body) {
+        // Everything erased: delete the message instead (after the same question as the delete button).
+        const what = editing.attachments.length ? 'this message, with its attachment,' : 'this message';
+        if (!confirm(`Delete ${what} for everyone?`)) return;
+        setSending(true);
+        setError(null);
+        try {
+          upsertMessages(id, [await api.remove(editing.id)]);
+          setEditing(null);
+          setText(draftBeforeEdit.current);
+          draftBeforeEdit.current = '';
+          mentions.current = [];
+        } catch (e) {
+          setError((e as Error).message);
+        } finally {
+          setSending(false);
+          area.current?.focus();
+        }
+        return;
+      }
       setSending(true);
       setError(null);
       setSuggest(null);
@@ -1918,11 +1938,11 @@ function Composer({
         <button
           className="send-btn"
           onClick={send}
-          disabled={disabled || sending || (!text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
-          aria-label={editing ? 'Save edit' : 'Send'}
-          title={editing ? 'Save edit' : undefined}
+          disabled={disabled || sending || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
+          aria-label={editing ? (text.trim() ? 'Save edit' : 'Delete message') : 'Send'}
+          title={editing ? (text.trim() ? 'Save edit' : 'Everything erased: delete the message') : undefined}
         >
-          <Icon name={editing ? 'check' : 'send'} />
+          <Icon name={editing ? (text.trim() ? 'check' : 'trash') : 'send'} />
         </button>
       </div>
     </footer>
