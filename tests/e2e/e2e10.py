@@ -71,6 +71,25 @@ with sync_playwright() as p:
     assert not s.get('link_preview'), s
     print('link previews ok')
 
+    # 1b. WhatsApp on the WEBJS engine can't send our own preview: the message goes as text and
+    # WhatsApp makes the preview; after that we don't try our own again
+    def wa(path, data=None):
+        r = urllib.request.Request('http://127.0.0.1:8090' + path, data=json.dumps(data).encode() if data is not None else None, headers={'content-type': 'application/json'}, method='POST' if data is not None else 'GET')
+        return json.loads(urllib.request.urlopen(r).read() or b'null')
+    wa('/mock/config', {'webjs': True})
+    page.click('.chat-row-wrap:has(.chat-title:text-is("Jan Bakker"))'); page.wait_for_selector('.msg')
+    for n in (1, 2):
+        page.click('textarea'); page.keyboard.type(f'Kijk {n} https://127.0.0.1:8443/moved'); page.wait_for_selector('.compose-preview', timeout=8000)
+        page.keyboard.press('Enter')
+        sent = wait(lambda: [x for x in wa('/mock/sent') if x['path'] == '/api/sendText' and f'Kijk {n}' in str(x.get('text'))])
+        assert sent[-1].get('linkPreview') is True, sent[-1]
+        page.wait_for_selector(f'.msg.out:has-text("Kijk {n}") .tick, .msg.out:has-text("Kijk {n}") time')
+        assert page.locator(f'.msg.out:has-text("Kijk {n}") .msg-error, .msg.out:has-text("Kijk {n}") :text("Not sent")').count() == 0
+    custom = [x for x in wa('/mock/sent') if x['path'] == '/api/send/link-custom-preview']
+    print('custom preview tries:', len(custom)); assert len(custom) == 1, custom
+    wa('/mock/config', {'webjs': False})
+    print('whatsapp webjs preview fallback ok')
+
     # 2. polls
     page.click('.chat-row:has-text("Weekend")'); page.wait_for_selector('.poll')
     poll = page.locator('.poll').first

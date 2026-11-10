@@ -1887,7 +1887,7 @@ export async function deliverWa(
       const res = await waha.sendMedia(kind, chatId, file, { caption, reply_to: i === 0 ? reply_to : undefined, mentions: i === 0 && wa.mentions.length ? wa.mentions : undefined });
       if (i === 0) first = res;
     }
-  } else if (p.preview && wa.text.includes(p.preview.url)) {
+  } else if (p.preview && wa.text.includes(p.preview.url) && kvGet('wa_no_custom_preview') !== '1') {
     let image: { mimetype: string; data: string } | undefined;
     if (p.preview.image && isSafeId(p.preview.image.id)) {
       try {
@@ -1896,7 +1896,18 @@ export async function deliverWa(
         /* without a picture */
       }
     }
-    first = await waha.linkPreview(chatId, wa.text, { url: p.preview.url, title: p.preview.title ?? p.preview.url, description: p.preview.description ?? '', ...(image ? { image } : {}) }, reply_to);
+    try {
+      first = await waha.linkPreview(chatId, wa.text, { url: p.preview.url, title: p.preview.title ?? p.preview.url, description: p.preview.description ?? '', ...(image ? { image } : {}) }, reply_to);
+    } catch (e) {
+      // WEBJS can't send our own preview ("not implemented by 'WEBJS' engine"): send it as text and let
+      // WhatsApp make the preview itself, and don't try our own again.
+      if (!/not implemented/i.test((e as Error).message)) throw e;
+      kvSet('wa_no_custom_preview', '1');
+      log.info('whatsapp: this engine cannot send custom link previews; WhatsApp makes them from now on');
+      first = await waha.sendText(chatId, wa.text, { reply_to, mentions: wa.mentions.length ? wa.mentions : undefined, linkPreview: true });
+    }
+  } else if (p.preview && wa.text.includes(p.preview.url)) {
+    first = await waha.sendText(chatId, wa.text, { reply_to, mentions: wa.mentions.length ? wa.mentions : undefined, linkPreview: true });
   } else {
     first = await waha.sendText(chatId, wa.text, { reply_to, mentions: wa.mentions.length ? wa.mentions : undefined, linkPreview: false });
   }
