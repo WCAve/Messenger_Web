@@ -98,6 +98,8 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 - **Member labels** only exist in WhatsApp Web for labels set after WAHA was linked. Older ones come
   from the Android backup (`group_participant_user.label`).
 - **Mentions** may name someone by privacy id, of any length (14 digits is common).
+- **Custom link previews** (`/api/send/link-custom-preview`) aren't implemented on WEBJS: on that error the
+  message goes as text with WhatsApp's own preview, and kv `wa_no_custom_preview` skips the attempt from then on.
 - **Sending video** needs WAHA's Chrome image (`devlikeapro/waha:chrome`); Chromium lacks the codecs.
 - **Browsers allow ~6 connections per site.** Nothing may hold a request open: pictures and files that
   aren't ready answer at once (404 + retry) and are fetched in the background.
