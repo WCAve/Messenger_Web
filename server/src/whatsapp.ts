@@ -21,7 +21,7 @@
  *                are handled strictly one after another.
  *   history      importHistory(): pages of 1000 per chat, resumable, skips chats that crash WhatsApp Web.
  *                catchUpWa(): the light version, after every (re)connect and from the refresh button:
- *                only chats WhatsApp has newer messages in, only back to the first one we have.
+ *                each chat active since the last event seen (the button: a week), back to then, filling holes.
  *   outgoing     deliverWa() sends a stored pending message; replies only link when WhatsApp Web has the
  *                original (linkableQuoteId), otherwise the quote goes as text.
  *   presence, contacts and profile, stickers, group system lines, calls, avatars, blocking.
@@ -403,16 +403,22 @@ export async function runHistoryImport(): Promise<{ chats: number; messages: num
 
 /**
  * Missed messages: WAHA only sends events while both it and this app are running, so after a restart
- * (or a dropped connection) messages can be missing. Asks for the chat list once, then only for chats
- * whose newest message is newer than ours, newest first, and stops at the first message we already
- * have. Missed messages keep WhatsApp's read state (unread on the phone = unread here). Files are
- * fetched when someone looks, like imported history.
+ * (or a dropped connection) messages can be missing, also in the middle of a chat when newer ones came
+ * in live afterwards. Asks for the chat list once, then for each chat with something since `since`,
+ * pages newest first back to `since`, storing what we don't have. After connecting `since` is just
+ * before the last event we saw; the refresh button looks back a week. Missed messages keep WhatsApp's
+ * read state (unread on the phone = unread here). Files are fetched when someone looks.
  */
 let catchingUp = false;
 const CATCHUP_CHATS = 100;
 const CATCHUP_PAGE = 50;
 const CATCHUP_MAX_PER_CHAT = 500;
-export async function catchUpWa(why: string): Promise<{ chats: number; messages: number }> {
+const WEEK = 7 * 24 * 3600_000;
+export async function catchUpWa(why: string, since?: number): Promise<{ chats: number; messages: number }> {
+  if (since === undefined) {
+    const last = Number(kvGet('wa_last_event_at') ?? 0);
+    since = last ? Math.max(last - 10 * 60_000, Date.now() - WEEK) : Date.now() - WEEK;
+  }
   if (catchingUp || importing || state.status !== 'connected') return { chats: 0, messages: 0 };
   catchingUp = true;
   setState({ ...state, catchUp: { ...state.catchUp, running: true } });
@@ -426,35 +432,36 @@ export async function catchUpWa(why: string): Promise<{ chats: number; messages:
       if (!idRaw || skipChat(idRaw)) continue;
       const id = await resolve(idRaw);
       if (!id) continue;
-      const known = findWaChat(id);
       const theirs = Number(c.timestamp ?? c.conversationTimestamp ?? c._chat?.t ?? 0) * 1000;
-      if (known && theirs && theirs <= (known.last_message_at ?? 0) + 1000) continue; // nothing newer
+      if (theirs && theirs < since) continue; // nothing since then
       const added: MessageRow[] = [];
+      const seenIncoming: { id: string; ts: number }[] = []; // to tell which ones the phone has as unread
       let offset = 0;
       while (offset < CATCHUP_MAX_PER_CHAT && state.status === 'connected') {
         const page = (await waha.messages(idRaw, CATCHUP_PAGE, false, offset)) ?? [];
+        for (const m of page) if (m?.id && !m.fromMe) seenIncoming.push({ id: String(m.id), ts: Number(m.timestamp) });
         const sorted = [...page].sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
-        let reachedKnown = false;
+        const reachedSince = sorted.length > 0 && Number(sorted[0].timestamp) * 1000 < since;
         for (const m of sorted) {
-          if (m?.id && findMessageByExt(String(m.id))) {
-            reachedKnown = true;
-            continue;
-          }
+          if (Number(m?.timestamp) * 1000 < since) continue;
+          if (m?.id && findMessageByExt(String(m.id))) continue;
           const row = await ingestMessage(m, { history: true }).catch((e) => {
             log.warn(`whatsapp: missed message ${m?.id}: ${(e as Error).message}`);
             return undefined;
           });
           if (row) added.push(row);
         }
-        if (reachedKnown || page.length < CATCHUP_PAGE) break;
+        if (reachedSince || page.length < CATCHUP_PAGE) break;
         offset += page.length;
         await pause(200);
       }
       if (!added.length) continue;
-      // Same read state as on the phone: its unread count says how many of the newest are unread.
+      // Same read state as on the phone: its unread count says how many of the newest incoming are unread.
       const unread = Number(c._chat?.unreadCount ?? c.unreadCount ?? 0);
-      const incoming = added.filter((r) => !r.outgoing).sort((a, b) => a.sent_ts - b.sent_ts);
-      if (unread > 0) for (const r of incoming.slice(-unread)) updateMessage(r.id, { read: 0 });
+      if (unread > 0) {
+        const unreadIds = new Set(seenIncoming.sort((a, b) => b.ts - a.ts).slice(0, unread).map((x) => x.id));
+        for (const r of added) if (!r.outgoing && r.ext_id && unreadIds.has(r.ext_id)) updateMessage(r.id, { read: 0 });
+      }
       for (const r of added) emitMessage(getMessage(r.id));
       const conv = findWaChat(id);
       if (conv) emitConversation(conv.id);
@@ -479,7 +486,7 @@ export async function catchUpWa(why: string): Promise<{ chats: number; messages:
 export function catchUpWaNow() {
   requireWa();
   if (importing) throw Object.assign(new Error('A history import is running; it fetches these too'), { httpStatus: 409 });
-  if (!catchingUp) catchUpWa('refresh button').catch(() => {});
+  if (!catchingUp) catchUpWa('refresh button', Date.now() - WEEK).catch(() => {});
   return { started: true };
 }
 
@@ -1365,8 +1372,18 @@ async function refreshGroupNames(groups?: Json[]) {
   }
 }
 
+/** When events last came in, so a catch-up after a restart knows how far back to look. */
+let lastEventSaved = 0;
+function noteEvent() {
+  const now = Date.now();
+  if (now - lastEventSaved < 30_000) return;
+  lastEventSaved = now;
+  kvSet('wa_last_event_at', String(now));
+}
+
 async function handleEvent(e: Json) {
   const p = e?.payload;
+  if (e?.event !== 'session.status') noteEvent();
   switch (e?.event) {
     case 'session.status':
       recheckWa(200);

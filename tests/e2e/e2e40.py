@@ -39,6 +39,19 @@ with sync_playwright() as p:
     btn.click(); page.wait_for_selector('.missed-note', timeout=20000)
     note = page.locator('.missed-note').inner_text(); print('again:', note)
     assert note.startswith('Nothing missed'), note
+    # A hole: missed while down, then a newer one came in live. The chat's newest message is here,
+    # but the older one is still fetched.
+    wa('/mock/history', {'message': {'id': f'false_{SANNE}_MISSED0005', 'timestamp': int(time.time()) - 120, 'from': SANNE, 'fromMe': False,
+                                     'to': ME, 'body': 'Gat in het gesprek', 'hasMedia': False, '_data': {'type': 'chat', 'notifyName': 'Sanne'}}})
+    wa('/mock/incoming', {'from': 'sanne', 'text': 'Live erna'}); time.sleep(1.5)
+    page.wait_for_selector('.missed-note', state='detached', timeout=15000)
+    btn.click(); page.wait_for_selector('.missed-note', timeout=20000)
+    note = page.locator('.missed-note').inner_text(); print('hole:', note)
+    assert note.startswith('Found 1 missed message in 1 chat'), note
+    page.click(row('Sanne')); time.sleep(1)
+    msgs = page.locator('.messages').inner_text()
+    assert 'Gat in het gesprek' in msgs and msgs.index('Gat in het gesprek') < msgs.index('Live erna'), msgs[-300:]
+    page.click(row('Jan Bakker')); time.sleep(0.5)
     # While WhatsApp is down a message arrives; after it reconnects it's fetched by itself
     wa('/mock/status', {'status': 'STOPPED'}); time.sleep(3)
     wa('/mock/history', {'chat': JAN, 'id': f'false_{JAN}_MISSED0004', 'body': 'Terwijl alles uit stond'})
