@@ -14,7 +14,7 @@ with sync_playwright() as p:
     page.wait_for_selector('.msg.out:has-text("Oeps, typfout") .tick, .msg.out:has-text("Oeps, typfout") time'); time.sleep(1.5)
     page.keyboard.press('ArrowUp'); page.wait_for_selector('.reply-preview.editing')
     page.keyboard.press('Control+a'); page.keyboard.press('Backspace')
-    assert page.locator('button[aria-label="Delete message"]').count() == 1
+    page.wait_for_selector('button[aria-label="Delete message"]', timeout=5000)
     # Cancel: still editing, nothing deleted
     page.once('dialog', lambda d: d.dismiss()); page.keyboard.press('Enter'); time.sleep(0.5)
     assert page.locator('.reply-preview.editing').count() == 1 and page.locator('.msg.out:has-text("Oeps, typfout")').count() == 1

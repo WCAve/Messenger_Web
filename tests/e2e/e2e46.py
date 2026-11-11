@@ -18,7 +18,7 @@ with sync_playwright() as p:
     sig('/mock/incoming', {'from': 'alice', 'text': 'Geheim, niet exporteren', 'ts': ts}); page.wait_for_selector('.msg:has-text("Geheim, niet")')
     sig('/mock/incoming', {'from': 'alice', 'text': '', 'extra': {'remoteDelete': {'timestamp': ts}}}); page.wait_for_selector('.deleted-show')
     page.click('textarea'); page.keyboard.type('Typfoutt'); page.keyboard.press('Enter'); page.wait_for_selector('.msg.out:has-text("Typfoutt")'); time.sleep(1.5)
-    page.keyboard.press('ArrowUp'); page.wait_for_selector('.reply-preview.editing'); page.keyboard.press('Backspace'); page.keyboard.press('Enter')
+    page.keyboard.press('ArrowUp'); page.wait_for_selector('.reply-preview.editing'); time.sleep(0.3); page.keyboard.press('Backspace'); time.sleep(0.3); page.keyboard.press('Enter')
     page.wait_for_selector('.msg.out:has-text("edited")', timeout=10000)
 
     def export(open_it, pick=(), dates=None, media=True):
