@@ -179,7 +179,12 @@ export class Router {
     }
     const m = url.pathname.match(route.re)!;
     const params: Record<string, string> = {};
-    route.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
+    try {
+      route.keys.forEach((k, i) => (params[k] = decodeURIComponent(m[i + 1])));
+    } catch {
+      sendJson(res, 400, { error: 'Bad address' }); // a broken %-escape: not worth an error in the log
+      return true;
+    }
     const peer = req.socket.remoteAddress ?? '';
     // Behind a reverse proxy the peer is the proxy; the client is the LAST X-Forwarded-For entry (the
     // one the proxy added). Earlier entries come from the client and can say anything, so they never
@@ -202,7 +207,7 @@ export class Router {
       if (route.auth && !this.opts.isAuthed(ctx)) throw new HttpError(401, 'Not logged in');
       if (route.raw) {
         if (req.headers['x-messenger-upload'] !== '1') throw new HttpError(400, 'Missing upload header');
-      } else ctx.body = await readBody(req, this.opts.bodyLimit);
+      } else ctx.body = await readBody(req, route.auth ? this.opts.bodyLimit : 64 * 1024); // not signed in: a password, not an upload
       const result = await route.handler(ctx);
       if (res.writableEnded || res.headersSent) return true;
       if (Buffer.isBuffer(result)) {

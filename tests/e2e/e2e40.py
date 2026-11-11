@@ -52,10 +52,15 @@ with sync_playwright() as p:
     msgs = page.locator('.messages').inner_text()
     assert 'Gat in het gesprek' in msgs and msgs.index('Gat in het gesprek') < msgs.index('Live erna'), msgs[-300:]
     page.click(row('Jan Bakker')); time.sleep(0.5)
-    # While WhatsApp is down a message arrives; after it reconnects it's fetched by itself
+    # WhatsApp is down for a while and a message arrives meanwhile; after it's back, new messages come in
+    # straight away (moving "last event" on) and only then the catch-up runs: it still looks back to
+    # before the interruption. (The tests run with a 2-second margin instead of 10 minutes.)
+    wa('/mock/incoming', {'from': 'jan', 'text': 'Laatste voor de storing'}); time.sleep(32)
     wa('/mock/status', {'status': 'STOPPED'}); time.sleep(3)
-    wa('/mock/history', {'chat': JAN, 'id': f'false_{JAN}_MISSED0004', 'body': 'Terwijl alles uit stond'})
+    wa('/mock/history', {'message': {'id': f'false_{JAN}_MISSED0004', 'timestamp': int(time.time()) - 20, 'from': JAN, 'fromMe': False, 'to': ME,
+                                     'body': 'Terwijl alles uit stond', 'hasMedia': False, '_data': {'type': 'chat', 'notifyName': 'Jan'}}})
     wa('/mock/status', {'status': 'WORKING'})
+    wa('/mock/incoming', {'from': 'jan', 'text': 'Eerste na de storing'})
     for _ in range(40):
         if 'Terwijl alles uit stond' in page.locator('.messages').inner_text(): break
         time.sleep(0.5)

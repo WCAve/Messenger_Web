@@ -43,6 +43,10 @@ function ExportWindow({ preselect }: { preselect: number[] }) {
     abort.current?.abort();
     setState({ exportDialog: null });
   };
+  // While it runs, only the Cancel button stops it: a stray click next to the window shouldn't throw away a long export.
+  const dismiss = () => {
+    if (!abort.current) close();
+  };
 
   const run = async () => {
     const chats = all.filter((c) => selected.has(c.id));
@@ -82,7 +86,7 @@ function ExportWindow({ preselect }: { preselect: number[] }) {
 
   const running = !!progress;
   return (
-    <Dialog title={single ? `Export ${single.title}` : 'Export chats'} onClose={close}>
+    <Dialog title={single ? `Export ${single.title}` : 'Export chats'} onClose={dismiss}>
       <div className="dialog-body export">
         {!single && (
           <section>

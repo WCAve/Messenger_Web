@@ -98,6 +98,9 @@ function getOnce(url: URL, limit: number, accept: string): Promise<Got & { locat
       },
     );
     req.on('timeout', () => req.destroy(new Error('Timed out')));
+    // The timeout above is for silence only; a page that keeps dripping bytes is cut off here.
+    const deadline = setTimeout(() => req.destroy(new Error('Timed out')), TIMEOUT_MS * 3);
+    req.on('close', () => clearTimeout(deadline));
     req.on('error', reject);
     req.end();
   });

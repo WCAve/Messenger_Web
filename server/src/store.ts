@@ -1145,19 +1145,15 @@ export function attachmentDto(a: Attachment) {
  * same time and author), so stickers and photos show as a thumbnail and other files by kind. Works
  * for replies stored before this existed too.
  */
+type QuotedRow = Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>;
+// Prepared once: this runs for every reply in every page of messages.
+const quotedByAuthor = db.prepare<[number, number, string], QuotedRow>(
+  'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ? LIMIT 1',
+);
+const quotedByTime = db.prepare<[number, number], QuotedRow>('SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1');
 export function quotedMedia(conversationId: number, q: Quote): { kind: string; label: string; thumb: string | null } | null {
-  const row =
-    db
-      .prepare<[number, number, string], Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>>(
-        'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ? LIMIT 1',
-      )
-      .get(conversationId, q.sentTs, q.author) ??
-    // WhatsApp may spell the author differently (number or privacy id): the time alone is close enough.
-    db
-      .prepare<[number, number], Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>>(
-        'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1',
-      )
-      .get(conversationId, q.sentTs);
+  // WhatsApp may spell the author differently (number or privacy id): then the time alone is close enough.
+  const row = quotedByAuthor.get(conversationId, q.sentTs, q.author) ?? quotedByTime.get(conversationId, q.sentTs);
   if (!row || row.deleted) return null;
   if (row.sticker) {
     const st: StickerRef = JSON.parse(row.sticker);
@@ -1266,13 +1262,27 @@ function pollDto(p: Poll) {
   };
 }
 
+/**
+ * Pages are cut by time ("older than", "newer than"), and two people can send in the same instant
+ * (WhatsApp counts in seconds). So a page never stops halfway such a moment: every message with the
+ * same time as the one at the cut-off comes along, or the next page would skip it.
+ */
+const sameMoment = db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ? ORDER BY id');
+function withTies(conversationId: number, rows: MessageRow[], edge: MessageRow | undefined): MessageRow[] {
+  if (!edge) return rows;
+  const have = new Set(rows.map((r) => r.id));
+  const extra = sameMoment.all(conversationId, edge.sent_ts).filter((r) => !have.has(r.id));
+  return extra.length ? [...rows, ...extra].sort((a, b) => a.sent_ts - b.sent_ts || a.id - b.id) : rows;
+}
+
 export function listMessages(conversationId: number, before: number | undefined, limit: number) {
   const rows = db
     .prepare<[number, number, number], MessageRow>(
-      'SELECT * FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC LIMIT ?',
+      'SELECT * FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC, id DESC LIMIT ?',
     )
-    .all(conversationId, before ?? Number.MAX_SAFE_INTEGER, limit);
-  return rows.reverse().map(messageDto);
+    .all(conversationId, before ?? Number.MAX_SAFE_INTEGER, limit)
+    .reverse();
+  return withTies(conversationId, rows, rows.length === limit ? rows[0] : undefined).map(messageDto);
 }
 
 export function unreadMessages(conversationId: number) {
@@ -1318,22 +1328,24 @@ export function messageNearDate(conversationId: number, ts: number | null) {
 export function listMessagesAround(conversationId: number, ts: number, limit: number) {
   const half = Math.floor(limit / 2);
   const older = db
-    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC LIMIT ?')
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts < ? ORDER BY sent_ts DESC, id DESC LIMIT ?')
     .all(conversationId, ts, half + 1);
   const newer = db
-    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts >= ? ORDER BY sent_ts ASC LIMIT ?')
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts >= ? ORDER BY sent_ts ASC, id ASC LIMIT ?')
     .all(conversationId, ts, half + 1);
   const hasOlder = older.length > half;
   const hasNewer = newer.length > half;
-  const rows = [...older.slice(0, half).reverse(), ...newer.slice(0, half)];
+  let rows = [...older.slice(0, half).reverse(), ...newer.slice(0, half)];
+  if (hasOlder) rows = withTies(conversationId, rows, rows[0]);
+  if (hasNewer) rows = withTies(conversationId, rows, rows[rows.length - 1]);
   return { messages: rows.map(messageDto), hasOlder, hasNewer };
 }
 
 export function listMessagesAfter(conversationId: number, after: number, limit: number) {
-  return db
-    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts > ? ORDER BY sent_ts ASC LIMIT ?')
-    .all(conversationId, after, limit)
-    .map(messageDto);
+  const rows = db
+    .prepare<[number, number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts > ? ORDER BY sent_ts ASC, id ASC LIMIT ?')
+    .all(conversationId, after, limit);
+  return withTies(conversationId, rows, rows.length === limit ? rows[rows.length - 1] : undefined).map(messageDto);
 }
 
 /** Text search over messages, newest first. */

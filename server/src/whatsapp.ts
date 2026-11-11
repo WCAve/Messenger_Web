@@ -72,6 +72,7 @@ import {
   setWaBlocked,
   setWaGroupMembers,
   statusRank,
+  unreadMessages,
   updateMessage,
   deleteMessageContent,
   upsertWaContact,
@@ -233,6 +234,7 @@ async function check() {
     // The regular status check rebuilds the state; keep what the import is showing.
     const base = { engine, version: state.version, importing: state.importing, importProgress: state.importProgress, lastImport: state.lastImport };
     if (!state.version) waha.version().then((v) => setState({ ...state, version: v.version, engine: state.engine ?? v.engine })).catch(() => {});
+    if (s.status !== 'WORKING' && state.status === 'connected') eventsInterrupted();
     switch (s.status) {
       case 'WORKING': {
         if (state.status !== 'connected') sentPresence = null; // say it again after (re)connecting
@@ -281,6 +283,7 @@ async function check() {
     }
   } catch (e) {
     const msg = (e as Error).message;
+    if (state.status === 'connected') eventsInterrupted();
     const auth = /\b401\b|\b403\b/.test(msg);
     setState({ status: 'unreachable', error: auth ? 'WAHA refused the API key (check WAHA_API_KEY).' : `Can't reach WAHA at ${config.wahaUrl}: ${msg}` });
     next = 10_000;
@@ -300,6 +303,8 @@ function connectWs() {
   sock.onopen = () => {
     wsDelay = 1000;
     log.info('whatsapp: listening for events');
+    // The connection for events was gone for a moment while WhatsApp itself stayed up: fetch what it missed.
+    if (missedSince !== undefined && !afterConnectBusy) setTimeout(() => void catchUpMissed('after the event connection dropped'), 15_000).unref();
   };
   sock.onmessage = (ev) => {
     let data: Json;
@@ -314,6 +319,7 @@ function connectWs() {
     if (ws !== sock) return;
     ws = undefined;
     if (stopped) return;
+    eventsInterrupted();
     setTimeout(() => {
       if (state.status === 'connected') connectWs();
     }, wsDelay);
@@ -327,7 +333,16 @@ let queue: Promise<unknown> = Promise.resolve(); // handle events one at a time,
 const HISTORY_KEY = 'wa_history_v2';
 let historyTimers: ReturnType<typeof setTimeout>[] = [];
 
+let afterConnectBusy = false; // afterConnect does the catch-up itself, a little later
 async function afterConnect() {
+  afterConnectBusy = true;
+  try {
+    await afterConnectSteps();
+  } finally {
+    afterConnectBusy = false;
+  }
+}
+async function afterConnectSteps() {
   // With WEBJS the chat list makes WhatsApp Web look up every group, which keeps it busy for up to a
   // minute. Once contacts are known, let the app load first and do this a little later.
   const known = kvGet('wa_directory_v1') === 'done';
@@ -355,9 +370,10 @@ async function afterConnect() {
   setTimeout(() => void downloadPendingMedia().catch(() => {}), 60_000); // carry on with files, if switched on
   if (kvGet(HISTORY_KEY) === 'done') {
     // Messages that came in while this app or WAHA was down never arrived as events: fetch them.
-    await catchUpWa('after connecting').catch(() => {});
+    await catchUpMissed('after connecting');
     return;
   }
+  missedSince = undefined; // the history import that follows fetches everything
   // Right after linking, the phone keeps sending WAHA older chats for several minutes. Import in a few
   // rounds; messages we already have are skipped, so later rounds only add what arrived since.
   const rounds = (process.env.WAHA_HISTORY_ROUNDS_MS ?? '').split(',').map(Number).filter((n) => n > 0);
@@ -415,12 +431,17 @@ const CATCHUP_CHATS = 100;
 const CATCHUP_PAGE = 50;
 const CATCHUP_MAX_PER_CHAT = 500;
 const WEEK = 7 * 24 * 3600_000;
+const CATCHUP_MARGIN = Number(process.env.WAHA_CATCHUP_MARGIN_MS) || 10 * 60_000;
+/** How far back to look to cover everything missed, or undefined when nothing was. At most 30 days. */
+function missedFrom(): number | undefined {
+  if (missedSince === undefined) return undefined;
+  return Math.max((missedSince || Date.now() - WEEK) - CATCHUP_MARGIN, Date.now() - 30 * 24 * 3600_000);
+}
 export async function catchUpWa(why: string, since?: number): Promise<{ chats: number; messages: number }> {
-  if (since === undefined) {
-    const last = Number(kvGet('wa_last_event_at') ?? 0);
-    since = last ? Math.max(last - 10 * 60_000, Date.now() - WEEK) : Date.now() - WEEK;
-  }
   if (catchingUp || importing || state.status !== 'connected') return { chats: 0, messages: 0 };
+  const interrupted = missedSince;
+  const needed = missedFrom();
+  since ??= needed ?? Date.now() - CATCHUP_MARGIN;
   catchingUp = true;
   setState({ ...state, catchUp: { ...state.catchUp, running: true } });
   let chatsTouched = 0;
@@ -471,6 +492,8 @@ export async function catchUpWa(why: string, since?: number): Promise<{ chats: n
       await pause(250);
     }
     if (total) log.info(`whatsapp: missed messages (${why}): ${total} from ${chatsTouched} chat${chatsTouched === 1 ? '' : 's'}`);
+    // Everything missed is covered, unless the stream was interrupted again meanwhile.
+    if (needed !== undefined && since <= needed && missedSince === interrupted && state.status === 'connected') missedSince = undefined;
     setState({ ...state, catchUp: { running: false, at: Date.now(), chats: chatsTouched, messages: total } });
     return { chats: chatsTouched, messages: total };
   } catch (e) {
@@ -483,11 +506,21 @@ export async function catchUpWa(why: string, since?: number): Promise<{ chats: n
   }
 }
 
+/** After the event stream was interrupted: fetch what was missed; once more a few minutes later if WhatsApp Web was too busy. */
+async function catchUpMissed(why: string, retry = true) {
+  if (missedSince === undefined || kvGet(HISTORY_KEY) !== 'done') return;
+  try {
+    await catchUpWa(why);
+  } catch {
+    if (retry) setTimeout(() => void catchUpMissed(why, false), 5 * 60_000).unref();
+  }
+}
+
 /** The refresh button: runs in the background, the result arrives with the WhatsApp state. */
 export function catchUpWaNow() {
   requireWa();
   if (importing) throw Object.assign(new Error('A history import is running; it fetches these too'), { httpStatus: 409 });
-  if (!catchingUp) catchUpWa('refresh button', Date.now() - WEEK).catch(() => {});
+  if (!catchingUp) catchUpWa('refresh button', Math.min(Date.now() - WEEK, missedFrom() ?? Infinity)).catch(() => {});
   return { started: true };
 }
 
@@ -504,6 +537,7 @@ export function startWhatsApp(logger: Logger) {
   attachmentHooks.whatsapp = fetchWaMedia;
   if (!config.wahaUrl) return;
   stopped = false;
+  eventsInterrupted(); // whatever came in while this app wasn't running
   void check();
   dirTimer = setInterval(() => state.status === 'connected' && refreshDirectory().catch(() => {}), 6 * 3600_000);
   // Mutes and pins change more often than names: check those every 15 minutes. (Not more often: with
@@ -1259,7 +1293,8 @@ function queueSeen(conv: ConversationRow, extId: string) {
         seenQueue.delete(conv.id);
         const ids = [...q!.ids];
         log.info(`whatsapp: ${ids.length} old message${ids.length === 1 ? '' : 's'} came in again as new in ${conv.group_name ?? conv.wa_id}; kept as read`);
-        if (getSettings().sendReadReceipts && state.status === 'connected') waha.seen(conv.wa_id!, ids.slice(-50)).catch(() => {});
+        // Telling WhatsApp marks the whole chat read on the phone: only when nothing here is unread.
+        if (getSettings().sendReadReceipts && state.status === 'connected' && !unreadMessages(conv.id).length) waha.seen(conv.wa_id!, ids.slice(-50)).catch(() => {});
       }, 3000),
     };
     seenQueue.set(conv.id, q);
@@ -1431,13 +1466,24 @@ async function refreshGroupNames(groups?: Json[]) {
   }
 }
 
-/** When events last came in, so a catch-up after a restart knows how far back to look. */
+/**
+ * When events last came in (also kept in kv, at most 30 s behind, for after a restart), and since when
+ * some may have been missed. `missedSince` is set the moment the stream is interrupted (start-up, the
+ * session stops, WAHA unreachable, the websocket closes): by the time the catch-up runs, new events have
+ * already moved "last event" on, so it can't be read then. 0 = interrupted, but no idea since when.
+ */
+let lastEventAt = 0;
 let lastEventSaved = 0;
+let missedSince: number | undefined;
 function noteEvent() {
   const now = Date.now();
+  lastEventAt = now;
   if (now - lastEventSaved < 30_000) return;
   lastEventSaved = now;
   kvSet('wa_last_event_at', String(now));
+}
+function eventsInterrupted() {
+  if (missedSince === undefined) missedSince = lastEventAt || Number(kvGet('wa_last_event_at') ?? 0) || 0;
 }
 
 async function handleEvent(e: Json) {

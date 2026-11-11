@@ -15,6 +15,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-11',
     date: '11 November 2026',
     items: [
+      'After a longer restart (more than ten minutes), missed WhatsApp messages are now all fetched, not only the most recent ones.',
+      'In busy groups, a message sent in the same second as someone else’s could be missing when scrolling back. Fixed.',
+      'Export: photos from old WhatsApp history that were never downloaded are left out without bothering WhatsApp; a click next to the window no longer stops a running export.',
       'Export chats: ⋮ → Export chats (pick several) or chat info → Export chat. As a web page that looks like the chat, text (WhatsApp’s format), JSON and a spreadsheet, with photos and files if you like, in one ZIP.',
     ],
   },

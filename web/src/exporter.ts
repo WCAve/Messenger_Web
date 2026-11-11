@@ -65,11 +65,14 @@ export async function exportChats(chats: Conversation[], opts: ExportOptions, on
 
     // Messages, oldest first
     const messages: Message[] = [];
+    const seen = new Set<number>();
     let after = opts.from ? opts.from - 1 : 0;
     for (;;) {
       if (signal.aborted) throw new DOMException('Cancelled', 'AbortError');
       const page = await api.messagesAfter(conv.id, after, PAGE);
       for (const m of page) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
         if (opts.to && m.sentAt >= opts.to) continue;
         if (m.outgoing && (m.status === 'failed' || m.status === 'pending')) continue; // never arrived anywhere
         messages.push(m);
@@ -87,8 +90,11 @@ export async function exportChats(chats: Conversation[], opts: ExportOptions, on
       const wantThumbs = opts.formats.includes('html');
       for (const m of messages) {
         if (m.deleted) continue;
+        // Files from imported WhatsApp history that were never downloaded are left out: asking for them
+        // would make the server fetch every one from WhatsApp Web, which it can't take in bulk.
+        for (const a of m.attachments) if (a.pending) media.set(a.id, { missing: true });
         const items: { key: string; url: string; att: Partial<Attachment> & { contentType: string } }[] = m.attachments
-          .filter((a) => !a.missing)
+          .filter((a) => !a.missing && !a.pending)
           .map((a) => ({ key: a.id, url: attachmentUrl(a.id), att: a }));
         if (m.sticker) items.push({ key: `sticker:${m.sticker.packId}:${m.sticker.stickerId}`, url: m.sticker.url, att: { contentType: 'image/webp', sticker: true } });
         for (const it of items) {
@@ -216,6 +222,11 @@ function attachmentLabel(a: Partial<Attachment> & { contentType: string }) {
   return t.startsWith('image/') ? 'Photo' : t.startsWith('video/') ? 'Video' : t.startsWith('audio/') ? 'Audio' : a.filename || 'File';
 }
 
+/** What a reply quotes: its text, or "Photo", "Sticker" … when it had none. */
+function quoteText(m: Message) {
+  return m.quote?.text || m.quote?.media?.label || '';
+}
+
 /** Poll as lines of text. */
 function pollLines(m: Message) {
   if (!m.poll) return [];
@@ -288,7 +299,7 @@ function toJson({ conv, messages, media, withMedia }: Ctx) {
               notAvailable: a.missing || (withMedia && media.get(a.id)?.missing) || undefined,
             })),
         sticker: m.sticker && !m.deleted ? { emoji: m.sticker.emoji, file: file(`sticker:${m.sticker.packId}:${m.sticker.stickerId}`) } : undefined,
-        replyTo: m.quote ? { authorName: m.quote.authorName, sentAt: new Date(m.quote.sentAt).toISOString(), text: m.quote.text } : undefined,
+        replyTo: m.quote ? { authorName: m.quote.authorName, sentAt: new Date(m.quote.sentAt).toISOString(), text: quoteText(m) } : undefined,
         reactions: m.reactions.length ? m.reactions.map((r) => ({ emoji: r.emoji, authorName: r.authorName })) : undefined,
         poll: m.poll && !m.deleted ? { question: m.poll.question, multiple: m.poll.multiple, options: m.poll.options.map((o) => ({ text: o.text, voters: o.voters.map((v) => v.name) })) } : undefined,
         linkPreview: m.preview && !m.deleted ? { url: m.preview.url, title: m.preview.title ?? null, description: m.preview.description ?? null } : undefined,
@@ -303,8 +314,10 @@ function toJson({ conv, messages, media, withMedia }: Ctx) {
   );
 }
 
+/** A cell. Text someone sent that starts like a formula (=, +, -, @) gets a ' in front, so a spreadsheet shows it instead of running it. */
 function csvCell(v: string | number | boolean | null | undefined) {
-  const s = v === null || v === undefined ? '' : String(v);
+  let s = v === null || v === undefined ? '' : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return `"${s.replace(/"/g, '""')}"`;
 }
 
@@ -324,7 +337,7 @@ function toCsv({ messages, media, withMedia }: Ctx) {
       m.outgoing ? 'yes' : 'no',
       m.deleted ? deletedText(m) : m.poll ? pollLines(m).join('\n') : (m.body ?? ''),
       files.join('; '),
-      m.quote ? `${m.quote.authorName}: ${m.quote.text}` : '',
+      m.quote ? `${m.quote.authorName}: ${quoteText(m)}` : '',
       m.reactions.map((r) => `${r.emoji} ${r.authorName}`).join('; '),
       m.edited ? 'yes' : '',
       m.deleted ? 'yes' : '',
@@ -411,7 +424,7 @@ function toHtml({ conv, messages, media, withMedia }: Ctx) {
     if (m.deleted) parts.push(`<div class="text deleted">🚫 ${esc(deletedText(m))}</div>`);
     else {
       if (m.forwarded) parts.push(`<div class="forwarded">↪ Forwarded</div>`);
-      if (m.quote) parts.push(`<div class="quote"><b>${esc(m.quote.authorName)}</b><br>${esc(m.quote.text)}</div>`);
+      if (m.quote) parts.push(`<div class="quote"><b>${esc(m.quote.authorName)}</b><br>${esc(quoteText(m))}</div>`);
       for (const a of m.attachments) parts.push(mediaHtml(a, media.get(a.id), withMedia));
       if (m.sticker) parts.push(mediaHtml({ contentType: 'image/webp', sticker: true }, media.get(`sticker:${m.sticker.packId}:${m.sticker.stickerId}`), withMedia));
       if (m.poll)
@@ -420,7 +433,7 @@ function toHtml({ conv, messages, media, withMedia }: Ctx) {
             .map((o) => `<li>${esc(o.text)} <span class="votes">${o.voters.length}${o.voters.length ? ` · ${esc(o.voters.map((v) => v.name).join(', '))}` : ''}</span></li>`)
             .join('')}</ul></div>`,
         );
-      if (m.preview?.title) parts.push(`<a class="preview" href="${esc(m.preview.url)}" rel="noopener noreferrer"><b>${esc(m.preview.title)}</b>${m.preview.description ? `<br>${esc(m.preview.description)}` : ''}</a>`);
+      if (m.preview?.title && /^https?:\/\//i.test(m.preview.url)) parts.push(`<a class="preview" href="${esc(m.preview.url)}" rel="noopener noreferrer"><b>${esc(m.preview.title)}</b>${m.preview.description ? `<br>${esc(m.preview.description)}` : ''}</a>`);
       if (m.body && !m.poll) parts.push(`<div class="text">${richHtml(m.body, m.styles, m.mentions)}</div>`);
     }
     parts.push(`<div class="meta">${m.edited && !m.deleted ? 'edited · ' : ''}${hm(m.sentAt)}</div>`);

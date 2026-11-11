@@ -87,9 +87,14 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 - **WEBJS is WhatsApp Web in a browser.** Heavy calls (getChats, looking up many messages) make it
   unresponsive for minutes. Never loop over many WAHA calls at once: few, one at a time, with pauses.
 - **Events only flow while both WAHA and this app run.** Anything that arrives during a restart never
-  comes as an event; `catchUpWa` (after every connect, and the ↻ button) fetches it: one chat list call,
-  then each chat with activity since the last event seen (the button: the last week), back to that
-  moment, filling holes too (kv `wa_last_event_at`).
+  comes as an event; `catchUpWa` fetches it: one chat list call, then each chat active since the
+  interruption, back to that moment, filling holes too. "Since when" (`missedSince`) is noted the moment
+  the stream is interrupted (start-up from kv `wa_last_event_at`, the session stopping, the websocket
+  closing), not when the catch-up runs: by then new events have moved "last event" on. The ↻ button
+  looks back a week.
+- **Two people can send in the same instant** (WhatsApp counts in seconds; only chat + time + author is
+  unique). Pages of messages are cut by time, so `listMessages*` always include every message of the
+  moment at the cut-off (`withTies`).
 - **WhatsApp Web hands over old messages again** as new, or counts read ones as unread. Anything sent
   more than 2 minutes before you last read that chat (`wa_read_at:`) is stored read and WhatsApp is told.
 - **Replies** only link when WhatsApp Web has the quoted message; otherwise they go as a text quote.

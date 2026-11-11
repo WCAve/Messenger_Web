@@ -60,7 +60,12 @@ const STATIC_MIME: Record<string, string> = {
 
 function serveStatic(req: http.IncomingMessage, res: http.ServerResponse) {
   if (!webDist || (req.method !== 'GET' && req.method !== 'HEAD')) return sendJson(res, 404, { error: 'Not found' });
-  const urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://local').pathname);
+  let urlPath: string;
+  try {
+    urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://local').pathname);
+  } catch {
+    return sendJson(res, 400, { error: 'Bad address' });
+  }
   let file = path.join(webDist, path.normalize(urlPath).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(webDist) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     if (urlPath.startsWith('/api/') || path.extname(urlPath)) return sendJson(res, 404, { error: 'Not found' });
