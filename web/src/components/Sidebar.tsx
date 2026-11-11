@@ -208,6 +208,9 @@ export function Sidebar({ onLogout }: { onLogout: () => void }) {
               <button role="menuitem" onClick={() => (setState({ stickerManager: true }), setMenu(false))}>
                 <Icon name="sticker" size={18} /> Sticker manager
               </button>
+              <button role="menuitem" onClick={() => (setState({ exportDialog: { preselect: [] } }), setMenu(false))}>
+                <Icon name="download" size={18} /> Export chats
+              </button>
               <button role="menuitem" onClick={() => (setState({ whatsNew: 'all' }), setMenu(false))}>
                 <Icon name="info" size={18} /> What’s new
               </button>

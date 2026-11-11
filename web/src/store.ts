@@ -46,6 +46,7 @@ export interface State {
   forwarding: Message | null;
   editHistory: Message | null; // the edit history window
   deletedView: Message | null; // what a deleted message said
+  exportDialog: { preselect: number[] } | null; // the Export window
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
   groupTick: Record<number, number>; // bumped when a group's details change
@@ -75,6 +76,7 @@ let state: State = {
   forwarding: null,
   editHistory: null,
   deletedView: null,
+  exportDialog: null,
 };
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;

@@ -17,6 +17,8 @@ with a comment saying what it does; this is the map.
 | `jump.ts` | Opening a chat at a particular message |
 | `notifications.ts` | Browser notifications (permission state, pictures with initials) |
 | `favicon.ts` | Unread count inside the tab icon |
+| `exporter.ts` | Exporting chats: pages through messages, fetches files, makes small photos, writes txt (WhatsApp's format), html, json and csv |
+| `zip.ts` | A small ZIP writer for the export (no library) |
 | `changelog.ts` | What's new, in plain words; shown after an update (`components/WhatsNew.tsx`). Add a line for every change people notice |
 | `util.ts` | Small helpers (hues, initials, images, safe links) |
 | `emoji/` | Emoji data (`curated.ts` hand-picked with shortcodes, `extra.ts` generated), search, usage, rendering in the chosen style |
@@ -27,6 +29,7 @@ with a comment saying what it does; this is the map.
 | `GroupManage.tsx` | Group management parts of chat info, New group, join by link |
 | `Picker.tsx` | Emoji / sticker / GIF picker |
 | `StickerManager.tsx` | Sticker manager |
+| `Export.tsx` | The Export window: pick chats, formats, photos, period; progress; saves the ZIP |
 | `Settings.tsx` | Settings main list and pages |
 | `Extras.tsx` | Polls, forwarding |
 | `Setup.tsx`, `Login.tsx` | Link screen (QR code), sign-in |

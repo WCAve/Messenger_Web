@@ -16,6 +16,7 @@ import { ForwardDialog } from './components/Extras';
 import { loadUsage } from './emoji/usage';
 import { Login } from './components/Login';
 import { LinkScreen, StatusScreen } from './components/Setup';
+import { ExportDialog } from './components/Export';
 import { Sidebar, SidebarResizer } from './components/Sidebar';
 import { applyEvent, getState, setState, upsertConversation, upsertMessages, useStore } from './store';
 import { getPrefs, usePrefs } from './prefs';
@@ -178,6 +179,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <WhatsNew />
       <EditHistory />
       <DeletedMessage onOpenMedia={setLightbox} />
+      <ExportDialog />
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );

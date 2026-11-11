@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-11',
+    date: '11 November 2026',
+    items: [
+      'Export chats: ⋮ → Export chats (pick several) or chat info → Export chat. As a web page that looks like the chat, text (WhatsApp’s format), JSON and a spreadsheet, with photos and files if you like, in one ZIP.',
+    ],
+  },
+  {
     id: '2026-11-10',
     date: '10 November 2026',
     items: [

@@ -3803,3 +3803,101 @@ video.deleted-media {
   font-size: 8px;
   border-color: var(--sidebar);
 }
+
+/* Export window */
+.dialog:has(.dialog-body.export) {
+  width: min(560px, 100%);
+}
+.dialog-body.export {
+  gap: 14px;
+}
+.export-dates input[type='date'] {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--mist);
+  border-radius: 6px;
+  padding: 3px 6px;
+}
+.export section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.export-pick-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.export-pick-head .muted {
+  margin-right: auto;
+  font-size: 13px;
+}
+.export-chats {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--mist);
+  border-radius: 8px;
+}
+.export-chat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.export-chat:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+.export-chat-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.export-chat-note {
+  font-size: 12px;
+}
+.export-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+}
+.export-option input {
+  margin-top: 3px;
+}
+.export-option small {
+  display: block;
+  font-size: 12.5px;
+}
+.export section.export-dates {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.export-dates label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.export-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+.export-progress .spinner {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+.export-done {
+  margin: 0;
+  color: var(--ultra);
+}

@@ -287,6 +287,12 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
         {group && <GroupManageSections conversation={conversation} group={g} members={info?.members ?? []} />}
 
         {!group && conversation.network === 'whatsapp' && conversation.number && <WaContactSection conversation={conversation} />}
+        <section className="panel-section">
+          <button className="panel-action" onClick={() => setState({ exportDialog: { preselect: [conversation.id] } })}>
+            <Icon name="download" size={20} /> Export chat
+          </button>
+        </section>
+
         {!group && conversation.network === 'whatsapp' && <BlockSection conversation={conversation} />}
       </div>
     </aside>
