@@ -10,6 +10,8 @@ import {
   type ConversationRow,
   type Reaction,
   contactKey,
+  contactByKeyOrId,
+  freeTimestamp,
   conversationDto,
   findMessage,
   getMessage,
@@ -109,7 +111,8 @@ function mapAttachments(list: Json[] | undefined): Attachment[] {
 
 function conversationFor(dm: Json, peer: Address): ConversationRow {
   const gid: string | undefined = dm?.groupInfo?.groupId;
-  if (gid) return getOrCreateGroup(gid, dm.groupInfo.groupName);
+  // A change's new name is left to the refresh that follows, which writes "… changed the group name".
+  if (gid) return getOrCreateGroup(gid, dm.groupInfo.type === 'UPDATE' ? null : dm.groupInfo.groupName);
   return getOrCreateDirect(peer.uuid, peer.number);
 }
 
@@ -169,12 +172,94 @@ function applyEdit(conv: ConversationRow, edit: Json) {
   emitConversation(conv);
 }
 
+// ---------- Signal group changes ----------
+/*
+ * Signal only says "this group changed" (an UPDATE message from whoever changed it), not what changed.
+ * So who sent it is remembered here, the group is fetched again (signal.ts), and the lines ("Luke added
+ * Jan", "Jan left", "Luke changed the group name to …") come from comparing before and after.
+ */
+const groupActors = new Map<string, { author: string; ts: number; at: number }>();
+
+/** Changes made here (adding members, renaming …): "You …". */
+export function noteOwnGroupChange(groupId: string) {
+  groupActors.set(groupId, { author: 'self', ts: Date.now(), at: Date.now() });
+}
+
+export interface SignalGroupState {
+  members: string[] | null;
+  admins: string[] | null;
+  name: string | null;
+  description: string | null;
+}
+
+function nameList(names: string[]) {
+  return names.length <= 1 ? names[0] ?? 'Someone' : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+export function noteSignalGroupChanges(conv: ConversationRow, before: SignalGroupState, after: SignalGroupState) {
+  if (!before.members || !after.members) return; // first time we see this group: nothing to compare with
+  const act = groupActors.get(conv.group_id ?? '');
+  const actor = act && Date.now() - act.at < 10 * 60_000 ? act : undefined;
+  if (act) groupActors.delete(conv.group_id ?? '');
+  const keyOf = (id: string) => (self.is(id, id) ? 'self' : contactByKeyOrId(id)?.key ?? id);
+  const nameOf = (id: string) => (self.is(id, id) ? 'You' : nameForKey(id));
+  const actorKey = actor ? (actor.author === 'self' ? 'self' : contactByKeyOrId(actor.author)?.key ?? actor.author) : undefined;
+  const isActor = (id: string) => !!actorKey && keyOf(id) === actorKey;
+  const A = actorKey ? nameForKey(actorKey) : null;
+  const quote = (s: string) => `“${s}”`;
+  const had = new Set(before.members.map(keyOf));
+  const has = new Set(after.members.map(keyOf));
+  const added = after.members.filter((m) => !had.has(keyOf(m)));
+  const removed = before.members.filter((m) => !has.has(keyOf(m)));
+  const lines: string[] = [];
+  const joinedSelf = added.filter(isActor);
+  const addedByOther = added.filter((m) => !isActor(m));
+  if (joinedSelf.length) lines.push(`${nameList(joinedSelf.map(nameOf))} joined using this group's invite link`);
+  if (addedByOther.length) lines.push(A ? `${A} added ${nameList(addedByOther.map(nameOf))}` : `${nameList(addedByOther.map(nameOf))} joined`);
+  const left = removed.filter(isActor);
+  const removedByOther = removed.filter((m) => !isActor(m));
+  if (left.length) lines.push(`${nameList(left.map(nameOf))} left`);
+  if (removedByOther.length) lines.push(A ? `${A} removed ${nameList(removedByOther.map(nameOf))}` : `${nameList(removedByOther.map(nameOf))} left`);
+  if (after.name && before.name && after.name !== before.name) lines.push(A ? `${A} changed the group name to ${quote(after.name)}` : `The group name was changed to ${quote(after.name)}`);
+  if ((after.description ?? '') !== (before.description ?? '') && before.description !== null) lines.push(A ? `${A} changed the group description` : 'The group description was changed');
+  if (before.admins && after.admins) {
+    const wasAdmin = new Set(before.admins.map(keyOf));
+    const isAdmin = new Set(after.admins.map(keyOf));
+    const promoted = after.admins.filter((m) => !wasAdmin.has(keyOf(m)) && had.has(keyOf(m)));
+    const demoted = before.admins.filter((m) => !isAdmin.has(keyOf(m)) && has.has(keyOf(m)));
+    const adminLine = (ids: string[], now: boolean) => {
+      if (ids.some((m) => self.is(m, m)) && ids.length === 1) return now ? "You're now an admin" : "You're no longer an admin";
+      const many = ids.length > 1;
+      return `${nameList(ids.map(nameOf))} ${now ? (many ? 'are now admins' : 'is now an admin') : many ? 'are no longer admins' : 'is no longer an admin'}`;
+    };
+    if (promoted.length) lines.push(adminLine(promoted, true));
+    if (demoted.length) lines.push(adminLine(demoted, false));
+  }
+  const author = actorKey ?? 'unknown';
+  for (const body of lines) {
+    const row = insertMessage({
+      conversationId: conv.id,
+      sentTs: freeTimestamp(conv.id, actor?.ts ?? Date.now(), author),
+      author,
+      outgoing: false, // a system line, even when you did it (no ticks)
+      kind: 'system',
+      body,
+      read: true,
+    });
+    emitMessage(row);
+  }
+  if (lines.length) emitConversation(conv);
+}
+
 /** A data message — either received (author = sender) or one we sent from another device (sync). */
 function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: boolean) {
   const conv = conversationFor(dm, peer);
   const authorKey = outgoing ? 'self' : contactKey(author.uuid, author.number);
 
-  if (dm.groupInfo?.type === 'UPDATE') ingestHooks.onGroupChanged();
+  if (dm.groupInfo?.type === 'UPDATE') {
+    if (dm.groupInfo.groupId) groupActors.set(dm.groupInfo.groupId, { author: authorKey, ts: Number(dm.timestamp) || Date.now(), at: Date.now() });
+    ingestHooks.onGroupChanged();
+  }
 
   if (dm.reaction) return applyReaction(conv, dm.reaction, authorKey);
   if (dm.remoteDelete) return applyDelete(conv, dm.remoteDelete.targetTimestamp ?? dm.remoteDelete.timestamp, authorKey);

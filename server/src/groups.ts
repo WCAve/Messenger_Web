@@ -10,6 +10,7 @@ import { invalidateAvatar } from './avatars.js';
 import { kvGet, kvSet } from './db.js';
 import { HttpError, type Router } from './http.js';
 import { type SignalLinkState, type SignalPermission, groupRecipientId, signalApi } from './signal-api.js';
+import { noteOwnGroupChange } from './ingest.js';
 import { getState as getSignalState, refreshDirectory } from './signal.js';
 import {
   type ConversationRow,
@@ -380,14 +381,16 @@ export async function groupAction(conversationId: number, a: Action): Promise<vo
     }
   };
 
+  // Signal: the refresh afterwards compares the group before and after and writes "You added …" lines.
+  if (!wa && a.action !== 'label' && a.action !== 'leave') noteOwnGroupChange(c.group_id!);
+
   switch (a.action) {
     case 'rename': {
       const name = String(a.name ?? '').trim();
       if (!name) throw new HttpError(400, 'Give the group a name');
       if (name.length > (wa ? 100 : 32)) throw new HttpError(400, `Group names can be at most ${wa ? 100 : 32} characters on ${wa ? 'WhatsApp' : 'Signal'}`);
       await run(() => (wa ? waha.setGroupSubject(g, name) : signalApi.updateGroup(account, g, { name })));
-      if (wa) getOrCreateWaChat(g, name);
-      else getOrCreateGroup(c.group_id!, name);
+      if (wa) getOrCreateWaChat(g, name); // Signal: the refresh right after picks it up (and writes the line)
       break;
     }
     case 'describe': {

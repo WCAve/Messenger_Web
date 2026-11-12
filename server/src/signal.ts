@@ -4,9 +4,9 @@
  */
 import { config } from './config.js';
 import { broadcast } from './events.js';
-import { handleEnvelope, ingestHooks } from './ingest.js';
+import { handleEnvelope, ingestHooks, noteSignalGroupChanges } from './ingest.js';
 import { signalApi } from './signal-api.js';
-import { conversationDto, getOrCreateGroup, mergeGroupSettings, listConversationRows, self, setSelfProfile, upsertContact } from './store.js';
+import { conversationDto, findGroupConversation, getOrCreateGroup, mergeGroupSettings, listConversationRows, self, setSelfProfile, upsertContact } from './store.js';
 
 /** Names and group details may have changed: push fresh chat-list rows to open browsers. */
 function broadcastAllConversations() {
@@ -171,7 +171,16 @@ export async function refreshDirectory() {
   }
   for (const g of groups) {
     if (g.blocked || g.member === false) continue;
+    const old = findGroupConversation(g.internal_id);
+    const before = old && {
+      members: old.group_members ? (JSON.parse(old.group_members) as string[]) : null,
+      admins: old.group_admins ? (JSON.parse(old.group_admins) as string[]) : null,
+      name: old.group_name,
+      description: old.group_description ?? '',
+    };
     const conv = getOrCreateGroup(g.internal_id, g.name, g.members, { description: g.description || null, admins: g.admins ?? [] });
+    // "Luke added Jan", "Jan left" …: Signal doesn't say what changed, so compare.
+    if (before) noteSignalGroupChanges(conv, before, { members: g.members, admins: g.admins ?? null, name: g.name || null, description: g.description || '' });
     // "edit_group" isn't reported correctly by the API (it repeats send_messages): leave that one alone.
     if (g.permissions) {
       const who = (x?: string) => (x ? (x === 'only-admins' ? 'admins' : 'all') : undefined);

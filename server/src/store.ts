@@ -453,6 +453,11 @@ export function getOrCreateDirect(uuid?: string | null, number?: string | null):
   return convById.get(Number(info.lastInsertRowid))!;
 }
 
+/** A Signal group's chat, if we have it. */
+export function findGroupConversation(groupId: string): ConversationRow | undefined {
+  return convByGroup.get(groupId);
+}
+
 export function getOrCreateGroup(
   groupId: string,
   name?: string | null,
@@ -632,7 +637,7 @@ export function conversationDto(row: ConversationRow) {
           text: previewText(last),
           outgoing: !!last.outgoing,
           status: last.status,
-          authorName: conv.kind === 'group' && !last.outgoing ? nameForKey(last.author) : null,
+          authorName: conv.kind === 'group' && !last.outgoing && last.kind !== 'system' ? nameForKey(last.author) : null, // a system line names people itself
         }
       : null,
     unread: unreadStmt.get(conv.id)!.n,

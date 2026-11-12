@@ -422,6 +422,19 @@ const server = http.createServer(async (req, res) => {
         return json(res, 204);
       }
     }
+    // Tests: someone else changes the group (members, name, description); Signal only sends "it changed"
+    if (p === '/mock/signal-group-change' && m === 'POST') {
+      const b = await body(req); // {who, add?, remove?, name?, description?}
+      const g = sgroups.get(GROUP_REST_ID);
+      for (const x of b.add ?? []) if (!g.members.includes(x)) g.members.push(x);
+      g.members = g.members.filter((x) => !(b.remove ?? []).includes(x));
+      g.admins = (g.admins ?? []).filter((x) => g.members.includes(x));
+      if (b.name) g.name = b.name;
+      if (b.description !== undefined) g.description = b.description;
+      const person = b.who === 'dave' ? DAVE : PEOPLE[b.who ?? 'alice'];
+      const ts = incoming(person, undefined, { group: true, extra: { groupInfo: { groupId: GROUP.internal_id, groupName: g.name, type: 'UPDATE' }, message: null } });
+      return json(res, 200, { timestamp: ts });
+    }
     if (p === '/mock/signal-join-request' && m === 'POST') {
       const b = await body(req); // {who}
       sgroups.get(GROUP_REST_ID).pending_requests.push(b.who);
