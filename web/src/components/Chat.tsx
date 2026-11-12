@@ -559,11 +559,7 @@ function GifVideo({ a, onLoad }: { a: Attachment; onLoad?: () => void }) {
       playsInline
       disablePictureInPicture
       onLoadedData={onLoad}
-      onClick={() => {
-        // With reduced motion GIFs start paused; a click plays/pauses them.
-        const v = ref.current;
-        if (v) void (v.paused ? v.play() : v.pause());
-      }}
+      // A click opens it large (the button around it), where it plays even with reduced motion.
       style={a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}
       aria-label="GIF"
     />
@@ -677,9 +673,10 @@ const MessageItem = memo(function MessageItem({
               ) : a.pending ? (
                 <PendingImage key={a.id} a={a} />
               ) : a.contentType.startsWith('video/') ? (
-                <div key={a.id} className="img-btn">
+                <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label="Open GIF">
                   <GifVideo a={a} onLoad={onMediaLoad} />
-                </div>
+                  <span className="gif-tag">GIF</span>
+                </button>
               ) : (
                 <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
                   <img
