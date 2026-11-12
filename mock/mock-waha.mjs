@@ -226,6 +226,12 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p.startsWith('/mock/')) {
       if (p === '/mock/sent') return json(res, 200, sent);
+      // Tests: someone extra in the WhatsApp contact list
+      if (p === '/mock/contact') {
+        const b = await body(req);
+        PEOPLE[b.key] = { id: b.id, name: b.name ?? null, pushname: b.pushname ?? null };
+        return json(res, 200, { ok: true });
+      }
       if (p === '/mock/incoming') {
         const b = await body(req);
         const person = PEOPLE[b.from ?? 'jan'];

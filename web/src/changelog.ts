@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-12',
+    date: '12 November 2026',
+    items: [
+      'Signal names keep their “tussenvoegsel”: Signal drops the middle name from your phone’s contacts (“Mary Ruijter”), so it’s filled in from their Signal profile or your WhatsApp contact (“Mary de Ruijter”).',
+    ],
+  },
+  {
     id: '2026-11-11',
     date: '11 November 2026',
     items: [

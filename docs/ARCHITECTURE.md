@@ -97,6 +97,9 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   moment at the cut-off (`withTies`).
 - **WhatsApp Web hands over old messages again** as new, or counts read ones as unread. Anything sent
   more than 2 minutes before you last read that chat (`wa_read_at:`) is stored read and WhatsApp is told.
+- **Signal drops the middle-name field** of your phone's contacts, where Dutch tussenvoegsels often are
+  ("Mary de Ruijter" → "Mary Ruijter"). `contactName` fills in words missing *in the middle* from the
+  Signal profile or the WhatsApp contact with the same number (`fullerName`).
 - **Replies** only link when WhatsApp Web has the quoted message; otherwise they go as a text quote.
 - **HD photos/videos** arrive as two messages; the second has `associationType: *_DUAL_UPLOAD` and
   `parentMsgKey`. They're shown as one.

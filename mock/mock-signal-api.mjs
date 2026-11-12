@@ -34,6 +34,7 @@ const PEOPLE = {
 };
 // Group members who aren't in your address book: one with a profile name, one Signal knows nothing about.
 const DAVE = { number: '', uuid: 'dddddddd-0000-4000-8000-00000000000d', profile: 'Dave Bakker' };
+const extraContacts = [];
 const STRANGER_UUID = 'eeeeeeee-0000-4000-8000-00000000000e';
 const GROUP = {
   internal_id: 'bW9ja2dyb3VwaWQxMjM0NTY3ODkwMTIzNDU2Nzg5MDE=',
@@ -360,6 +361,8 @@ const server = http.createServer(async (req, res) => {
         profile: { given_name: x.profile, lastname: '', about: x === PEOPLE.alice ? 'Hiking whenever I can 🥾' : '', has_avatar: x === PEOPLE.alice }, nickname: { name: '', given_name: '', family_name: '' } }));
       if (all) list.push({ number: SELF.number, uuid: SELF.uuid, name: '', profile_name: `${selfProfile.given} ${selfProfile.family}`, username: '', blocked: false, given_name: selfProfile.given,
         profile: { given_name: selfProfile.given, lastname: selfProfile.family, about: selfProfile.about, has_avatar: !!selfAvatar }, nickname: {} });
+      for (const x of extraContacts) list.push({ number: x.number, uuid: x.uuid, name: x.name, profile_name: '', username: '', blocked: false, given_name: x.given ?? '',
+        profile: { given_name: x.profileGiven ?? '', lastname: x.profileLast ?? '', about: '', has_avatar: false }, nickname: { name: '', given_name: '', family_name: '' } });
       if (all) list.push({ number: '', uuid: DAVE.uuid, name: '', profile_name: DAVE.profile, username: '', blocked: false, given_name: '', profile: { given_name: 'Dave', lastname: 'Bakker', about: '', has_avatar: false }, nickname: {} });
       return json(res, 200, list);
     }
@@ -497,6 +500,11 @@ const server = http.createServer(async (req, res) => {
       const ts = (lastTs = Math.max(Date.now(), lastTs + 1));
       push({ ...from(person), timestamp: ts, ...b.envelope });
       return json(res, 200, { timestamp: ts });
+    }
+    // Tests: someone extra in the contact list (e.g. a name from your phone without its middle part)
+    if (p === '/mock/contact' && m === 'POST') {
+      extraContacts.push(await body(req));
+      return json(res, 200, { ok: true });
     }
     if (p === '/mock/incoming' && m === 'POST') {
       const b = await body(req);

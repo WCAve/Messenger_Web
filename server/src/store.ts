@@ -254,10 +254,32 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 /** Best display name. Never shows a raw Signal UUID: people we know nothing about are "Unknown". */
 export function contactName(c: ContactRow | undefined, fallback?: string | null): string {
-  const name = c && (c.name || c.profile_name || c.envelope_name || c.number || (c.username ? '@' + c.username : null));
+  const name = c && (c.name ? fullerName(c, c.name) : c.profile_name || c.envelope_name || c.number || (c.username ? '@' + c.username : null));
   if (name) return name;
   if (fallback && !UUID_RE.test(fallback)) return fallback;
   return 'Unknown';
+}
+
+/**
+ * Signal passes on your phone's contact names without the middle-name field, which is where Dutch
+ * "tussenvoegsels" often are: "Mary de Ruijter" arrives as "Mary Ruijter". When another name for the
+ * same person (their own Signal profile, or your WhatsApp contact for the same number, which WhatsApp
+ * gets whole) is the same name with words added in the middle, that one is used. Only ever words in
+ * the middle: a short name you chose ("Mary", "Mama") stays as it is.
+ */
+function fullerName(c: ContactRow, name: string): string {
+  const digits = c.number?.replace(/\D/g, '');
+  const wa = digits ? waByJid.get(`${digits}@c.us`)?.name : null;
+  for (const other of [c.profile_name, wa]) if (other && hasMiddleAdded(name, other)) return other;
+  return name;
+}
+export function hasMiddleAdded(short: string, long: string) {
+  const a = short.toLowerCase().split(/\s+/).filter(Boolean);
+  const b = long.toLowerCase().split(/\s+/).filter(Boolean);
+  if (a.length < 2 || b.length <= a.length || a[0] !== b[0] || a[a.length - 1] !== b[b.length - 1]) return false;
+  let i = 0;
+  for (const w of b) if (i < a.length && w === a[i]) i++;
+  return i === a.length;
 }
 
 export function contactByKeyOrId(key: string): ContactRow | undefined {
