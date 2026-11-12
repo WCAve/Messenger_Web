@@ -282,6 +282,48 @@ export function hasMiddleAdded(short: string, long: string) {
   return i === a.length;
 }
 
+/**
+ * A photo's or sticker's built-in preview picture as text (base64 JPEG/PNG/WebP), which WhatsApp Web
+ * sometimes hands over where text should be (the quote of a reply to a photo without caption).
+ */
+export function isPreviewData(s: unknown): boolean {
+  if (typeof s !== 'string' || s.length < 100 || /\s/.test(s.slice(0, 200))) return false;
+  return /^(\/9j\/|iVBORw0KGgo|UklGR|R0lGOD)/.test(s) || (s.length > 400 && /^[A-Za-z0-9+/=]+$/.test(s.slice(0, 400)));
+}
+
+/** Once: replies (and bodies) stored with such preview data as their text. Returns how many were fixed. */
+export function cleanPreviewText(): number {
+  let n = 0;
+  const rows = db
+    .prepare<[], { id: number; body: string | null; quote: string | null }>(
+      `SELECT id, body, quote FROM messages WHERE (quote IS NOT NULL AND length(quote) > 300) OR (body IS NOT NULL AND length(body) > 300)`,
+    )
+    .all();
+  const setQuote = db.prepare<[string, number]>('UPDATE messages SET quote = ? WHERE id = ?');
+  const clearBody = db.prepare<[number]>('UPDATE messages SET body = NULL, ranges = NULL WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      if (r.quote) {
+        const q = JSON.parse(r.quote) as Quote;
+        if (isPreviewData(q.text)) {
+          setQuote.run(JSON.stringify({ ...q, text: 'Photo' }), r.id);
+          n++;
+        }
+      }
+      if (isPreviewData(r.body)) {
+        clearBody.run(r.id);
+        n++;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+  return n;
+}
+
 export function contactByKeyOrId(key: string): ContactRow | undefined {
   return contactByKey.get(key) ?? findContact(key, key);
 }
@@ -1258,7 +1300,7 @@ export function messageEdits(messageId: number) {
 function quoteDto(conversationId: number, quote: Quote) {
   const media = quotedMedia(conversationId, quote);
   let text = renderMentions(quote.text) ?? '';
-  if (media && (!text || text === 'Attachment')) text = ''; // the media label says it better
+  if (media && (!text || text === 'Attachment' || text === 'Photo')) text = ''; // the media label says it better
   return {
     sentAt: quote.sentTs,
     author: quote.author,

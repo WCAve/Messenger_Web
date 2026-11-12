@@ -58,6 +58,7 @@ import {
   getMessage,
   getOrCreateWaChat,
   insertMessage,
+  isPreviewData,
   listWaGroups,
   messageDto,
   nameForKey,
@@ -1167,7 +1168,9 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   const forwarded = m._data?.isForwarded || m.isForwarded ? (Number(m._data?.forwardingScore ?? m.forwardingScore ?? 0) >= 5 ? 2 : 1) : 0;
 
   const poll = pollOf(m);
-  let { body, ranges } = poll ? { body: poll.question, ranges: null } : await richFromWa(m.body, conv, m._data?.mentionedJidList ?? m.mentionedIds);
+  let { body, ranges } = poll
+    ? { body: poll.question, ranges: null }
+    : await richFromWa(isPreviewData(m.body) ? '' : m.body, conv, m._data?.mentionedJidList ?? m.mentionedIds);
   const attachments: Attachment[] = [];
   const pending: { id: string; chat: string; msg: string }[] = [];
   if (viewOnce) {
@@ -1205,15 +1208,17 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
 
   let quote = null;
   if (m.replyTo) {
+    // WhatsApp Web puts a photo's tiny preview picture (as text) where a reply's quoted text goes when
+    // the photo has no caption: that's never shown; the quote shows "Photo" and the picture instead.
     const q = findMessageByExt(m.replyTo.id ?? m.replyTo.messageId);
     const qAuthor = q ? q.author : m.replyTo.participant ? keyFor((await resolve(m.replyTo.participant)) ?? '') : 'unknown';
     // WhatsApp sends the quoted text raw ("@2718973… be like"): use our copy, or at least resolve its mentions.
     let text = q ? renderBody(q.body, q.ranges)?.text ?? null : null;
-    if (text === null && m.replyTo.body) {
+    if (text === null && m.replyTo.body && !isPreviewData(m.replyTo.body)) {
       const rich = await richFromWa(m.replyTo.body, conv);
       text = renderBody(rich.body, rich.ranges ? JSON.stringify(rich.ranges) : null)?.text ?? m.replyTo.body;
     }
-    quote = { sentTs: q?.sent_ts ?? 0, author: qAuthor, text: text || (m.replyTo.hasMedia || q?.attachments ? 'Attachment' : '') };
+    quote = { sentTs: q?.sent_ts ?? 0, author: qAuthor, text: text || (isPreviewData(m.replyTo.body) ? 'Photo' : m.replyTo.hasMedia || q?.attachments ? 'Attachment' : '') };
   }
 
   const ts = freeTimestamp(conv.id, Math.round(Number(m.timestamp) * 1000) || Date.now(), author);

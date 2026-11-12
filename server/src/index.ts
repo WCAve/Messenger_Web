@@ -14,7 +14,7 @@ import { db, kvGet, kvSet } from './db.js';
 import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
-import { backfillExtRaw, recomputeGroupReadStatuses, removeDuplicateWaMessages } from './store.js';
+import { backfillExtRaw, cleanPreviewText, recomputeGroupReadStatuses, removeDuplicateWaMessages } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
 import { seedWaReadMarks, startWhatsApp, stopWhatsApp } from './whatsapp.js';
@@ -136,6 +136,11 @@ setTimeout(() => {
     log('warn', `id backfill failed: ${(e as Error).message}`);
   }
   try {
+    if (!kvGet('wa_preview_text_v1')) {
+      const fixed = cleanPreviewText();
+      kvSet('wa_preview_text_v1', '1');
+      if (fixed) log('info', `replies showing a photo's preview data as text: fixed ${fixed}`);
+    }
     const seeded = seedWaReadMarks();
     if (seeded) log('info', `noted what's read in ${seeded} WhatsApp chats (old messages coming in again stay read)`);
   } catch (e) {

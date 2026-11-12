@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-12',
     date: '12 November 2026',
     items: [
+      'WhatsApp: a reply to a photo without caption sometimes showed a long string of letters in the quote. It now shows “Photo” with the picture, also for replies you already had.',
       'Signal names keep their “tussenvoegsel”: Signal drops the middle name from your phone’s contacts (“Mary Ruijter”), so it’s filled in from their Signal profile or your WhatsApp contact (“Mary de Ruijter”).',
     ],
   },
