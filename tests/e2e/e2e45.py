@@ -13,10 +13,21 @@ with sync_playwright() as p:
     page.click('textarea'); page.keyboard.type('Oeps, typfout'); page.keyboard.press('Enter')
     page.wait_for_selector('.msg.out:has-text("Oeps, typfout") .tick, .msg.out:has-text("Oeps, typfout") time'); time.sleep(1.5)
     page.keyboard.press('ArrowUp'); page.wait_for_selector('.reply-preview.editing')
-    page.keyboard.press('Control+a'); page.keyboard.press('Backspace')
+    for _ in range(50):  # the message's text is in the box
+        if page.input_value('textarea') == 'Oeps, typfout': break
+        time.sleep(0.1)
+    page.click('textarea'); page.keyboard.press('Control+a'); page.keyboard.press('Backspace')
+    print('box after erasing:', repr(page.input_value('textarea')))
     page.wait_for_selector('button[aria-label="Delete message"]', timeout=5000)
     # Cancel: still editing, nothing deleted
-    page.once('dialog', lambda d: d.dismiss()); page.keyboard.press('Enter'); time.sleep(0.5)
+    asked = []
+    page.once('dialog', lambda d: (asked.append(d.message), d.dismiss())); page.keyboard.press('Enter')
+    for _ in range(50):
+        if asked: break
+        time.sleep(0.1)
+    assert asked, 'no question asked'
+    time.sleep(0.5)
+    print('editing:', page.locator('.reply-preview.editing').count(), 'message:', page.locator('.msg.out:has-text("Oeps, typfout")').count())
     assert page.locator('.reply-preview.editing').count() == 1 and page.locator('.msg.out:has-text("Oeps, typfout")').count() == 1
     # OK: deleted
     page.once('dialog', lambda d: (print('asks:', d.message), d.accept())); page.keyboard.press('Enter')
