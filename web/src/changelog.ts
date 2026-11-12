@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-12',
     date: '12 November 2026',
     items: [
+      'A yellow bar at the top tells you when Signal or WhatsApp can’t be reached (or WhatsApp needs linking again), in plain words. It goes away by itself once it’s back.',
       'Signal groups show who was added, removed or left, name and description changes and new admins as lines in the chat, like WhatsApp groups already did.',
       'GIFs open large when you click them, like photos (they keep looping there).',
       'WhatsApp: a reply to a photo without caption sometimes showed a long string of letters in the quote. It now shows “Photo” with the picture, also for replies you already had.',

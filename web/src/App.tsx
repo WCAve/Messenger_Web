@@ -41,6 +41,7 @@ export function App() {
 function Main({ onLogout }: { onLogout: () => void }) {
   const signal = useStore((s) => s.signal);
   const waStatus = useStore((s) => s.whatsapp.status);
+  const waError = useStore((s) => s.whatsapp.error);
   const [linkingSignal, setLinkingSignal] = useState(false);
   const live = useStore((s) => s.live);
   const activeId = useStore((s) => s.activeId);
@@ -120,6 +121,31 @@ function Main({ onLogout }: { onLogout: () => void }) {
     if (activeId && window.matchMedia('(max-width: 760px)').matches) history.pushState({ chat: activeId }, '');
   }, [activeId]);
 
+  // What's wrong with Signal or WhatsApp, in plain words (the technical reason is in the tooltip).
+  const signalProblem =
+    waStatus !== 'disabled' && signal.status !== 'connected' && signal.status !== 'disabled' && signal.status !== 'connecting' && signal.status !== 'starting'
+      ? signal.status === 'unlinked'
+        ? 'Signal is not linked yet.'
+        : signal.status === 'wrong_mode'
+          ? 'The Signal API needs json-rpc mode.'
+          : 'Can’t reach Signal (signal-cli-rest-api). New Signal messages come in once it’s back.'
+      : null;
+  const waProblem =
+    waStatus === 'unreachable'
+      ? /API key/.test(waError ?? '')
+        ? 'WhatsApp (WAHA) refuses the API key; check WAHA_API_KEY.'
+        : 'Can’t reach WhatsApp (WAHA). New WhatsApp messages come in once it’s back.'
+      : waStatus === 'failed'
+        ? 'WhatsApp Web stopped working; it’s being restarted.'
+        : waStatus === 'scan_qr'
+          ? 'WhatsApp is no longer linked: link it again under Settings → WhatsApp.'
+          : waStatus === 'stopped'
+            ? 'WhatsApp is stopped in WAHA.'
+            : null;
+  // Only once a problem lasts: a restart or a short hiccup shouldn't make the bar flash.
+  const shownSignalProblem = useLasting(signalProblem, signal.status === 'unlinked' ? 0 : PROBLEM_DELAY);
+  const shownWaProblem = useLasting(waProblem, PROBLEM_DELAY);
+
   // With only Signal set up, nothing works until it's linked and reachable. With WhatsApp as well, the
   // app opens anyway and a banner offers to link Signal.
   const waOn = waStatus !== 'disabled';
@@ -128,14 +154,6 @@ function Main({ onLogout }: { onLogout: () => void }) {
   if (!waOn && (signal.status === 'starting' || signal.status === 'unreachable' || signal.status === 'wrong_mode')) {
     return <StatusScreen state={signal} />;
   }
-  const signalProblem =
-    waOn && signal.status !== 'connected' && signal.status !== 'disabled' && signal.status !== 'connecting' && signal.status !== 'starting'
-      ? signal.status === 'unlinked'
-        ? 'Signal is not linked yet.'
-        : signal.status === 'wrong_mode'
-          ? 'The Signal API needs json-rpc mode.'
-          : signal.error ?? "Can't reach the Signal API."
-      : null;
 
   return (
     <div
@@ -148,14 +166,16 @@ function Main({ onLogout }: { onLogout: () => void }) {
           {!live ? 'Reconnecting to Messenger Web…' : signal.error ?? 'Connecting to Signal…'}
         </div>
       )}
-      {live && signalProblem && (
-        <div className="banner" role="status">
-          {signalProblem}{' '}
-          {signal.status === 'unlinked' && (
+      {live && signal.status !== 'connecting' && (shownSignalProblem || shownWaProblem) && (
+        <div className="banner" role="status" title={[shownSignalProblem && signal.error, shownWaProblem && waError].filter(Boolean).join('\n') || undefined}>
+          {shownSignalProblem}
+          {shownSignalProblem && signal.status === 'unlinked' && (
             <button className="link-btn" onClick={() => setLinkingSignal(true)}>
               Link Signal
             </button>
           )}
+          {shownSignalProblem && shownWaProblem && <span className="banner-sep"> · </span>}
+          {shownWaProblem}
         </div>
       )}
       <Sidebar onLogout={onLogout} />
@@ -273,4 +293,18 @@ function show(m: Extract<ServerEvent, { type: 'message' }>['message']) {
       n.close();
     };
   });
+}
+
+const PROBLEM_DELAY = 15_000;
+
+/** `value` once it has stayed the same for `delay` ms; null right away when it clears. */
+function useLasting(value: string | null, delay: number): string | null {
+  const [shown, setShown] = useState<string | null>(delay ? null : value);
+  useEffect(() => {
+    if (!value) return setShown(null);
+    if (!delay) return setShown(value);
+    const t = setTimeout(() => setShown(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return value ? shown : null;
 }

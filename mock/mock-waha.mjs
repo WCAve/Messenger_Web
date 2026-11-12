@@ -224,6 +224,8 @@ const server = http.createServer(async (req, res) => {
   const p = url.pathname;
   const m = req.method;
   try {
+    // Tests: WAHA can't be reached (every API call fails like a stopped container behind a proxy)
+    if (mockConfig.down && p.startsWith('/api/')) return json(res, 502, { message: 'Bad gateway' });
     if (p.startsWith('/mock/')) {
       if (p === '/mock/sent') return json(res, 200, sent);
       // Tests: someone extra in the WhatsApp contact list
