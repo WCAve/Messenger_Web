@@ -11,7 +11,7 @@ export type ServerEvent =
   | { type: 'receipt'; messageId: number } // per-recipient receipt changed (overall status didn't)
   | { type: 'remove'; conversationId: number; messageId: number } // disappeared
   | { type: 'group'; conversationId: number } // group details changed: open group info reloads
-  | { type: 'ping' }; // every 25 s: a page that hears nothing for a minute knows its connection is dead
+  | { type: 'ping'; every: number }; // every 25 s: a page that hears nothing for a minute knows its connection is dead
 
 const clients = new Set<ServerResponse>();
 const stalled = new WeakSet<ServerResponse>(); // tests only: connections that silently stop getting anything
@@ -54,7 +54,7 @@ export function broadcast(event: ServerEvent) {
 // the page would wait forever. This is a real event (not an SSE comment) so the page can see it.
 const PING_MS = Number(process.env.EVENTS_PING_MS) || 25_000;
 setInterval(() => {
-  for (const res of clients) send(res, `data: {"type":"ping"}\n\n`);
+  for (const res of clients) send(res, `data: {"type":"ping","every":${PING_MS}}\n\n`);
 }, PING_MS).unref();
 
 /** Tests only (E2E_HOOKS=1): every open connection goes silent without closing, like a dead network. */

@@ -220,7 +220,7 @@ const RESTART_BACKOFF = [Number(process.env.WAHA_RESTART_AFTER_MS) || 20_000, 60
 async function check() {
   clearTimeout(checkTimer);
   if (stopped || !config.wahaUrl) return;
-  let next = 60_000;
+  let next = Number(process.env.WAHA_CHECK_MS) || 60_000; // while connected (tests: a few seconds)
   try {
     let s;
     try {
@@ -1489,7 +1489,7 @@ let missedSince: number | undefined;
 function noteEvent() {
   const now = Date.now();
   lastEventAt = now;
-  if (now - lastEventSaved < 30_000) return;
+  if (now - lastEventSaved < (Number(process.env.WAHA_EVENT_SAVE_MS) || 30_000)) return;
   lastEventSaved = now;
   kvSet('wa_last_event_at', String(now));
 }

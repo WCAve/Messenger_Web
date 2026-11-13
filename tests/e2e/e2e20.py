@@ -1,6 +1,7 @@
 """Files in imported history: fetched when opened, "missing" placeholders, background download, quotes by raw id."""
 import sys, time, json, urllib.request, os
 MW = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA = os.environ.get('E2E_DATA') or os.path.join(MW, '.data')  # the app's data folder for this test run
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
 def wa(path, data=None):
@@ -73,7 +74,7 @@ with sync_playwright() as p:
     wa('/mock/incoming', {'from': 'jan', 'text': '', 'media': 'image/jpeg'})  # live: downloaded at once
     cookies = '; '.join(f"{c['name']}={c['value']}" for c in page.context.cookies())
     import sqlite3
-    con = sqlite3.connect(os.path.join(MW, '.data/signal-web.db')); con.execute("INSERT OR IGNORE INTO wa_media (id, chat, msg, message_id, ts, state) VALUES ('wa-slowtest.jpg', '31655500001@c.us', 'false_31655500001@c.us_SLOW', NULL, 1, 'pending')"); con.commit(); con.close()
+    con = sqlite3.connect(os.path.join(DATA, 'signal-web.db')); con.execute("INSERT OR IGNORE INTO wa_media (id, chat, msg, message_id, ts, state) VALUES ('wa-slowtest.jpg', '31655500001@c.us', 'false_31655500001@c.us_SLOW', NULL, 1, 'pending')"); con.commit(); con.close()
     t0 = time.time()
     try:
         urllib.request.urlopen(urllib.request.Request('http://localhost:3000/api/attachments/wa-slowtest.jpg', headers={'cookie': cookies}))

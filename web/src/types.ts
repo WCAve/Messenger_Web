@@ -276,4 +276,4 @@ export type ServerEvent =
   | { type: 'receipt'; messageId: number }
   | { type: 'remove'; conversationId: number; messageId: number }
   | { type: 'group'; conversationId: number }
-  | { type: 'ping' };
+  | { type: 'ping'; every?: number };

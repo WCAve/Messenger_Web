@@ -8,6 +8,7 @@ def to_chats(pg):
     pg.click('button[aria-label="Back to chats"]')
 S = sys.argv[1]; errors = []
 MW = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA = os.environ.get('E2E_DATA') or os.path.join(MW, '.data')  # the app's data folder for this test run
 def req(base, path, data=None):
     r = urllib.request.Request(base + path, data=json.dumps(data).encode() if data is not None else None, headers={'content-type': 'application/json'}, method='POST' if data is not None else 'GET')
     return json.loads(urllib.request.urlopen(r).read() or b'null')
@@ -45,8 +46,8 @@ with sync_playwright() as p:
     page.fill('input[aria-label="64-digit backup key"]', KEY)
     page.click('.backup-import button:has-text("Import member labels only")')
     page.wait_for_selector('.backup-import :text("Imported 5 member labels in 2 groups")', timeout=20000)
-    assert os.path.exists(MW + '/.data/whatsapp-backup/msgstore.db.crypt15'), 'backup file should stay after labels-only'
-    assert not os.path.exists(MW + '/.data/whatsapp-backup/msgstore.decrypted.db'), 'decrypted copy kept'
+    assert os.path.exists(DATA + '/whatsapp-backup/msgstore.db.crypt15'), 'backup file should stay after labels-only'
+    assert not os.path.exists(DATA + '/whatsapp-backup/msgstore.decrypted.db'), 'decrypted copy kept'
     assert not page.locator('.backup-import :text("Imported 0 messages")').count()
     print('labels-only import ok')
 

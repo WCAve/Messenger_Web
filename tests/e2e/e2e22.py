@@ -8,6 +8,7 @@ def to_chats(pg):
     pg.click('button[aria-label="Back to chats"]')
 S = sys.argv[1]; errors = []
 MW = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+DATA = os.environ.get('E2E_DATA') or os.path.join(MW, '.data')  # the app's data folder for this test run
 def wa(path, data=None):
     r = urllib.request.Request('http://127.0.0.1:8090' + path, data=json.dumps(data).encode() if data is not None else None, headers={'content-type': 'application/json'}, method='POST' if data is not None else 'GET')
     return json.loads(urllib.request.urlopen(r).read() or b'null')
@@ -48,8 +49,8 @@ with sync_playwright() as p:
     page.wait_for_selector('.backup-import :text("Imported")', timeout=20000)
     txt = page.inner_text('.backup-import'); print(txt.split('Imported')[1][:160])
     assert '1 was here already' in txt, txt
-    assert not os.path.exists(MW + '/.data/whatsapp-backup/msgstore.db.crypt15'), 'backup file kept'
-    assert not os.path.exists(MW + '/.data/whatsapp-backup/msgstore.decrypted.db'), 'decrypted copy kept'
+    assert not os.path.exists(DATA + '/whatsapp-backup/msgstore.db.crypt15'), 'backup file kept'
+    assert not os.path.exists(DATA + '/whatsapp-backup/msgstore.decrypted.db'), 'decrypted copy kept'
     print('import ok')
 
     to_chats(page)
@@ -76,14 +77,14 @@ with sync_playwright() as p:
     print('lid chat ok')
 
     # media folder
-    d = MW + '/.data/whatsapp-backup/Media/WhatsApp Images'; os.makedirs(d, exist_ok=True)
+    d = DATA + '/whatsapp-backup/Media/WhatsApp Images'; os.makedirs(d, exist_ok=True)
     shutil.copy(MW + '/web/public/icon-192.png' if os.path.exists(MW + '/web/public/icon-192.png') else MW + '/web/public/icon.svg', d + '/IMG-20240301-WA0001.jpg')
     page.click('button[aria-label=Menu]'); page.click('button[role=menuitem]:has-text("Settings")'); goto(page, 'History and backup')
     page.click('text=Import full history from an Android backup')
     page.click('.backup-import button:has-text("Add media from the folder")')
     page.wait_for_selector('.backup-import :text("matched 1 file")', timeout=15000)
     print('media ok')
-    sd = MW + '/.data/whatsapp-backup/Media/WhatsApp Stickers'; os.makedirs(sd, exist_ok=True)
+    sd = DATA + '/whatsapp-backup/Media/WhatsApp Stickers'; os.makedirs(sd, exist_ok=True)
     open(sd + '/STK-20240301-WA0001.webp', 'wb').write(b'RIFF\x1a\x00\x00\x00WEBPVP8 ' + b'\x00' * 18)
     page.click('.backup-import button:has-text("Import stickers from the folder")')
     page.wait_for_selector('.backup-import :text("1 stickers found, 1 new")', timeout=8000)

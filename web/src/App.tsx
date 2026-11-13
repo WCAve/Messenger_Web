@@ -231,7 +231,7 @@ function useLiveEvents() {
     // So when nothing came for a minute, or when you come back to the tab and it has been quiet too
     // long, it reconnects (and the resync on open fetches what was missed).
     let lastHeard = Date.now();
-    const SILENT = 60_000;
+    let SILENT = 60_000; // or a little over two pings, when the server says how often it pings
     const reconnect = () => {
       if (closed) return;
       es?.close();
@@ -241,7 +241,7 @@ function useLiveEvents() {
     const checkAlive = () => {
       if (Date.now() - lastHeard > SILENT) reconnect();
     };
-    const watchdog = setInterval(checkAlive, 10_000);
+    let watchdog = setInterval(checkAlive, 10_000);
     const onVisible = () => document.visibilityState === 'visible' && checkAlive();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('online', reconnect); // network back: the old connection is likely gone
@@ -258,7 +258,15 @@ function useLiveEvents() {
       es.onmessage = (ev) => {
         lastHeard = Date.now();
         const e = JSON.parse(ev.data) as ServerEvent;
-        if (e.type === 'ping') return;
+        if (e.type === 'ping') {
+          const silent = Math.max(5_000, Math.min(60_000, (e.every ?? 25_000) * 2.4));
+          if (silent !== SILENT) {
+            SILENT = silent;
+            clearInterval(watchdog);
+            watchdog = setInterval(checkAlive, Math.min(10_000, silent / 3));
+          }
+          return;
+        }
         applyEvent(e);
         if (e.type === 'message') notify(e);
       };

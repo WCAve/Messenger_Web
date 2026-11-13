@@ -55,7 +55,7 @@ with sync_playwright() as p:
     # WhatsApp is down for a while and a message arrives meanwhile; after it's back, new messages come in
     # straight away (moving "last event" on) and only then the catch-up runs: it still looks back to
     # before the interruption. (The tests run with a 2-second margin instead of 10 minutes.)
-    wa('/mock/incoming', {'from': 'jan', 'text': 'Laatste voor de storing'}); time.sleep(32)
+    wa('/mock/incoming', {'from': 'jan', 'text': 'Laatste voor de storing'}); time.sleep(2.5)  # "last event" is saved at most every second in tests
     wa('/mock/status', {'status': 'STOPPED'}); time.sleep(3)
     wa('/mock/history', {'message': {'id': f'false_{JAN}_MISSED0004', 'timestamp': int(time.time()) - 20, 'from': JAN, 'fromMe': False, 'to': ME,
                                      'body': 'Terwijl alles uit stond', 'hasMedia': False, '_data': {'type': 'chat', 'notifyName': 'Jan'}}})
