@@ -14,7 +14,8 @@ RUN npm run build
 # ---- runtime ----
 # The server has no runtime npm dependencies (Node 22 ships sqlite, fetch and WebSocket).
 FROM node:22-alpine
-RUN apk add --no-cache su-exec tzdata
+# ffmpeg (and heif-dec for iPhone photos) convert files the networks can't take as they are (server/src/convert.ts).
+RUN apk add --no-cache su-exec tzdata ffmpeg libheif-tools
 WORKDIR /app
 ENV NODE_ENV=production \
     DATA_DIR=/data \

@@ -22,6 +22,7 @@ import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { VoicePlayer } from './VoicePlayer';
+import { mightShrink, shrinkPhoto } from '../shrink';
 import { getPrefs, usePrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, MediaItem, Message, Network } from '../types';
@@ -1306,9 +1307,14 @@ function LightboxMedia({ att }: { att: Attachment }) {
 // ---------------------------------------------------------------------------
 
 interface Pending {
-  file: File;
+  key: number;
+  file: File; // what will be sent (made smaller, when it had to be)
   preview?: string;
+  original?: File; // set when `file` is a smaller version
+  useOriginal?: boolean; // "Send the original as a file instead"
+  shrinking?: boolean;
 }
+let pendingKey = 0;
 
 /** The "@name" being typed right before the caret, if any (group chats). */
 function mentionAtCaret(text: string, caret: number): { start: number; term: string } | null {
@@ -1515,8 +1521,16 @@ function Composer({
   }, [text]);
 
   function addFiles(list: File[]) {
-    setFiles((prev) => [...prev, ...list.map((file) => ({ file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined }))]);
+    const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file) }));
+    setFiles((prev) => [...prev, ...added]);
+    // Large photos are made smaller here before sending (shrink.ts); the chip says so.
+    for (const p of added.filter((x) => x.shrinking)) {
+      void shrinkPhoto(p.file)
+        .catch(() => null)
+        .then((small) => setFiles((prev) => prev.map((x) => (x.key === p.key ? { ...x, shrinking: false, ...(small ? { file: small, original: p.file } : {}) } : x))));
+    }
   }
+  const shrinking = files.some((f) => f.shrinking);
 
   function stopTyping() {
     clearTimeout(typingStop.current);
@@ -1646,14 +1660,18 @@ function Composer({
       }
       return;
     }
-    if ((!body && !files.length) || sending) return;
+    if ((!body && !files.length) || sending || shrinking) return;
     setSending(true);
     setError(null);
     setSuggest(null);
     stopTyping();
     try {
       const attachments = await Promise.all(
-        files.map(async (p) => ({ name: p.file.name || 'file', type: p.file.type || 'application/octet-stream', data: await fileToBase64(p.file) })),
+        files.map(async (p) => {
+          // The original, when asked for: as a plain file, so the network doesn't try to treat it as a photo
+          const f = p.useOriginal && p.original ? p.original : p.file;
+          return { name: f.name || 'file', type: p.useOriginal ? 'application/octet-stream' : f.type || 'application/octet-stream', data: await fileToBase64(f) };
+        }),
       );
       const previewUrl = linkCard && linkCard.url === firstLink && rich.text.includes(linkCard.url) ? linkCard.url : undefined;
       const msg = await api.send(id, { ...rich, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined, previewUrl });
@@ -1895,9 +1913,18 @@ function Composer({
       {files.length > 0 && (
         <div className="pending-files">
           {files.map((p, i) => (
-            <div key={i} className="pending-file">
+            <div key={p.key} className={`pending-file${p.original || p.shrinking ? ' noted' : ''}`}>
               {p.preview ? <img src={p.preview} alt="" /> : <Icon name="file" size={28} />}
-              <span>{p.file.name}</span>
+              <span>{p.useOriginal && p.original ? p.original.name : p.file.name}</span>
+              {p.shrinking && <small className="shrink-note">Making it smaller…</small>}
+              {p.original && (
+                <small className="shrink-note" title="Large photos are made smaller so they can be sent">
+                  {p.useOriginal ? `Original, as a file (${formatSize(p.original.size)})` : `Made smaller: ${formatSize(p.original.size)} → ${formatSize(p.file.size)}`}
+                  <button className="link-btn" onClick={() => setFiles((all) => all.map((x) => (x.key === p.key ? { ...x, useOriginal: !x.useOriginal } : x)))}>
+                    {p.useOriginal ? 'Make it smaller' : 'Send the original as a file'}
+                  </button>
+                </small>
+              )}
               <button className="remove" onClick={() => setFiles((f) => f.filter((_, j) => j !== i))} aria-label={`Remove ${p.file.name}`}>
                 <Icon name="close" size={14} />
               </button>
@@ -2014,7 +2041,7 @@ function Composer({
         <button
           className="send-btn"
           onClick={send}
-          disabled={disabled || sending || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
+          disabled={disabled || sending || shrinking || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
           aria-label={editing ? (text.trim() ? 'Save edit' : 'Delete message') : 'Send'}
           title={editing ? (text.trim() ? 'Save edit' : 'Everything erased: delete the message') : undefined}
         >

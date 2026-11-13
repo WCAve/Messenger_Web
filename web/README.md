@@ -18,6 +18,7 @@ with a comment saying what it does; this is the map.
 | `notifications.ts` | Browser notifications (permission state, pictures with initials) |
 | `favicon.ts` | Unread count inside the tab icon |
 | `exporter.ts` | Exporting chats: pages through messages, fetches files, makes small photos, writes txt (WhatsApp's format), html, json and csv |
+| `shrink.ts` | Making large photos smaller in the browser before sending |
 | `zip.ts` | A small ZIP writer for the export (no library) |
 | `changelog.ts` | What's new, in plain words; shown after an update (`components/WhatsNew.tsx`). Add a line for every change people notice |
 | `util.ts` | Small helpers (hues, initials, images, safe links) |

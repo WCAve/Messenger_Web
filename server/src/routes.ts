@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';
+import { convertForSending, needsConverting } from './convert.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
@@ -315,6 +316,33 @@ function readBase64(a: Attachment) {
 }
 
 /** Hand a stored message to signal-cli and record the outcome. */
+/**
+ * Files the networks can't take as they are (iPhone photos, odd video formats, huge photos) are
+ * converted first (convert.ts); the stored message then shows the converted file. The message stays
+ * "pending" meanwhile.
+ */
+async function makeSendable<P extends { base64: string[] }>(messageId: number, payload: P, log: (m: string) => void): Promise<P> {
+  if (!payload.base64.length) return payload;
+  const row = getMessage(messageId);
+  const atts: Attachment[] = row?.attachments ? JSON.parse(row.attachments) : [];
+  if (atts.length !== payload.base64.length || !atts.some((a) => needsConverting(a.contentType, a.filename ?? '', a.size ?? 0))) return payload;
+  const base64 = [...payload.base64];
+  let changed = false;
+  for (const [i, a] of atts.entries()) {
+    if (!needsConverting(a.contentType, a.filename ?? '', a.size ?? 0)) continue;
+    const comma = base64[i].indexOf('base64,');
+    const out = await convertForSending({ buf: Buffer.from(base64[i].slice(comma + 7), 'base64'), type: a.contentType, name: a.filename ?? 'file' }, log);
+    if (!out) continue;
+    const id = saveOutgoing(out.buf, out.type, out.name);
+    atts[i] = { ...a, id, contentType: out.type, filename: out.name, size: out.buf.length };
+    base64[i] = `data:${out.type};filename=${out.name};base64,${out.buf.toString('base64')}`;
+    changed = true;
+  }
+  if (!changed) return payload;
+  emitMessageRow(messageId, { attachments: JSON.stringify(atts) });
+  return { ...payload, base64 };
+}
+
 async function deliver(
   account: string,
   c: ConversationRow,
@@ -330,6 +358,7 @@ async function deliver(
   },
   log: (m: string) => void,
 ) {
+  payload = await makeSendable(messageId, payload, log);
   if (isWa(c)) {
     try {
       await deliverWa(c, messageId, payload);
