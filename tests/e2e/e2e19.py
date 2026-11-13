@@ -1,5 +1,5 @@
 """History import waits while WhatsApp Web restarts, then resumes."""
-import sys, time, json, urllib.request
+import os, sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright
 
 def goto(pg, title): pg.click(f'.settings-nav-row:has(strong:text-is("{title}"))')
@@ -29,7 +29,7 @@ with sync_playwright() as p:
     end = time.time() + 40
     while time.time() < end and not re.search(r'No older messages found|Imported \d+ messages', page.inner_text('body')): time.sleep(0.5)
     assert re.search(r'No older messages found|Imported \d+ messages', page.inner_text('body')), 'import did not finish'
-    log = open(S + '/server.log').read()
+    log = open(os.environ.get('E2E_SERVER_LOG', S + '/server.log')).read()
     assert 'waiting for it to come back' in log, 'no resume in log'
     assert 'history import failed' not in log.split('waiting for it to come back')[-1], 'import failed after resume'
     print('resumed ok')

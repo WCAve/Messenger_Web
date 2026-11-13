@@ -11,13 +11,22 @@ Nothing talks to real Signal or WhatsApp.
 
 ```bash
 npm run build                      # the tests run server/dist and web/dist
-tests/e2e/run.sh                   # all suites, ~15 minutes
+tests/e2e/run.sh                   # all suites, 4 at a time, ~5 minutes
 tests/e2e/run.sh e2e27 e2e28       # some
+JOBS=1 tests/e2e/run.sh            # one at a time (E2E_PRIVATE=0: also without private networks)
 ```
 
 Needs Python 3 with `playwright` and a Chromium it can launch. Every suite gets a fresh app: both mocks
-and the server are restarted and `.data/` is wiped. Logs and screenshots go to `.test-out/`
-(`<suite>.log`, `server.log`, `waha.log`, `mock.log`). Each suite prints one line:
+and the server are restarted and its data folder is wiped.
+
+**Four at a time:** each runner gets its own private network (`unshare -rn`, no root needed), so all of
+them use the usual ports without clashing, plus its own data folder. Suites must therefore not assume a
+path or log name: use `E2E_DATA` (the app's data folder), `E2E_SERVER_LOG`, `E2E_WAHA_LOG` and
+`E2E_MOCK_LOG` from the environment. Slow suites start first (`SLOW` in run.sh). Waits that take a
+minute in real life are seconds in the tests (`WAHA_EVENT_SAVE_MS`, `EVENTS_PING_MS` … set in run.sh).
+
+Logs and screenshots go to `.test-out/` (`<suite>.log`, and `server-<n>.log`, `waha-<n>.log`,
+`mock-<n>.log` per runner). Each suite prints one line:
 `e2e27 exit 0: ERRORS: []`; `ERRORS` lists JavaScript errors from the page (404s for avatars that
 don't exist are normal in e2e2/3/9/10, a 401 in e2e for the wrong password).
 

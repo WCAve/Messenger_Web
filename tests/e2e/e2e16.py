@@ -1,5 +1,5 @@
 """WhatsApp history import settings, and importing."""
-import sys, time, json, urllib.request
+import os, sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright
 
 def goto(pg, title): pg.click(f'.settings-nav-row:has(strong:text-is("{title}"))')
@@ -27,7 +27,7 @@ with sync_playwright() as p:
     print('settings saved ok')
     page.click('button:has-text("Import history now")')
     page.wait_for_selector('text=No older messages found', timeout=15000)
-    lim = [r for r in open(S + '/waha.log').read().splitlines()]
+    lim = [r for r in open(os.environ.get('E2E_WAHA_LOG', S + '/waha.log')).read().splitlines()]
     print('import ok')
     page.screenshot(path=S + '/e2e16.png')
     b.close()

@@ -25,14 +25,23 @@ cd "$ROOT"
 # ---------------------------------------------------------------- one runner
 if [ "${1:-}" = --runner ]; then
   N="$2" QUEUE="$3" RESULTS="$4"
-  # A fresh private network starts with its loopback switched off.
+  # A fresh private network starts with its loopback switched off; e2e7 also visits the app through an
+  # outside address (192.0.2.2, a documentation address), which the runner's network gets too.
   python3 - <<'PY' 2>/dev/null
 import socket, fcntl, struct
 s = socket.socket()
-flags = struct.unpack('16sH', fcntl.ioctl(s, 0x8913, struct.pack('16sH', b'lo', 0)))[1]
-fcntl.ioctl(s, 0x8914, struct.pack('16sH', b'lo', flags | 1))
+def up(name):
+    flags = struct.unpack('16sH', fcntl.ioctl(s, 0x8913, struct.pack('16sH', name, 0)))[1]
+    fcntl.ioctl(s, 0x8914, struct.pack('16sH', name, flags | 1))
+up(b'lo')
+try:
+    fcntl.ioctl(s, 0x8916, struct.pack('16sH2s4s8s', b'lo:1', socket.AF_INET, b'\0\0', socket.inet_aton('192.0.2.2'), b'\0' * 8))
+    up(b'lo:1')
+except OSError:
+    pass  # not inside a private network
 PY
   export E2E_DATA="$ROOT/.data-$N"
+  export E2E_SERVER_LOG="$OUT/server-$N.log" E2E_WAHA_LOG="$OUT/waha-$N.log" E2E_MOCK_LOG="$OUT/mock-$N.log" # for suites that read them
   pids=()
   stop_all() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
@@ -59,13 +68,14 @@ PY
       SIGNAL_API_URL=http://127.0.0.1:8080 SIGNAL_STICKER_CDN=http://127.0.0.1:8080 \
       WAHA_URL="$waha" WAHA_API_KEY=test-waha-key GIPHY_API_KEY=test-key LINK_PREVIEW_INSECURE=1 \
       WAHA_HISTORY_ROUNDS_MS="${ROUNDS:-1500,7000}" WAHA_RESUME_SETTLE_MS=1500 WAHA_RESTART_AFTER_MS=2000 WAHA_AFTER_CONNECT_PAUSE_MS=1500 WAHA_CATCHUP_MARGIN_MS=2000 \
-      WAHA_CHECK_MS=3000 WAHA_EVENT_SAVE_MS=1000 EVENTS_PING_MS=2000 E2E_HOOKS=1 \
+      WAHA_EVENT_SAVE_MS=1000 EVENTS_PING_MS=2000 E2E_HOOKS=1 \
       node --no-warnings=ExperimentalWarning server/dist/index.js > "$OUT/server-$N.log" 2>&1 &
     pids+=($!)
     for _ in $(seq 1 50); do # until the app answers
       python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/healthz', timeout=1)" 2>/dev/null && break
       sleep 0.1
     done
+    sleep 2.5 # as before: the suites expect the app to have had a moment (WhatsApp connecting)
   }
   trap stop_all EXIT
   while :; do
@@ -96,7 +106,7 @@ queue="$OUT/.queue"; results="$OUT/.results"
   for s in "${suites[@]}"; do printf '%s\n' "${SLOW[@]}" | grep -qx "$s" || echo "$s"; done
 } > "$queue"
 
-private() { unshare -rn true 2>/dev/null; }
+private() { [ "${E2E_PRIVATE:-1}" != 0 ] && unshare -rn true 2>/dev/null; } # E2E_PRIVATE=0: never
 jobs=$JOBS
 [ ${#suites[@]} -lt "$jobs" ] && jobs=${#suites[@]}
 if ! private; then

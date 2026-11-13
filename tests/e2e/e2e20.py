@@ -56,7 +56,7 @@ with sync_playwright() as p:
     n = fetches()
     st = api('/api/settings', {'waHistoryMedia': True})
     assert st['waHistoryMedia'] is True
-    until(lambda: 'background download:' in open(S + '/server.log').read(), 15, 'no background download')
+    until(lambda: 'background download:' in open(os.environ.get('E2E_SERVER_LOG', S + '/server.log')).read(), 15, 'no background download')
     assert fetches() > n
     page.click(row('Familie')); page.wait_for_selector('.msg:has-text("Taartfoto")')
     assert page.locator('.msg:has-text("Taartfoto") .img-btn.pending').count() == 0, 'still pending after background download'

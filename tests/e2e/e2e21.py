@@ -18,7 +18,7 @@ def until(fn, secs=10, msg='timeout'):
         time.sleep(0.3)
     raise AssertionError(msg)
 SANNE = '31655500002@c.us'
-log = lambda: open(S + '/server.log').read()
+log = lambda: open(os.environ.get('E2E_SERVER_LOG', S + '/server.log')).read()
 with sync_playwright() as p:
     b = p.chromium.launch(); page = b.new_page(viewport={'width': 1400, 'height': 900})
     page.on('pageerror', lambda e: errors.append(str(e)))

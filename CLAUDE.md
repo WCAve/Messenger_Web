@@ -31,7 +31,7 @@ do update these docs when you change how something works.
 npm install                 # once
 npm run build               # web (esbuild) + server (tsc)
 npm run typecheck           # both; CI runs this and the build
-tests/e2e/run.sh            # all browser tests against the mocks (~15 min); see tests/README.md
+tests/e2e/run.sh            # all browser tests against the mocks, 4 at a time (~5 min); see tests/README.md
 tests/e2e/run.sh e2e27      # one suite
 ```
 
