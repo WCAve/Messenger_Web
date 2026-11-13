@@ -321,9 +321,10 @@ function MessageList({
     const el = ref.current?.querySelector<HTMLElement>(`[data-ts="${focus.sentAt}"]`);
     if (!el) return;
     stick.current = false;
-    el.scrollIntoView({ block: 'center' });
-    el.classList.add('flash');
-    setTimeout(() => el.classList.remove('flash'), 1600);
+    const container = ref.current!;
+    const visible = isFullyVisible(container, el);
+    if (!visible) el.scrollIntoView({ block: 'center' });
+    flashMessage(container, el, visible);
     setState({ focus: null });
   }, [focus, id, messages]);
 
@@ -393,9 +394,10 @@ function MessageList({
       void jumpToMessage(id, sentAt).catch(() => {}); // not loaded: fetch the messages around it
       return;
     }
-    el.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
-    el.classList.add('flash');
-    setTimeout(() => el.classList.remove('flash'), 1400);
+    const container = ref.current!;
+    const visible = isFullyVisible(container, el);
+    if (!visible) el.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' });
+    flashMessage(container, el, visible);
   };
 
   if (!messages) return <div className="messages" />;
@@ -473,6 +475,45 @@ function MessageList({
 }
 
 // ---------------------------------------------------------------------------
+
+function isFullyVisible(container: HTMLElement, el: HTMLElement) {
+  const c = container.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return r.top >= c.top && r.bottom <= c.bottom;
+}
+
+/**
+ * Light up a message you jumped to (a quote, a search result) so your eye finds it after the scroll.
+ * It starts once the scroll has landed (or straight away when the message was already in view), and
+ * starts over when you jump to the same one again.
+ */
+const flashTimers = new WeakMap<HTMLElement, ReturnType<typeof setTimeout>>();
+function flashMessage(container: HTMLElement, el: HTMLElement, alreadyVisible: boolean) {
+  let started = false;
+  const start = () => {
+    if (started) return;
+    started = true;
+    el.classList.remove('flash');
+    void el.offsetWidth; // restart the animation if it was still running
+    el.classList.add('flash');
+    clearTimeout(flashTimers.get(el));
+    flashTimers.set(el, setTimeout(() => el.classList.remove('flash'), 2400));
+  };
+  if (alreadyVisible) return start();
+  // Wait until it's in view and has stopped moving (the smooth scroll has landed), checking every frame.
+  let lastTop = NaN;
+  let still = 0;
+  const begun = performance.now();
+  const check = () => {
+    if (started) return;
+    const top = el.getBoundingClientRect().top;
+    still = Math.abs(top - lastTop) < 1 ? still + 1 : 0;
+    lastTop = top;
+    if ((still >= 4 && isFullyVisible(container, el)) || performance.now() - begun > 1500) return start();
+    requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
+}
 
 /** Message text with bold/italic/… styles, highlighted mentions, links and click-to-reveal spoilers. */
 function RichBody({ m }: { m: Message }) {

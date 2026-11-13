@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-13',
     date: '13 November 2026',
     items: [
+      'Clicking a quote (or a search result) now briefly lights up the message it jumps to, once the scroll has landed, so you see straight away which one it is.',
       'Fixed: after the computer slept or the network changed, the page could stop showing new messages until you refreshed. It now notices within a minute (or as soon as you come back to the tab) and catches up by itself.',
     ],
   },
