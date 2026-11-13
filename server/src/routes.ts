@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, newOutgoingId, saveOutgoing } from './attachments.js';
 import { db } from './db.js';
 import { fillMessageSizes, parseImageSize } from './mediasize.js';
+import { makeThumb, thumbIfReady, thumbable } from './thumbs.js';
 import { TooBig, canConvert, convertForSending, needsConverting, videoConversion } from './convert.js';
 import { cancelUpload, receivePiece, startUpload, takeUpload } from './uploads.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
@@ -1295,6 +1296,32 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (fs.existsSync(localPath(id))) return { ready: true };
     void fetchAttachment(id).catch(() => {});
     return { queued: true };
+  });
+
+  // The chat's small version of a photo, or a video's still (thumbs.ts). ?kind=image|video says which,
+  // for files whose name doesn't. Not made yet: made now (up to 1.5 s), else the original for this
+  // once (not cached), or for a video nothing (the player shows its own first frame).
+  r.get('/api/attachments/:id/thumb', async (ctx) => {
+    const id = ctx.params.id;
+    if (!isSafeId(id)) throw new HttpError(400, 'Bad id');
+    if (id.startsWith('wa-') && !fs.existsSync(localPath(id))) {
+      void fetchAttachment(id).catch(() => {});
+      ctx.res.setHeader('retry-after', '10');
+      throw new HttpError(404, 'Not downloaded yet');
+    }
+    if (!(await fetchAttachment(id))) throw new HttpError(404, 'Attachment not available');
+    const byName = MIME[path.extname(id).toLowerCase()] ?? '';
+    const kind = ctx.query.get('kind');
+    const type = kind === 'video' ? 'video/mp4' : kind === 'image' && !byName.startsWith('image/') ? 'image/jpeg' : byName;
+    const head = ctx.req.method === 'HEAD';
+    const jpeg = { 'content-type': 'image/jpeg', 'x-content-type-options': 'nosniff', 'cache-control': 'private, max-age=31536000, immutable' };
+    const ready = thumbIfReady(id) ?? (thumbable({ contentType: type }) ? await Promise.race([makeThumb({ id, contentType: type }).then((t) => t.file), new Promise<null>((r) => setTimeout(() => r(null), 1500))]) : null);
+    if (ready) return sendFile(ctx.res, ready, jpeg, head);
+    if (type.startsWith('video/')) {
+      ctx.res.setHeader('cache-control', 'no-store');
+      throw new HttpError(404, 'No still yet');
+    }
+    sendFile(ctx.res, localPath(id), { 'content-type': byName || 'application/octet-stream', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' }, head);
   });
 
   r.get('/api/attachments/:id', async (ctx) => {

@@ -128,6 +128,13 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   WhatsApp, else read from the file by mediasize.ts: when it arrives, after sending, and once in the
   background for older messages, `media_sizes_upto` in kv). The web app gives each its final space from
   that (`shapeOf`, `LazyVideo` in Chat.tsx); videos load only when scrolled near.
+- **Thumbnails**: the chat, quotes, reply bar and media overview show `/api/attachments/:id/thumb?kind=`
+  (thumbs.ts: a photo ≤ 720 px wide turned by EXIF, or a video's still; DATA_DIR/thumbs, safe to delete),
+  never the original; the viewer, downloads and forwarding use the original. Each photo/video also
+  carries `tiny` (a blurred 24 px JPEG, or WhatsApp's own preview for files not downloaded yet), shown
+  behind it while it loads. Made when a message is stored or its file arrives (`storeHooks.mediaAdded`),
+  and once for the newest 2000 media messages; older ones when first shown (served the original that
+  once, not cached).
 - **Big files** (over 20 MB) are uploaded in pieces first (server/src/uploads.ts, `uploadInPieces` in
   web/src/api.ts), so a proxy's upload limit doesn't matter, then sent as `{upload: id}`. Their base64 is
   only made in `makeSendable` (an empty entry = "read the stored file"), after videos over

@@ -5,7 +5,7 @@
  * is `panel` in the store.
  */
 import { type ReactNode, useEffect, useRef, useState } from 'react';
-import { api, attachmentUrl } from '../api';
+import { api, attachmentUrl, thumbUrl, tinyBehind } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import { jumpToMessage } from '../jump';
 import { NETWORK_LABEL, capsFor } from '../networks';
@@ -197,12 +197,13 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
                     <span className="media-badge">{m.attachment.contentType.startsWith('image/') ? 'Photo' : 'Video'} · not loaded</span>
                   ) : m.attachment.contentType.startsWith('image/') ? (
                     <>
-                      <img src={attachmentUrl(m.attachment.id)} alt="" loading="lazy" />
+                      <img src={thumbUrl(m.attachment)} alt="" loading="lazy" style={tinyBehind(m.attachment)} />
                       {m.attachment.contentType === 'image/gif' && <span className="media-badge">GIF</span>}
                     </>
                   ) : (
                     <>
-                      <video src={attachmentUrl(m.attachment.id)} muted preload={m.attachment.pending ? 'none' : 'metadata'} />
+                      {/* the video's still, not the video: a page of them stays light */}
+                      <img src={thumbUrl(m.attachment)} alt="" loading="lazy" style={tinyBehind(m.attachment)} onError={(e) => (e.currentTarget.style.visibility = 'hidden')} />
                       {!m.attachment.gif && <span className="media-badge">Video</span>}
                       {m.attachment.gif && <span className="media-badge">GIF</span>}
                     </>

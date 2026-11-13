@@ -6,8 +6,9 @@
  *   photos  from the first bytes (JPEG, PNG, GIF, WebP, BMP), turned by the JPEG's EXIF orientation
  *   videos  ffprobe, turned by the rotation phones store
  *
- * fillMessageSizes() does one message (when its files arrive); backfillSizes() goes through everything
- * stored once, newest first, a little at a time.
+ * fillMessageSizes() does one message (when it's stored and when its files arrive), and also has its
+ * thumbnails and blurred previews made (thumbs.ts); backfillSizes() fills sizes in for everything stored,
+ * newest first, a little at a time; backfillThumbs() makes thumbnails for the newest 2000.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -15,6 +16,7 @@ import { localPath } from './attachments.js';
 import { db, kvGet, kvSet } from './db.js';
 import { broadcast } from './events.js';
 import { type Attachment, getMessage, messageDto, updateMessage } from './store.js';
+import { makeThumb, thumbable } from './thumbs.js';
 
 export interface Size {
   width: number;
@@ -72,7 +74,7 @@ export function parseImageSize(b: Buffer): Size | null {
         continue;
       }
       const len = b.readUInt16BE(i + 2);
-      if (marker === 0xe1 && b.toString('latin1', i + 4, i + 10) === 'Exif\0\0') turned = exifTurned(b.subarray(i + 10, i + 2 + len));
+      if (marker === 0xe1 && b.toString('latin1', i + 4, i + 10) === 'Exif\0\0') turned = exifOrientation(b.subarray(i + 10, i + 2 + len)) >= 5;
       // SOF0–SOF15, except DHT (C4), JPG (C8) and DAC (CC)
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
         const h = b.readUInt16BE(i + 5);
@@ -85,9 +87,29 @@ export function parseImageSize(b: Buffer): Size | null {
   return null;
 }
 
-/** True when the EXIF orientation turns the picture a quarter (5–8: width and height swap). */
-function exifTurned(t: Buffer): boolean {
-  if (t.length < 8) return false;
+/** The EXIF orientation of a JPEG (1 = as stored; 5–8 turn it a quarter, so width and height swap). */
+export function jpegOrientation(file: string): number {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const b = Buffer.alloc(128 * 1024);
+    const n = fs.readSync(fd, b, 0, b.length, 0);
+    fs.closeSync(fd);
+    if (b[0] !== 0xff || b[1] !== 0xd8) return 1;
+    for (let i = 2; i + 10 < n && b[i] === 0xff; ) {
+      const marker = b[i + 1];
+      const len = b.readUInt16BE(i + 2);
+      if (marker === 0xe1 && b.toString('latin1', i + 4, i + 10) === 'Exif\0\0') return exifOrientation(b.subarray(i + 10, Math.min(n, i + 2 + len)));
+      if (marker === 0xda) break; // the picture itself: no EXIF after this
+      i += 2 + len;
+    }
+  } catch {
+    /* unreadable: as stored */
+  }
+  return 1;
+}
+
+function exifOrientation(t: Buffer): number {
+  if (t.length < 8) return 1;
   const le = t.toString('latin1', 0, 2) === 'II';
   const u16 = (o: number) => (le ? t.readUInt16LE(o) : t.readUInt16BE(o));
   const u32 = (o: number) => (le ? t.readUInt32LE(o) : t.readUInt32BE(o));
@@ -96,12 +118,15 @@ function exifTurned(t: Buffer): boolean {
     const n = u16(ifd);
     for (let k = 0; k < n; k++) {
       const e = ifd + 2 + k * 12;
-      if (u16(e) === 0x0112) return u16(e + 8) >= 5 && u16(e + 8) <= 8;
+      if (u16(e) === 0x0112) {
+        const o = u16(e + 8);
+        return o >= 1 && o <= 8 ? o : 1;
+      }
     }
   } catch {
     /* broken EXIF: as stored */
   }
-  return false;
+  return 1;
 }
 
 /** A video's size as it's shown (phones store "turn 90°" instead of turning the picture). */
@@ -139,26 +164,75 @@ export async function sizeOf(a: Attachment): Promise<Size | null> {
   return videoSize(file);
 }
 
-/** Fill in missing sizes of one message's photos and videos, and tell the open pages. */
+const needsTiny = (a: Attachment) => thumbable(a) && !a.tiny;
+
+/** Size, thumbnail and blurred preview for one file, as far as they're missing. True when something was added. */
+async function prepare(a: Attachment, thumbs: boolean): Promise<boolean> {
+  let changed = false;
+  if (needsSize(a)) {
+    const s = await sizeOf(a);
+    if (s) (a.width = s.width), (a.height = s.height), (changed = true);
+  }
+  if (thumbs && needsTiny(a)) {
+    const t = await makeThumb(a);
+    if (t.tiny) (a.tiny = t.tiny), (changed = true);
+  }
+  return changed;
+}
+
+/**
+ * Fill in what one message's photos and videos are missing (size, thumbnail, blurred preview), and
+ * tell the open pages. Called when a message is stored and when its files arrive.
+ */
 export async function fillMessageSizes(messageId: number) {
   const m = getMessage(messageId);
   if (!m?.attachments) return;
   const atts: Attachment[] = JSON.parse(m.attachments);
-  if (!atts.some(needsSize)) return;
+  if (!atts.some((a) => needsSize(a) || needsTiny(a))) return;
   let changed = false;
-  for (const a of atts) {
-    if (!needsSize(a)) continue;
-    const s = await sizeOf(a);
-    if (s) (a.width = s.width), (a.height = s.height), (changed = true);
-  }
+  for (const a of atts) if (await prepare(a, true)) changed = true;
   if (!changed) return;
-  // The message may have changed meanwhile (a conversion replaced a file): only add sizes to the same files
+  // The message may have changed meanwhile (a conversion replaced a file): only add to the same files
   const now = getMessage(messageId);
   if (!now?.attachments) return;
-  const sized = new Map(atts.filter((a) => a.width && a.height).map((a) => [a.id, a]));
-  const next = (JSON.parse(now.attachments) as Attachment[]).map((a) => (needsSize(a) && sized.has(a.id) ? { ...a, width: sized.get(a.id)!.width, height: sized.get(a.id)!.height } : a));
+  const done = new Map(atts.map((a) => [a.id, a]));
+  const next = (JSON.parse(now.attachments) as Attachment[]).map((a) => {
+    const d = done.get(a.id);
+    if (!d) return a;
+    return { ...a, ...(needsSize(a) && d.width && d.height ? { width: d.width, height: d.height } : {}), ...(!a.tiny && d.tiny ? { tiny: d.tiny } : {}) };
+  });
   const row = updateMessage(messageId, { attachments: JSON.stringify(next) });
   if (row) broadcast({ type: 'message', message: messageDto(row) });
+}
+
+/**
+ * Once: thumbnails and blurred previews for the newest 2000 messages with photos or videos (older ones
+ * get a thumbnail when they're first shown), one file at a time with breaks.
+ */
+export async function backfillThumbs(log: (m: string) => void) {
+  if (kvGet('media_thumbs_v1')) return;
+  const rows = db
+    .prepare<[], { id: number; attachments: string }>(`SELECT id, attachments FROM messages WHERE attachments LIKE '%"image/%' OR attachments LIKE '%"video/%' ORDER BY id DESC LIMIT 2000`)
+    .all();
+  let made = 0;
+  for (const r of rows) {
+    let atts: Attachment[];
+    try {
+      atts = JSON.parse(r.attachments);
+    } catch {
+      continue;
+    }
+    if (!atts.some(needsTiny)) continue;
+    let changed = false;
+    for (const a of atts) if (needsTiny(a) && (await prepare(a, true))) changed = true;
+    if (changed && getMessage(r.id)?.attachments === r.attachments) {
+      updateMessage(r.id, { attachments: JSON.stringify(atts) });
+      made++;
+    }
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  kvSet('media_thumbs_v1', '1');
+  if (made) log(`thumbnails made for ${made} message${made === 1 ? '' : 's'}`);
 }
 
 /**

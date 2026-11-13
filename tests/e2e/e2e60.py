@@ -1,5 +1,9 @@
-"""Slow chat openings end up in the server's log with where the time went (here: a held-up answer)."""
-import sys, time, os
+"""Slow chat openings end up in the server's log with where the time went (here: a held-up answer).
+A message that arrives while a chat is still loading isn't lost."""
+import sys, time, os, json, urllib.request
+def post(port, path, body):
+    req = urllib.request.Request(f'http://127.0.0.1:{port}{path}', data=json.dumps(body).encode(), headers={'content-type': 'application/json'})
+    return urllib.request.urlopen(req).read()
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
 LOG = os.environ.get('E2E_SERVER_LOG', os.path.join(S, 'server.log'))
@@ -23,6 +27,19 @@ with sync_playwright() as p:
         time.sleep(0.25)
     print('log:', line)
     assert 'took' in line and 'drawing' in line and 'other downloads' in line, line
+    # A message arriving while a chat loads: the page of messages is made first (without it), the message
+    # arrives live, and only then does the page reach the browser
+    page.unroute('**/api/conversations/*/messages*')
+    held = []
+    page.route('**/api/conversations/*/messages*', lambda route: held.append(route))
+    page.click('.chat-row:has-text("Carol")'); page.wait_for_timeout(500)
+    assert held, 'no page requested'
+    made = held[0].fetch()
+    post(8080, '/mock/incoming', {'from': 'carol', 'text': 'Terwijl het laadt'})
+    page.wait_for_timeout(2000)  # it arrives live meanwhile
+    held[0].fulfill(response=made)
+    page.wait_for_selector('.msg:has-text("Terwijl het laadt")', timeout=5000)
+    print('message during loading: shown')
     assert not errors, errors
     b.close()
 print('e2e60 ok')

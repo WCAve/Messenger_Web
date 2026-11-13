@@ -178,6 +178,21 @@ export interface ServerSettings {
   sessions: number;
 }
 
+/**
+ * The small version for the chat (server/src/thumbs.ts): a photo at most 720 px wide, or a video's still.
+ * GIF images, stickers and other files: the file itself.
+ */
+export function thumbUrl(a: Attachment) {
+  const video = a.contentType.startsWith('video/');
+  const photo = a.contentType.startsWith('image/') && !/gif|svg|webp/.test(a.contentType) && !a.sticker;
+  return video || photo ? `/api/attachments/${encodeURIComponent(a.id)}/thumb?kind=${video ? 'video' : 'image'}` : attachmentUrl(a.id);
+}
+
+/** A blurred preview behind a photo or video while it loads (style for its box). */
+export function tinyBehind(a: Attachment) {
+  return a.tiny ? { backgroundImage: `url("${a.tiny}")`, backgroundSize: 'cover', backgroundPosition: 'center' } : {};
+}
+
 export function attachmentUrl(id: string, download?: string) {
   return `/api/attachments/${encodeURIComponent(id)}${download ? `?download=1&name=${encodeURIComponent(download)}` : ''}`;
 }

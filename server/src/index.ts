@@ -14,14 +14,14 @@ import { db, kvGet, kvSet } from './db.js';
 import { sendFile, sendJson } from './http.js';
 import { backfillGifFlags } from './ingest.js';
 import { buildRouter } from './routes.js';
-import { backfillExtRaw, cleanPreviewText, recomputeGroupReadStatuses, removeDuplicateWaMessages } from './store.js';
+import { backfillExtRaw, cleanPreviewText, recomputeGroupReadStatuses, removeDuplicateWaMessages, storeHooks } from './store.js';
 import { startSignal, stopSignal } from './signal.js';
 import { startExpiry, stopExpiry } from './expiry.js';
 import { seedWaReadMarks, startWhatsApp, stopWhatsApp } from './whatsapp.js';
 import { refreshBackupInfo, setBackupLogger } from './wabackup.js';
 import { clearUploads } from './uploads.js';
 import { videoChip } from './convert.js';
-import { backfillSizes } from './mediasize.js';
+import { backfillSizes, backfillThumbs, fillMessageSizes } from './mediasize.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 const minLevel = LEVELS[(config.logLevel as keyof typeof LEVELS) ?? 'info'] ?? 20;
@@ -39,7 +39,15 @@ if (!config.password || config.password.length < 8) {
 const router = buildRouter(log);
 clearUploads(); // half-finished uploads from before a restart can't be finished
 void videoChip((m) => log('info', m)); // checked once at start, so the log says which is used
-setTimeout(() => void backfillSizes((m) => log('info', m)).catch((e) => log('warn', `photo sizes: ${(e as Error).message}`)), 30_000).unref(); // after start-up has settled
+storeHooks.mediaAdded = (id) => void fillMessageSizes(id).catch(() => {});
+// After start-up has settled: sizes for stored photos and videos, then thumbnails for the newest
+setTimeout(
+  () =>
+    void backfillSizes((m) => log('info', m))
+      .then(() => backfillThumbs((m) => log('info', m)))
+      .catch((e) => log('warn', `photo sizes and thumbnails: ${(e as Error).message}`)),
+  30_000,
+).unref();
 
 // Note when the server was too busy to answer anyone (a stuck moment slows every chat that opens then).
 {

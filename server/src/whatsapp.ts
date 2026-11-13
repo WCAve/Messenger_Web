@@ -739,6 +739,8 @@ function pendingMedia(m: Json, extId: string): Attachment {
   if (mimetype.startsWith('audio/') && (d.type === 'ptt' || /ogg.*opus/i.test(String(d.mimetype ?? '')))) att.voiceNote = true;
   if (mimetype.startsWith('video/') && d.isGif) att.gif = true;
   if (d.type === 'sticker') att.sticker = true;
+  // WhatsApp sends a small preview with photos and videos: shown blurred until the file is here
+  if ((mimetype.startsWith('image/') || mimetype.startsWith('video/')) && !att.sticker && typeof d.body === 'string' && d.body.length < 40_000 && /^\/9j\//.test(d.body)) att.tiny = `data:image/jpeg;base64,${d.body}`;
   return att;
 }
 

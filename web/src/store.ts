@@ -122,6 +122,24 @@ function sortMessages(list: Message[]) {
   return list.sort((a, b) => a.sentAt - b.sentAt || a.id - b.id);
 }
 
+/**
+ * Chats whose first page is being fetched: live messages for them are kept here meanwhile, since the
+ * fetched page may have been put together just before they arrived (they'd be lost otherwise).
+ */
+const arrivingWhileLoading = new Map<number, Message[]>();
+export function startLoading(conversationId: number) {
+  arrivingWhileLoading.set(conversationId, []);
+}
+export function abandonLoading(conversationId: number) {
+  arrivingWhileLoading.delete(conversationId);
+}
+/** The first page is here: it plus whatever arrived meanwhile. */
+export function finishLoading(conversationId: number, list: Message[], opts: { hasMore?: boolean } = {}) {
+  const meanwhile = arrivingWhileLoading.get(conversationId) ?? [];
+  arrivingWhileLoading.delete(conversationId);
+  upsertMessages(conversationId, [...list, ...meanwhile], opts);
+}
+
 export function upsertMessages(conversationId: number, incoming: Message[], opts: { prepend?: boolean; hasMore?: boolean } = {}) {
   setState((s) => {
     const byId = new Map((s.messages[conversationId] ?? []).map((m) => [m.id, m]));
@@ -173,6 +191,7 @@ export function applyEvent(e: ServerEvent) {
     case 'message':
       // Only keep messages for conversations we've loaded; others are fetched when opened. While a chat
       // shows an older stretch of history, new messages arrive when scrolling down instead.
+      arrivingWhileLoading.get(e.message.conversationId)?.push(e.message);
       if (state.messages[e.message.conversationId]) {
         const list = state.messages[e.message.conversationId];
         const known = list.some((m) => m.id === e.message.id);

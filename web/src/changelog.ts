@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-8',
+    date: '13 November 2026',
+    items: [
+      'Photos in chats load as small versions (thumbnails) instead of the full file: much faster, lighter to scroll through, and sharper-looking. Clicking still opens the original, and downloading or forwarding sends the original too.',
+      'While a photo or video loads you see a blurred preview of it, and videos show a still from the video instead of black. The media overview in a chat’s info uses the small versions too.',
+      'Phone photos taken sideways or upside down are always shown the right way up.',
+      'Fixed: a message that arrived just while you opened a chat could be missing from it until you refreshed.',
+    ],
+  },
+  {
     id: '2026-11-13-7',
     date: '13 November 2026',
     items: ['Upright videos whose size wasn\u2019t known yet no longer show with wide black bars: the video takes its own shape as soon as it starts loading.'],

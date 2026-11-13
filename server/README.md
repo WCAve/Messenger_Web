@@ -23,6 +23,7 @@ How it all fits together: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 | `attachments.ts` | Files: copied out of signal-cli into DATA_DIR/attachments, served by id |
 | `convert.ts` | Making files sendable with ffmpeg (in the Docker image): HEIC/TIFF → JPEG, odd video → MP4/H.264, huge photos, videos too big to send made smaller |
 | `mediasize.ts` | Width and height of photos and videos (read from the file where Signal/WhatsApp didn't say), so the chat keeps their space before they load |
+| `thumbs.ts` | Thumbnails for the chat (photos ≤ 720 px, video stills) and the blurred 24 px preview kept in the message; DATA_DIR/thumbs |
 | `uploads.ts` | Big files you send, uploaded in pieces (DATA_DIR/uploads) before the message is sent |
 | `avatars.ts` | Signal profile and group pictures, cached on disk |
 | `stickers.ts` | Signal sticker packs: download and decrypt from Signal's CDN (`signal-ca.ts` = its root cert) |

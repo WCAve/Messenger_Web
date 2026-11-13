@@ -15,7 +15,7 @@
  * What each network can do comes from capsFor (networks.ts); the server decides how to send.
  */
 import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { type UploadLimits, api, attachmentUrl, uploadInPieces } from '../api';
+import { type UploadLimits, api, attachmentUrl, thumbUrl, tinyBehind, uploadInPieces } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
@@ -24,7 +24,7 @@ import { jumpToMessage, loadLatest } from '../jump';
 import { VoicePlayer } from './VoicePlayer';
 import { mightShrink, shrinkPhoto } from '../shrink';
 import { getPrefs, usePrefs } from '../prefs';
-import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
+import { abandonLoading, finishLoading, getState, setDraft, setHasNewer, setState, startLoading, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, MediaItem, Message, Network } from '../types';
 import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
@@ -106,15 +106,16 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
     setLoadError(null);
     if (getState().messages[id]) return;
     const started = performance.now();
+    startLoading(id); // what arrives while this loads is added afterwards
     api
       .messages(id, undefined, PAGE)
       .then((list) => {
         const fetched = performance.now();
-        upsertMessages(id, list, { hasMore: list.length === PAGE });
+        finishLoading(id, list, { hasMore: list.length === PAGE });
         // Slow? Say where the time went, in the server's log (see reportSlowOpen)
         requestAnimationFrame(() => requestAnimationFrame(() => reportSlowOpen(id, started, fetched, list.length)));
       })
-      .catch((e) => setLoadError(e.message));
+      .catch((e) => (abandonLoading(id), setLoadError(e.message)));
   }, [id]);
 
   // Tell the server (WhatsApp then starts sending "typing…" for this chat).
@@ -630,6 +631,7 @@ function GifVideo({ a, onLoad, single }: { a: Attachment; onLoad?: () => void; s
       ref={ref}
       className="gif-video"
       src={attachmentUrl(a.id)}
+      poster={thumbUrl(a)}
       autoPlay={!reducedMotion}
       loop
       muted
@@ -637,7 +639,7 @@ function GifVideo({ a, onLoad, single }: { a: Attachment; onLoad?: () => void; s
       disablePictureInPicture
       onLoadedData={onLoad}
       // A click opens it large (the button around it), where it plays even with reduced motion.
-      style={single ? { aspectRatio: shapeOf(a) } : undefined}
+      style={{ ...tinyBehind(a), ...(single ? { aspectRatio: shapeOf(a) } : {}) }}
       aria-label="GIF"
     />
   );
@@ -764,12 +766,12 @@ const MessageItem = memo(function MessageItem({
               ) : (
                 <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label={`Open image ${a.filename ?? ''}`}>
                   <img
-                    src={attachmentUrl(a.id)}
+                    src={thumbUrl(a)}
                     alt={a.caption ?? a.filename ?? 'Image'}
                     loading="lazy"
                     onLoad={onMediaLoad}
                     onError={(e) => a.id.startsWith('wa-') && e.currentTarget.parentElement?.classList.add('failed')}
-                    style={visual.length === 1 ? { aspectRatio: shapeOf(a) } : undefined}
+                    style={{ ...tinyBehind(a), ...(visual.length === 1 ? { aspectRatio: shapeOf(a) } : {}) }}
                   />
                   {i === 3 && visual.length > 4 && <span className="more-images">+{visual.length - 4}</span>}
                   {isLoopingMedia(a) && <span className="gif-tag">GIF</span>}
@@ -989,7 +991,7 @@ function PendingImage({ a }: { a: Attachment }) {
     return () => io.disconnect();
   }, [a.id]);
   return (
-    <div ref={ref} className="img-btn pending" title="Getting it from WhatsApp…" style={{ aspectRatio: shapeOf(a) }}>
+    <div ref={ref} className="img-btn pending" title="Getting it from WhatsApp…" style={{ ...tinyBehind(a), aspectRatio: shapeOf(a) }}>
       <span className="pending-label">{a.contentType.startsWith('video/') ? 'GIF' : 'Photo'} · getting it from WhatsApp…</span>
     </div>
   );
@@ -1038,16 +1040,18 @@ function LazyVideo({ a }: { a: Attachment }) {
   const [seen, setSeen] = useState<number | null>(null);
   const ratio = a.width && a.height ? a.width / a.height : (seen ?? 16 / 9);
   return (
-    <div ref={box} className="video" style={{ aspectRatio: String(ratio), width: `min(340px, 60vw, ${Math.round(420 * ratio)}px)` }}>
+    <div ref={box} className="video" style={{ ...tinyBehind(a), aspectRatio: String(ratio), width: `min(340px, 60vw, ${Math.round(420 * ratio)}px)` }}>
       {near ? (
         <video
           src={attachmentUrl(a.id)}
+          poster={thumbUrl(a)}
           controls
           preload="metadata"
           onLoadedMetadata={(e) => !(a.width && a.height) && e.currentTarget.videoWidth > 0 && setSeen(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
         />
       ) : (
         <span className="video-wait" aria-label="Video">
+          <img src={thumbUrl(a)} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.display = 'none')} />
           <Icon name="play" size={34} />
         </span>
       )}
@@ -1089,7 +1093,7 @@ function mediaLabel(m: Message): string {
 function mediaThumb(m: Message): string | null {
   if (m.sticker) return m.sticker.url;
   const a = m.attachments[0];
-  return a && !a.missing && !a.gif && a.contentType.startsWith('image/') ? attachmentUrl(a.id) : null;
+  return a && !a.missing && !a.gif && a.contentType.startsWith('image/') ? thumbUrl(a) : null;
 }
 
 /** Edit history: the message as it is now, then each earlier version, newest first. */

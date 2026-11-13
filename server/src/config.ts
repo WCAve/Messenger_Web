@@ -53,6 +53,8 @@ export const config = {
   /** The same for WhatsApp: WAHA takes at most 50 MB per request, and a file grows by a third as text (base64). */
   waSendLimitMb: Number(process.env.WA_SEND_LIMIT_MB ?? 36),
   uploadsDir: path.join(dataDir, 'uploads'),
+  /** Small versions of photos and a still of each video, for the chat (made when needed; safe to delete). */
+  thumbsDir: path.join(dataDir, 'thumbs'),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Giphy API key for the GIF picker (free at developers.giphy.com). Without it the GIF tab explains how to add one. */
   giphyApiKey: process.env.GIPHY_API_KEY?.trim() || null,

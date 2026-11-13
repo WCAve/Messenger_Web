@@ -112,6 +112,7 @@ export interface Attachment {
   height?: number | null;
   voiceNote?: boolean;
   caption?: string | null;
+  tiny?: string; // photos and videos: a blurred 24 px preview (data: URL), shown while the thumbnail loads
   gif?: boolean;
   sticker?: boolean; // WhatsApp sticker
   pending?: boolean; // WhatsApp history: not on the server yet, fetched when opened (can take a while)

@@ -87,6 +87,7 @@ export interface Attachment {
   height?: number | null;
   voiceNote?: boolean;
   caption?: string | null;
+  tiny?: string; // photos and videos: a blurred 24 px preview (data: URL), shown while the thumbnail loads
   sticker?: boolean; // WhatsApp sticker (a WebP image)
   gif?: boolean; // silent looping video (Signal's GIFs)
   missing?: boolean; // WhatsApp: the file couldn't be fetched any more (old media)
@@ -167,6 +168,8 @@ export interface MessageRow {
 export const storeHooks = {
   /** Disappearing-message timers started or changed: reschedule the sweeper. */
   timersChanged: () => {},
+  /** A message with photos or videos was stored: fill in sizes and thumbnails (mediasize.ts). */
+  mediaAdded: (_messageId: number) => {},
 };
 
 // ---------- self ----------
@@ -1150,7 +1153,9 @@ export function insertMessage(m: {
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
   if (m.expiresAt) storeHooks.timersChanged();
-  return msgById.get(Number(info.lastInsertRowid));
+  const id = Number(info.lastInsertRowid);
+  if (m.attachments?.some((a) => a.contentType.startsWith('image/') || a.contentType.startsWith('video/'))) setImmediate(() => storeHooks.mediaAdded(id));
+  return msgById.get(id);
 }
 
 const UPDATABLE = new Set(['body', 'status', 'error', 'read', 'edited', 'deleted', 'reactions', 'attachments', 'sent_ts', 'ts_confirmed', 'ranges', 'preview', 'expires_at', 'poll', 'ext_id', 'ext_raw', 'forwarded', 'quote']);
@@ -1264,8 +1269,9 @@ export function quotedMedia(conversationId: number, q: Quote): { kind: string; l
   const t = a.contentType ?? '';
   if (a.sticker || row.kind === 'sticker') return { kind: 'sticker', label: 'Sticker', thumb: url };
   if (a.gif) return { kind: 'gif', label: 'GIF', thumb: null };
-  if (t.startsWith('image/')) return { kind: 'image', label: atts.length > 1 ? `${atts.length} photos` : 'Photo', thumb: url };
-  if (t.startsWith('video/')) return { kind: 'video', label: 'Video', thumb: null };
+  const small = (kind: string) => (url ? `${url}/thumb?kind=${kind}` : null); // the small version (thumbs.ts)
+  if (t.startsWith('image/')) return { kind: 'image', label: atts.length > 1 ? `${atts.length} photos` : 'Photo', thumb: /gif|svg|webp/.test(t) ? url : small('image') };
+  if (t.startsWith('video/')) return { kind: 'video', label: 'Video', thumb: small('video') };
   if (t.startsWith('audio/')) return { kind: 'audio', label: a.voiceNote ? 'Voice message' : 'Audio', thumb: null };
   return { kind: 'file', label: a.filename || 'File', thumb: null };
 }
