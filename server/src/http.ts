@@ -126,6 +126,8 @@ export function sendJson(res: ServerResponse, status: number, data: unknown) {
   res.end(body);
 }
 
+const QUICK = /^\/api\/(conversations|messages|state|search|session)(\/|$)/;
+
 export class Router {
   private routes: Route[] = [];
 
@@ -203,6 +205,7 @@ export class Router {
       cookies: parseCookies(req.headers.cookie),
       status: 200,
     };
+    const started = performance.now();
     try {
       if (route.auth && !this.opts.isAuthed(ctx)) throw new HttpError(401, 'Not logged in');
       if (route.raw) {
@@ -222,6 +225,9 @@ export class Router {
       if (!res.headersSent) sendJson(res, status, { error: (e as Error).message });
       else res.end();
     }
+    // Answers that should always be quick (opening a chat, the chat list): note it when they weren't
+    const ms = Math.round(performance.now() - started);
+    if (ms > 1000 && !route.raw && QUICK.test(url.pathname)) this.opts.log('warn', `slow: ${req.method} ${url.pathname} took ${ms} ms`);
     return true;
   }
 }

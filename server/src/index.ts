@@ -39,6 +39,20 @@ const router = buildRouter(log);
 clearUploads(); // half-finished uploads from before a restart can't be finished
 void videoChip((m) => log('info', m)); // checked once at start, so the log says which is used
 
+// Note when the server was too busy to answer anyone (a stuck moment slows every chat that opens then).
+{
+  let expected = Date.now() + 500;
+  let lastNote = 0;
+  setInterval(() => {
+    const late = Date.now() - expected;
+    expected = Date.now() + 500;
+    if (late > 400 && Date.now() - lastNote > 10_000) {
+      lastNote = Date.now();
+      log('warn', `slow: the server was busy for ${late} ms (nothing could be answered meanwhile)`);
+    }
+  }, 500).unref();
+}
+
 // ---------- static web UI ----------
 const here = path.dirname(fileURLToPath(import.meta.url));
 const webDist = [process.env.WEB_DIST, path.resolve(here, '../../web/dist'), path.resolve(here, '../public')].find(

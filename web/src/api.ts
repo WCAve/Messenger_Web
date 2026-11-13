@@ -116,6 +116,7 @@ export const api = {
     b: RichText & { quoteId?: number; previewUrl?: string; attachments?: ({ name: string; type: string; data: string } | { name: string; type: string; upload: string })[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
+  clientLog: (message: string) => call<{ ok: true }>('POST', '/api/client-log', { message }),
   uploadLimits: () => call<UploadLimits>('GET', '/api/uploads/limits'),
   edit: (id: number, b: RichText) => call<Message>('POST', `/api/messages/${id}/edit`, b),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),

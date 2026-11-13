@@ -140,6 +140,11 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 
 ## Debugging on the server
 
+**Slowness**: `docker logs -t signal-web 2>&1 | grep "slow:\|browser: opening"`. The server logs answers
+that should be quick but took over a second (http.ts `QUICK`), and moments it was too busy to answer
+anything (index.ts). The web app reports a chat that took over 1.5 s to open, with the time split into
+waiting for a free connection, server, download and drawing (Chat.tsx `reportSlowOpen`).
+
 The app's data is in the container at `/data` (`signal-web.db`, `attachments/`, `avatars/`,
 `whatsapp-backup/`). Read-only queries can be run without stopping anything:
 

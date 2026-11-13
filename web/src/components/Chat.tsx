@@ -105,9 +105,15 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
     setEditing(null);
     setLoadError(null);
     if (getState().messages[id]) return;
+    const started = performance.now();
     api
       .messages(id, undefined, PAGE)
-      .then((list) => upsertMessages(id, list, { hasMore: list.length === PAGE }))
+      .then((list) => {
+        const fetched = performance.now();
+        upsertMessages(id, list, { hasMore: list.length === PAGE });
+        // Slow? Say where the time went, in the server's log (see reportSlowOpen)
+        requestAnimationFrame(() => requestAnimationFrame(() => reportSlowOpen(id, started, fetched, list.length)));
+      })
       .catch((e) => setLoadError(e.message));
   }, [id]);
 
@@ -1302,6 +1308,28 @@ function LightboxMedia({ att }: { att: Attachment }) {
       {waiting && <p className="lightbox-note">Getting this from WhatsApp…</p>}
     </>
   );
+}
+
+/**
+ * Opening a chat that isn't in memory yet should take well under a second. When it took more than
+ * 1.5 s, the server's log gets where the time went: waiting for a free connection (the browser has only
+ * a few per site), the server working, the download, and drawing the messages.
+ */
+function reportSlowOpen(id: number, started: number, fetched: number, count: number) {
+  const total = performance.now() - started;
+  if (total < 1500) return;
+  const entry = performance
+    .getEntriesByType('resource')
+    .filter((e): e is PerformanceResourceTiming => e.name.includes(`/api/conversations/${id}/messages`) && e.startTime >= started - 5)
+    .pop();
+  const ms = (n: number) => `${Math.round(n)} ms`;
+  const parts = entry
+    ? [`waiting for a connection ${ms(entry.requestStart - entry.startTime)}`, `server ${ms(entry.responseStart - entry.requestStart)}`, `download ${ms(entry.responseEnd - entry.responseStart)}`]
+    : [`fetch ${ms(fetched - started)}`];
+  const busy = performance.getEntriesByType('resource').filter((e) => e !== entry && e.startTime < fetched && e.startTime + e.duration > started).length;
+  void api
+    .clientLog(`opening chat ${id} took ${ms(total)}: ${parts.join(', ')}, drawing ${count} messages ${ms(performance.now() - fetched)}; ${busy} other downloads at the same time`)
+    .catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

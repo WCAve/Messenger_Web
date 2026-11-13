@@ -821,6 +821,12 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return listMessages(c.id, before, limit);
   });
 
+  // The web app reports a slow chat opening (with where the time went), so it ends up in the log.
+  r.post('/api/client-log', (ctx) => {
+    log('warn', `browser: ${String(ctx.body?.message ?? '').replace(/[\r\n]+/g, ' ').slice(0, 400)}`);
+    return { ok: true };
+  });
+
   r.get('/api/emoji/usage', () => ({ usage: emojiUsage() }));
   r.post('/api/emoji/alias', (ctx) => {
     recordAlias(String(ctx.body?.emoji ?? ''), String(ctx.body?.code ?? '').toLowerCase());
