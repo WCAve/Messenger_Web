@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-10',
+    date: '13 November 2026',
+    items: ['Dark green theme: unread chats stand out more, with a bright green count and time. Muted chats with unread messages now show a calmer green count instead of grey.'],
+  },
+  {
     id: '2026-11-13-9',
     date: '13 November 2026',
     items: ['Click a sticker (Signal or WhatsApp) to see it large in the photo viewer; you can download it there too.'],

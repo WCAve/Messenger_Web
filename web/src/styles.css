@@ -37,6 +37,11 @@
   --row-active: var(--ultra-soft);
   --header: var(--sidebar);
   --self-hue: 221; /* colour of "You" in quotes and reply bars */
+  /* Unread counts in the chat list (badge, its digits, the time next to it), and for muted chats */
+  --unread: var(--ultra);
+  --unread-ink: var(--on-accent);
+  --unread-muted: var(--ink-3);
+  --unread-muted-time: var(--ultra);
   --font: 'Messenger Emoji', system-ui, -apple-system, 'Segoe UI Variable Text', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   color-scheme: light;
 }
@@ -109,6 +114,11 @@
   --shadow: 0 1px 0.5px rgba(11, 20, 26, 0.13);
   --name-l: 66%;
   --name-s: 62%;
+  /* Unread stands out: WhatsApp's bright green; muted chats the calmer green */
+  --unread: #25d366;
+  --unread-ink: #0b141a;
+  --unread-muted: #00a884;
+  --unread-muted-time: #00a884;
   color-scheme: dark;
 }
 
@@ -509,8 +519,11 @@ p {
   color: var(--ink-3);
 }
 .chat-row.unread time {
-  color: var(--ultra);
+  color: var(--unread);
   font-weight: 600;
+}
+.chat-row.muted.unread time {
+  color: var(--unread-muted-time);
 }
 .preview {
   flex: 1;
@@ -538,8 +551,8 @@ p {
   height: 21px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--ultra);
-  color: var(--on-accent);
+  background: var(--unread);
+  color: var(--unread-ink);
   font-size: 12px;
   font-weight: 700;
   display: grid;
@@ -2679,7 +2692,7 @@ body.resizing * {
   color: var(--ink-3);
 }
 .chat-row.muted .badge {
-  background: var(--ink-3);
+  background: var(--unread-muted);
 }
 .draft-label {
   color: var(--ultra);
