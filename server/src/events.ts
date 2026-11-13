@@ -10,9 +10,11 @@ export type ServerEvent =
   | { type: 'presence'; conversationId: number; online: boolean; lastSeen: number | null }
   | { type: 'receipt'; messageId: number } // per-recipient receipt changed (overall status didn't)
   | { type: 'remove'; conversationId: number; messageId: number } // disappeared
-  | { type: 'group'; conversationId: number }; // group details changed: open group info reloads
+  | { type: 'group'; conversationId: number } // group details changed: open group info reloads
+  | { type: 'ping' }; // every 25 s: a page that hears nothing for a minute knows its connection is dead
 
 const clients = new Set<ServerResponse>();
+const stalled = new WeakSet<ServerResponse>(); // tests only: connections that silently stop getting anything
 
 export function addClient(req: IncomingMessage, res: ServerResponse, initial: ServerEvent[]) {
   res.writeHead(200, {
@@ -33,6 +35,7 @@ export function addClient(req: IncomingMessage, res: ServerResponse, initial: Se
 const MAX_QUEUED = 4 * 1024 * 1024;
 
 function send(res: ServerResponse, data: string) {
+  if (stalled.has(res)) return;
   if (res.writableLength > MAX_QUEUED) {
     clients.delete(res);
     res.destroy(); // the browser reconnects and reloads what it missed
@@ -46,10 +49,18 @@ export function broadcast(event: ServerEvent) {
   for (const res of clients) send(res, data);
 }
 
-// Keep idle connections (and any proxy in between) from timing out.
+// Keep idle connections (and any proxy in between) from timing out, and let pages see the connection is
+// alive: a connection can die without either side noticing (sleep, network change, a proxy), and then
+// the page would wait forever. This is a real event (not an SSE comment) so the page can see it.
+const PING_MS = Number(process.env.EVENTS_PING_MS) || 25_000;
 setInterval(() => {
-  for (const res of clients) send(res, ': ping\n\n');
-}, 25_000).unref();
+  for (const res of clients) send(res, `data: {"type":"ping"}\n\n`);
+}, PING_MS).unref();
+
+/** Tests only (E2E_HOOKS=1): every open connection goes silent without closing, like a dead network. */
+export function stallAllClients() {
+  for (const res of clients) stalled.add(res);
+}
 
 /** Drop every live connection (after "sign out everywhere"); browsers reconnect and hit the login page. */
 export function closeAllClients() {

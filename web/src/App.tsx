@@ -226,14 +226,39 @@ function useLiveEvents() {
       }
     };
 
+    // The server sends something at least every 25 s. A connection can die without the browser noticing
+    // (sleep, Wi-Fi change, a proxy dropping it): then nothing arrives and the page would wait forever.
+    // So when nothing came for a minute, or when you come back to the tab and it has been quiet too
+    // long, it reconnects (and the resync on open fetches what was missed).
+    let lastHeard = Date.now();
+    const SILENT = 60_000;
+    const reconnect = () => {
+      if (closed) return;
+      es?.close();
+      setState({ live: false });
+      open();
+    };
+    const checkAlive = () => {
+      if (Date.now() - lastHeard > SILENT) reconnect();
+    };
+    const watchdog = setInterval(checkAlive, 10_000);
+    const onVisible = () => document.visibilityState === 'visible' && checkAlive();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', reconnect); // network back: the old connection is likely gone
+    window.addEventListener('focus', checkAlive);
+
     const open = () => {
+      lastHeard = Date.now();
       es = new EventSource('/api/events');
       es.onopen = () => {
+        lastHeard = Date.now();
         setState({ live: true });
         void resync();
       };
       es.onmessage = (ev) => {
+        lastHeard = Date.now();
         const e = JSON.parse(ev.data) as ServerEvent;
+        if (e.type === 'ping') return;
         applyEvent(e);
         if (e.type === 'message') notify(e);
       };
@@ -250,6 +275,10 @@ function useLiveEvents() {
     open();
     return () => {
       closed = true;
+      clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', reconnect);
+      window.removeEventListener('focus', checkAlive);
       es?.close();
     };
   }, []);

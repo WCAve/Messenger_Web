@@ -75,7 +75,7 @@ import {
   recordLoginFailure,
 } from './auth.js';
 import { config } from './config.js';
-import { addClient, broadcast, closeAllClients } from './events.js';
+import { addClient, broadcast, closeAllClients, stallAllClients } from './events.js';
 import { type Ctx, HttpError, Router, sendFile, setCookie } from './http.js';
 import { getState, recheckSoon, refreshDirectory } from './signal.js';
 import { groupRecipientId, sentTimestamp, signalApi } from './signal-api.js';
@@ -456,6 +456,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   );
 
   // ---------- authenticated ----------
+
+  if (process.env.E2E_HOOKS === '1') r.post('/api/test/stall-events', () => (stallAllClients(), { ok: true }));
 
   r.get('/api/events', (ctx) => {
     addClient(ctx.req, ctx.res, [

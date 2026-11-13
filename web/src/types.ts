@@ -273,4 +273,5 @@ export type ServerEvent =
   | { type: 'presence'; conversationId: number; online: boolean; lastSeen: number | null }
   | { type: 'receipt'; messageId: number }
   | { type: 'remove'; conversationId: number; messageId: number }
-  | { type: 'group'; conversationId: number };
+  | { type: 'group'; conversationId: number }
+  | { type: 'ping' };

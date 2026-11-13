@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13',
+    date: '13 November 2026',
+    items: [
+      'Fixed: after the computer slept or the network changed, the page could stop showing new messages until you refreshed. It now notices within a minute (or as soon as you come back to the tab) and catches up by itself.',
+    ],
+  },
+  {
     id: '2026-11-12',
     date: '12 November 2026',
     items: [

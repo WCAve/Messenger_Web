@@ -113,6 +113,9 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 - **Custom link previews** (`/api/send/link-custom-preview`) aren't implemented on WEBJS: on that error the
   message goes as text with WhatsApp's own preview, and kv `wa_no_custom_preview` skips the attempt from then on.
 - **Sending video** needs WAHA's Chrome image (`devlikeapro/waha:chrome`); Chromium lacks the codecs.
+- **A live connection can die silently** (sleep, network change, a proxy): the browser keeps waiting and
+  shows nothing new. The server sends `{type:'ping'}` every 25 s; the page reconnects (and resyncs) after
+  60 s of silence, on coming back to the tab, or when the network returns (App.tsx `useLiveEvents`).
 - **Browsers allow ~6 connections per site.** Nothing may hold a request open: pictures and files that
   aren't ready answer at once (404 + retry) and are fetched in the background.
 - **Signal's REST API** can't upload sticker packs, join groups by link, make a new invite link or remove
