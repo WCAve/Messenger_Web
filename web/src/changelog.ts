@@ -15,6 +15,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-11-13',
     date: '13 November 2026',
     items: [
+      'New player for voice messages and audio, like WhatsApp’s: picture, play button, the recording’s waveform (click to jump), time, and 1× / 1.5× / 2× speed. Only one plays at a time.',
       'WhatsApp: audio files you send (a recording, .m4a, .mp3) arrive as a voice message you can play, instead of a file to download. Text with it follows as its own message.',
       'Reply privately: on someone’s message in a group, the new button opens your one-to-one chat with them, replying to that message. On WhatsApp it’s a real private reply; on Signal the quote carries the text along. Private replies you get show which group they’re about; click to go there.',
       'Clicking a quote (or a search result) now briefly lights up the message it jumps to, once the scroll has landed, so you see straight away which one it is.',

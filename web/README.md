@@ -30,6 +30,7 @@ with a comment saying what it does; this is the map.
 | `Picker.tsx` | Emoji / sticker / GIF picker |
 | `StickerManager.tsx` | Sticker manager |
 | `Export.tsx` | The Export window: pick chats, formats, photos, period; progress; saves the ZIP |
+| `VoicePlayer.tsx` | Player for voice messages and audio: picture, play, waveform from the sound, speed |
 | `Settings.tsx` | Settings main list and pages |
 | `Extras.tsx` | Polls, forwarding |
 | `Setup.tsx`, `Login.tsx` | Link screen (QR code), sign-in |

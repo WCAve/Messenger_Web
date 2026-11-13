@@ -24,6 +24,18 @@ import zlib from 'node:zlib';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const GIF_MP4 = fs.readFileSync(path.join(FIXTURES, 'gif.mp4')); // no sound track → shown as a GIF
 const CLIP_MP4 = fs.readFileSync(path.join(FIXTURES, 'clip.mp4')); // has sound → normal video
+// A 3-second recording: loud, quiet, loud (so a waveform can be checked)
+const VOICE = (() => {
+  const rate = 8000, n = rate * 3, buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVEfmt ', 8); buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34); buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) {
+    const loud = i < rate || i >= 2 * rate ? 0.8 : 0.05;
+    buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 440 * i) / rate) * loud * 32767), 44 + i * 2);
+  }
+  return buf;
+})();
 
 const PORT = Number(process.env.MOCK_PORT ?? 8080);
 const SELF = { number: '+31600000001', uuid: '00000000-0000-4000-8000-000000000001' };
@@ -443,7 +455,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/mock/signal-groups') return json(res, 200, Object.fromEntries(sgroups));
     if (p.startsWith('/v1/attachments/')) {
       const id = decodeURIComponent(p.split('/').pop());
-      const [type, body] = id === 'mockgif1.mp4' ? ['video/mp4', GIF_MP4] : id === 'mockclip1.mp4' ? ['video/mp4', CLIP_MP4] : ['image/png', PHOTO];
+      const [type, body] = id === 'mockgif1.mp4' ? ['video/mp4', GIF_MP4] : id === 'mockclip1.mp4' ? ['video/mp4', CLIP_MP4] : id.endsWith('.wav') ? ['audio/wav', VOICE] : ['image/png', PHOTO];
       res.writeHead(200, { 'content-type': type });
       return res.end(body);
     }

@@ -21,6 +21,7 @@ import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
+import { VoicePlayer } from './VoicePlayer';
 import { getPrefs, usePrefs } from '../prefs';
 import { getState, setDraft, setHasNewer, setState, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, MediaItem, Message, Network } from '../types';
@@ -765,7 +766,7 @@ const MessageItem = memo(function MessageItem({
           </div>
         )}
         {others.map((a) => (
-          <AttachmentView key={a.id} a={a} />
+          <AttachmentView key={a.id} a={a} m={m} />
         ))}
         {!m.deleted && m.preview && <LinkPreviewCard p={m.preview} onLoad={onMediaLoad} />}
         {m.deleted ? (
@@ -1004,13 +1005,13 @@ function PendingPlayable({ a }: { a: Attachment }) {
   );
 }
 
-function AttachmentView({ a }: { a: Attachment }) {
+function AttachmentView({ a, m }: { a: Attachment; m?: Message }) {
   const url = attachmentUrl(a.id);
   if (a.missing) return <MissingMedia a={a} />;
   const playable = a.contentType.startsWith('video/') || a.contentType.startsWith('audio/') || a.voiceNote;
   if (a.pending && playable) return <PendingPlayable a={a} />;
   if (a.contentType.startsWith('video/')) return <video className="video" src={url} controls preload="metadata" />;
-  if (a.contentType.startsWith('audio/') || a.voiceNote) return <audio className="audio" src={url} controls preload="metadata" />;
+  if (a.contentType.startsWith('audio/') || a.voiceNote) return m ? <VoicePlayer a={a} m={m} /> : <audio className="audio" src={url} controls preload="metadata" />;
   return (
     <a className="file" href={attachmentUrl(a.id, a.filename ?? a.id)}>
       <Icon name="file" size={26} />
