@@ -115,6 +115,7 @@ import {
   setConversationTimer,
   messageDto,
   messageEdits,
+  quoteFor,
   deletedContent,
   messageReceipts,
   recipientFor,
@@ -668,8 +669,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const c = conv(ctx);
     const id = String(ctx.body?.id ?? '');
     if (!isSafeId(id) || !fs.existsSync(localPath(id))) throw new HttpError(404, 'Sticker not found');
-    const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
-    const quote = quoted && quoted.conversation_id === c.id && !quoted.deleted ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' } : null;
+    const quote = quoteFor(c, ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined);
     if (isWa(c)) return messageDto(await wa(() => sendStickerWa(c, { id }, quote)));
     const account = accountFor(c);
     const att: Attachment = { id, contentType: stickerMime(id), size: fs.statSync(localPath(id)).size };
@@ -845,11 +845,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       base64.push(`data:${type};filename=${name};base64,${f.data}`);
     }
 
-    const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
-    const quote =
-      quoted && quoted.conversation_id === c.id && !quoted.deleted
-        ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' }
-        : null;
+    const quote = quoteFor(c, ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined); // also a private reply to a group message
 
     // A Signal pack sticker in a WhatsApp chat: sent the WhatsApp way (WhatsApp makes a sticker of the image).
     if (sticker && isWa(c)) {
@@ -1194,9 +1190,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/conversations/:id/wa-sticker', async (ctx) => {
     const c = conv(ctx);
     if (!isWa(c)) throw new HttpError(400, 'Not a WhatsApp chat');
-    const quoted = ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined;
-    const quote =
-      quoted && quoted.conversation_id === c.id && !quoted.deleted ? { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' } : null;
+    const quote = quoteFor(c, ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined);
     const src = typeof ctx.body?.id === 'string' ? { id: ctx.body.id } : typeof ctx.body?.image === 'string' ? { image: ctx.body.image } : null;
     if (!src) throw new HttpError(400, 'Pick a sticker or an image');
     return messageDto(await wa(() => sendStickerWa(c, src, quote)));

@@ -1218,7 +1218,13 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
       const rich = await richFromWa(m.replyTo.body, conv);
       text = renderBody(rich.body, rich.ranges ? JSON.stringify(rich.ranges) : null)?.text ?? m.replyTo.body;
     }
-    quote = { sentTs: q?.sent_ts ?? 0, author: qAuthor, text: text || (isPreviewData(m.replyTo.body) ? 'Photo' : m.replyTo.hasMedia || q?.attachments ? 'Attachment' : '') };
+    quote = {
+      sentTs: q?.sent_ts ?? 0,
+      author: qAuthor,
+      text: text || (isPreviewData(m.replyTo.body) ? 'Photo' : m.replyTo.hasMedia || q?.attachments ? 'Attachment' : ''),
+      // A private reply: the quoted message is in a group
+      ...(q && q.conversation_id !== conv.id ? { chat: q.conversation_id } : {}),
+    };
   }
 
   const ts = freeTimestamp(conv.id, Math.round(Number(m.timestamp) * 1000) || Date.now(), author);
@@ -1916,7 +1922,9 @@ export async function deliverWa(
   const wa = toWaText(p.text, p.ranges ?? null, jidFor);
   let reply_to: string | undefined;
   if (p.quote) {
-    const q = db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ?').get(conv.id, p.quote.sentTs);
+    // A private reply quotes a message in a group: WhatsApp links it like any reply (by the group message's id).
+    const quotedChat = (p.quote as { chat?: number }).chat ?? conv.id;
+    const q = db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ?').get(quotedChat, p.quote.sentTs);
     if (q) {
       reply_to = (await linkableQuoteId(q)) ?? undefined;
       if (!reply_to) {

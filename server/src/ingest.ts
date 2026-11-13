@@ -10,6 +10,8 @@ import {
   type ConversationRow,
   type Reaction,
   contactKey,
+  findMessageAt,
+  findQuotedElsewhere,
   contactByKeyOrId,
   freeTimestamp,
   conversationDto,
@@ -309,13 +311,18 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
   }
   if (!body && !attachments.length && kind === 'message') return; // profile key updates, group updates, typing-only payloads, etc.
 
-  const quote = dm.quote
+  let quote: { sentTs: number; author: string; text: string; chat?: number } | null = dm.quote
     ? {
         sentTs: dm.quote.id,
         author: contactKey(dm.quote.authorUuid, dm.quote.authorNumber ?? dm.quote.author),
         text: resolveMentions(dm.quote.text, dm.quote.mentions) ?? (dm.quote.attachments?.length ? 'Attachment' : ''),
       }
     : null;
+  // A reply in a one-to-one chat quoting a message that's not in it: a private reply to a group message.
+  if (quote && conv.kind !== 'group' && !findMessageAt(conv.id, quote.sentTs)) {
+    const elsewhere = findQuotedElsewhere(conv.id, quote.sentTs, quote.author);
+    if (elsewhere) quote = { ...quote, chat: elsewhere.conversation_id };
+  }
 
   const row = insertMessage({
     conversationId: conv.id,

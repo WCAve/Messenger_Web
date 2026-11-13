@@ -196,6 +196,8 @@ export interface Message {
     /** What the quoted message holds when it's not just text (a thumbnail for stickers and photos). */
     media?: { kind: 'sticker' | 'gif' | 'image' | 'video' | 'audio' | 'file'; label: string; thumb: string | null };
     unlinked?: boolean;
+    /** A private reply: the quoted message is in this group. */
+    chat?: { id: number; title: string };
   } | null;
   reactions: { emoji: string; author: string; authorName: string }[];
   status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed' | null;

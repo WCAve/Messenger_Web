@@ -104,6 +104,10 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 - **Signal drops the middle-name field** of your phone's contacts, where Dutch tussenvoegsels often are
   ("Mary de Ruijter" → "Mary Ruijter"). `contactName` fills in words missing *in the middle* from the
   Signal profile or the WhatsApp contact with the same number (`fullerName`).
+- **Private replies** quote a group message from a one-to-one chat: the quote has `chat` (the group's
+  conversation id), set by `quoteFor` when sending and found by id (WhatsApp) or time + author (Signal,
+  `findQuotedElsewhere`) when receiving. WhatsApp links it by the group message's id; Signal has no
+  private replies, but its quotes carry their text, so it shows as a normal quote.
 - **Replies** only link when WhatsApp Web has the quoted message; otherwise they go as a text quote.
 - **HD photos/videos** arrive as two messages; the second has `associationType: *_DUAL_UPLOAD` and
   `parentMsgKey`. They're shown as one.

@@ -97,6 +97,35 @@ export interface Quote {
   author: string;
   text?: string | null;
   unlinked?: boolean; // WhatsApp: sent as quoted text, because WhatsApp Web no longer had the message
+  chat?: number; // a private reply: the quoted message is in this (group) chat, not this one
+}
+
+/**
+ * The quote for a reply: a message in this chat, or (a private reply) a message someone else sent in
+ * a group on the same network. Undefined when the message can't be quoted here.
+ */
+export function quoteFor(c: ConversationRow, quoted: MessageRow | undefined): Quote | null {
+  if (!quoted || quoted.deleted) return null;
+  const base = { sentTs: quoted.sent_ts, author: quoted.author, text: renderBody(quoted.body, quoted.ranges)?.text ?? '' };
+  if (quoted.conversation_id === c.id) return base;
+  const from = getConversation(quoted.conversation_id);
+  if (!from || from.kind !== 'group' || from.network !== c.network || c.kind === 'group' || quoted.outgoing) return null;
+  return { ...base, chat: from.id };
+}
+
+/** A message in this chat at exactly this time (Signal's message identity). */
+export function findMessageAt(conversationId: number, sentTs: number): MessageRow | undefined {
+  return db.prepare<[number, number], MessageRow>('SELECT * FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1').get(conversationId, sentTs);
+}
+
+/** Signal: a reply quoting a message that isn't in this chat may be a private reply to a group message. */
+export function findQuotedElsewhere(conversationId: number, sentTs: number, author: string): MessageRow | undefined {
+  return db
+    .prepare<[number, string, number], MessageRow>(
+      `SELECT m.* FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.sent_ts = ? AND m.author = ? AND c.kind = 'group' AND m.conversation_id != ? LIMIT 1`,
+    )
+    .get(sentTs, author, conversationId);
 }
 
 export interface Reaction {
@@ -1303,7 +1332,8 @@ export function messageEdits(messageId: number) {
 }
 
 function quoteDto(conversationId: number, quote: Quote) {
-  const media = quotedMedia(conversationId, quote);
+  const from = quote.chat && quote.chat !== conversationId ? getConversation(quote.chat) : undefined;
+  const media = quotedMedia(from?.id ?? conversationId, quote);
   let text = renderMentions(quote.text) ?? '';
   if (media && (!text || text === 'Attachment' || text === 'Photo')) text = ''; // the media label says it better
   return {
@@ -1313,6 +1343,7 @@ function quoteDto(conversationId: number, quote: Quote) {
     text,
     ...(media ? { media } : {}),
     ...(quote.unlinked ? { unlinked: true } : {}),
+    ...(from ? { chat: { id: from.id, title: from.group_name ?? 'Group' } } : {}), // a private reply to a group message
   };
 }
 

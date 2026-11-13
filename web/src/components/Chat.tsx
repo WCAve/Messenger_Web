@@ -76,6 +76,17 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const [chatMenu, setChatMenu, chatMenuRef] = useMenu();
   const hasNewer = useStore((s) => s.hasNewer[id] ?? false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // Reply privately: your one-to-one chat with whoever sent this group message, with it in the reply bar.
+  const replyPrivately = async (m: Message) => {
+    try {
+      const k = m.author;
+      const c = await api.startChat(k.startsWith('wa:') ? { network: 'whatsapp', jid: k.slice(3) } : k.startsWith('+') ? { number: k } : { uuid: k });
+      upsertConversation(c);
+      setState({ pendingReply: { conversationId: c.id, message: m }, activeId: c.id, panel: null });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
   const [reactTo, setReactTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -84,7 +95,10 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
 
   // Initial load
   useEffect(() => {
-    setReplyTo(null);
+    // "Reply privately" in a group opened this chat with that message in the reply bar
+    const pending = getState().pendingReply;
+    if (pending?.conversationId === id) setState({ pendingReply: null });
+    setReplyTo(pending?.conversationId === id ? pending.message : null);
     setReactTo(null);
     setEditing(null);
     setLoadError(null);
@@ -209,6 +223,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           hasMore={hasMore}
           hasNewer={hasNewer}
           onReply={(m) => (setEditing(null), setReplyTo(m))}
+          onReplyPrivately={(m) => void replyPrivately(m)}
           onEdit={(m) => (setReplyTo(null), setEditing(m))}
           onMoreReactions={setReactTo}
           onOpenImage={(att, msg) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt, conversationId: conversation.id, messageId: msg.id })}
@@ -257,6 +272,7 @@ function MessageList({
   hasMore,
   hasNewer,
   onReply,
+  onReplyPrivately,
   onEdit,
   onMoreReactions,
   onOpenImage,
@@ -266,6 +282,7 @@ function MessageList({
   hasMore: boolean;
   hasNewer: boolean;
   onReply: (m: Message) => void;
+  onReplyPrivately: (m: Message) => void;
   onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
   onOpenImage: (a: Attachment, m: Message) => void;
@@ -443,6 +460,7 @@ function MessageList({
         selected={selected === m.id}
         onSelect={() => setSelected((s) => (s === m.id ? null : m.id))}
         onReply={onReply}
+        onReplyPrivately={onReplyPrivately}
         onEdit={onEdit}
         onMoreReactions={onMoreReactions}
         onOpenImage={onOpenImage}
@@ -475,6 +493,10 @@ function MessageList({
 }
 
 // ---------------------------------------------------------------------------
+
+function groupTitle(conversationId: number) {
+  return getState().conversations[conversationId]?.title ?? 'a group';
+}
 
 function isFullyVisible(container: HTMLElement, el: HTMLElement) {
   const c = container.getBoundingClientRect();
@@ -616,6 +638,7 @@ const MessageItem = memo(function MessageItem({
   selected,
   onSelect,
   onReply,
+  onReplyPrivately,
   onEdit,
   onMoreReactions,
   onOpenImage,
@@ -630,6 +653,7 @@ const MessageItem = memo(function MessageItem({
   selected: boolean;
   onSelect: () => void;
   onReply: (m: Message) => void;
+  onReplyPrivately: (m: Message) => void;
   onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
   onOpenImage: (a: Attachment, m: Message) => void;
@@ -695,9 +719,14 @@ const MessageItem = memo(function MessageItem({
           </div>
         )}
         {m.quote && (
-          <button className="quote" onClick={() => onJump(m.quote!.sentAt)} style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
+          <button
+            className="quote"
+            onClick={() => (m.quote!.chat ? void jumpToMessage(m.quote!.chat.id, m.quote!.sentAt).catch(() => {}) : onJump(m.quote!.sentAt))}
+            title={m.quote.chat ? `Open it in ${m.quote.chat.title}` : undefined}
+            style={{ ['--hue' as string]: m.quote.author === 'self' ? 'var(--self-hue)' : hueFor(m.quote.author) }}>
             <strong>
               {m.quote.author === 'self' ? 'You' : m.quote.authorName}
+              {m.quote.chat && <span className="quote-note"> · {m.quote.chat.title}</span>}
               {m.quote.unlinked && <span className="quote-note" title="WhatsApp no longer had this message, so the reply was sent with the quoted text"> · quoted as text</span>}
             </strong>
             <span>
@@ -828,6 +857,11 @@ const MessageItem = memo(function MessageItem({
           {canAct && (
             <button className="icon-btn sm" onClick={() => onReply(m)} aria-label="Reply" title="Reply">
               <Icon name="reply" size={18} />
+            </button>
+          )}
+          {canAct && group && !m.outgoing && m.author !== 'unknown' && (
+            <button className="icon-btn sm" onClick={() => onReplyPrivately(m)} aria-label="Reply privately" title={`Reply privately to ${m.authorName}`}>
+              <Icon name="reply-private" size={18} />
             </button>
           )}
           {canEdit(m, network) && (
@@ -1823,7 +1857,10 @@ function Composer({
       {replyTo && !editing && (
         <div className="reply-preview" style={{ ['--hue' as string]: replyTo.author === 'self' ? 'var(--self-hue)' : hueFor(replyTo.author) }}>
           <div>
-            <strong>Replying to {replyTo.author === 'self' ? 'yourself' : replyTo.authorName}</strong>
+            <strong>
+              {replyTo.conversationId !== conversation.id ? `Replying privately to ${replyTo.authorName}` : `Replying to ${replyTo.author === 'self' ? 'yourself' : replyTo.authorName}`}
+              {replyTo.conversationId !== conversation.id && <span className="quote-note"> · {groupTitle(replyTo.conversationId)}</span>}
+            </strong>
             <span>
               <Emojified text={replyTo.body || mediaLabel(replyTo)} />
             </span>

@@ -47,6 +47,7 @@ export interface State {
   editHistory: Message | null; // the edit history window
   deletedView: Message | null; // what a deleted message said
   exportDialog: { preselect: number[] } | null; // the Export window
+  pendingReply: { conversationId: number; message: Message } | null; // "Reply privately": the reply bar to open in that chat
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
   groupTick: Record<number, number>; // bumped when a group's details change
@@ -77,6 +78,7 @@ let state: State = {
   editHistory: null,
   deletedView: null,
   exportDialog: null,
+  pendingReply: null,
 };
 
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
