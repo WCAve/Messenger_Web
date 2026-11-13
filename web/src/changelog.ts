@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-7',
+    date: '13 November 2026',
+    items: ['Upright videos whose size wasn\u2019t known yet no longer show with wide black bars: the video takes its own shape as soon as it starts loading.'],
+  },
+  {
     id: '2026-11-13-6',
     date: '13 November 2026',
     items: [

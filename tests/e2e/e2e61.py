@@ -69,6 +69,27 @@ with sync_playwright() as p:
     assert img('staand')['height'] > img('staand')['width'] and img('liggend')['width'] > img('liggend')['height']
     v = page.locator('.msg.out:has-text("filmpje") .video').bounding_box(); print('video box:', v)
     assert v['height'] > v['width']
+    # A video whose size isn't known (older messages, before the server filled it in): the box takes the
+    # video's own shape once it loads, instead of a wide box with black bars
+    ctx3 = b.new_context(viewport={'width': 1400, 'height': 900})
+    page = ctx3.new_page(); page.on('pageerror', lambda e: errors.append(str(e)))
+    def no_sizes(route):
+        r = route.fetch(); data = r.json()
+        for m in (data['messages'] if isinstance(data, dict) else data):
+            for a in m.get('attachments', []):
+                if a['contentType'].startswith('video/'): a.pop('width', None); a.pop('height', None)
+        route.fulfill(response=r, json=data)
+    page.route('**/api/conversations/*/messages*', no_sizes)
+    page.goto('http://localhost:3000/'); page.fill('input[type=password]', 'testpassword'); page.click('button:has-text("Sign in")')
+    page.wait_for_selector('.chat-row:has-text("Alice")', timeout=20000)
+    page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.msg.out:has-text("filmpje") .video video')
+    box = None
+    for _ in range(40):
+        box = page.locator('.msg.out:has-text("filmpje") .video').bounding_box()
+        if box['height'] > box['width']: break
+        time.sleep(0.25)
+    print('unknown size, after loading:', box)
+    assert box['height'] > box['width'], box
     assert not errors, errors
     b.close()
 print('e2e61 ok')

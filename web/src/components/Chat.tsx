@@ -1034,11 +1034,18 @@ function LazyVideo({ a }: { a: Attachment }) {
     io.observe(el);
     return () => io.disconnect();
   }, [near]);
-  const ratio = a.width && a.height ? a.width / a.height : 16 / 9;
+  // Its size unknown (not filled in yet): 16:9 until the video says its own shape, then that
+  const [seen, setSeen] = useState<number | null>(null);
+  const ratio = a.width && a.height ? a.width / a.height : (seen ?? 16 / 9);
   return (
     <div ref={box} className="video" style={{ aspectRatio: String(ratio), width: `min(340px, 60vw, ${Math.round(420 * ratio)}px)` }}>
       {near ? (
-        <video src={attachmentUrl(a.id)} controls preload="metadata" />
+        <video
+          src={attachmentUrl(a.id)}
+          controls
+          preload="metadata"
+          onLoadedMetadata={(e) => !(a.width && a.height) && e.currentTarget.videoWidth > 0 && setSeen(e.currentTarget.videoWidth / e.currentTarget.videoHeight)}
+        />
       ) : (
         <span className="video-wait" aria-label="Video">
           <Icon name="play" size={34} />
