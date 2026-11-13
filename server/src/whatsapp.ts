@@ -1943,7 +1943,20 @@ export async function deliverWa(
       if (!file) continue;
       const kind = file.mimetype.startsWith('image/') && file.mimetype !== 'image/gif' ? 'sendImage' : file.mimetype.startsWith('video/') ? 'sendVideo' : 'sendFile';
       const caption = i === 0 && wa.text ? wa.text : undefined;
-      const res = await waha.sendMedia(kind, chatId, file, { caption, reply_to: i === 0 ? reply_to : undefined, mentions: i === 0 && wa.mentions.length ? wa.mentions : undefined });
+      const opts = { caption, reply_to: i === 0 ? reply_to : undefined, mentions: i === 0 && wa.mentions.length ? wa.mentions : undefined };
+      let res: Json;
+      if (file.mimetype.startsWith('audio/')) {
+        // Audio (a recording, an .m4a or .mp3): as a voice message, so it plays in the chat instead of
+        // being a file to download. WAHA converts it to the format WhatsApp needs. A voice message has no
+        // caption: the text follows as its own message. If WAHA can't, it goes as a file, as before.
+        try {
+          res = await waha.sendMedia('sendVoice', chatId, file, { reply_to: opts.reply_to });
+          if (caption) await waha.sendText(chatId, caption, { mentions: opts.mentions, linkPreview: true });
+        } catch (e) {
+          log.warn(`whatsapp: couldn't send audio as a voice message (${(e as Error).message}); sending it as a file`);
+          res = await waha.sendMedia('sendFile', chatId, file, opts);
+        }
+      } else res = await waha.sendMedia(kind, chatId, file, opts);
       if (i === 0) first = res;
     }
   } else if (p.preview && wa.text.includes(p.preview.url) && kvGet('wa_no_custom_preview') !== '1') {

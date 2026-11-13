@@ -550,6 +550,7 @@ const server = http.createServer(async (req, res) => {
       const record = { path: p, method: m, ...b, file: b.file ? { ...b.file, data: String(b.file.data ?? '').slice(0, 40) + '…' } : undefined, preview: b.preview ? { ...b.preview, image: b.preview.image ? { mimetype: b.preview.image.mimetype, bytes: b.preview.image.data?.length } : undefined } : undefined };
       sent.push(record);
       if (p === '/api/sendSeen') markedUnread.delete(chatId);
+      if (p === '/api/sendVoice' && mockConfig.noVoice) return json(res, 500, { message: 'ffmpeg not available' }); // tests: conversion fails
       if (p === '/api/send/link-custom-preview' && mockConfig.webjs) // like WAHA's WEBJS engine
         return json(res, 501, { statusCode: 501, message: "The method is not implemented by 'WEBJS' engine. Check the docs and try another engine: https://waha.devlike.pro/" });
       if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll', '/api/sendSticker'].includes(p)) {
