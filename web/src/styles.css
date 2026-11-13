@@ -1360,6 +1360,13 @@ p {
     animation: none !important;
     transition: none !important;
   }
+  /* No fade, but a message you jumped to still lights up for a moment (it's not motion). */
+  .msg.flash .bubble {
+    background-image: linear-gradient(color-mix(in srgb, var(--ultra) 22%, transparent), color-mix(in srgb, var(--ultra) 22%, transparent));
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--ultra) 75%, transparent),
+      0 0 14px 4px color-mix(in srgb, var(--ultra) 35%, transparent);
+  }
 }
 
 .avatar img {

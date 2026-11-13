@@ -39,5 +39,17 @@ with sync_playwright() as p:
         page.locator('.msg:has-text("Antwoord hierop") .quote').click(); time.sleep(0.15)
         assert 'flash' in (target.get_attribute('class') or '')
     print('quote flash ok')
+    # With animations switched off in the system settings: still lights up (without the fade)
+    pr = b.new_page(viewport={'width': 1400, 'height': 800}, reduced_motion='reduce')
+    pr.goto('http://localhost:3000/'); pr.fill('input[type=password]', 'testpassword'); pr.click('button:has-text("Sign in")'); pr.wait_for_selector('.chat-row:has-text("Alice")', timeout=20000)
+    pr.click('.chat-row:has-text("Alice")'); pr.wait_for_selector('.msg:has-text("Antwoord hierop") .quote')
+    pr.evaluate("() => document.querySelector('.messages').scrollTop = 1e9"); time.sleep(0.3)
+    pr.locator('.msg:has-text("Antwoord hierop") .quote').click(); time.sleep(0.4)
+    t = pr.locator('.msg:has(.body:text-is("Het originele bericht")) .bubble')
+    glow = t.evaluate('e => getComputedStyle(e).boxShadow'); print('reduced motion glow:', glow[:50])
+    assert glow != 'none' and 'rgba(0, 0, 0, 0)' not in glow.split(',')[0]
+    time.sleep(1.6)
+    assert t.evaluate('e => getComputedStyle(e).boxShadow') != glow, 'stays lit'
+    print('reduced motion ok')
     b.close()
 print('ERRORS:', errors)

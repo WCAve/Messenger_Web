@@ -497,7 +497,7 @@ function flashMessage(container: HTMLElement, el: HTMLElement, alreadyVisible: b
     void el.offsetWidth; // restart the animation if it was still running
     el.classList.add('flash');
     clearTimeout(flashTimers.get(el));
-    flashTimers.set(el, setTimeout(() => el.classList.remove('flash'), 2400));
+    flashTimers.set(el, setTimeout(() => el.classList.remove('flash'), reducedMotion ? 1600 : 2400)); // without a fade: a bit shorter
   };
   if (alreadyVisible) return start();
   // Wait until it's in view and has stopped moving (the smooth scroll has landed), checking every frame.
