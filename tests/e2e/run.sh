@@ -100,7 +100,7 @@ if [ ${#suites[@]} -eq 0 ]; then
   mapfile -t suites < <(ls tests/e2e/e2e*.py | xargs -n1 basename | sed 's/\.py$//' | sort -V)
 fi
 # Slowest first (they wait on purpose), then the rest in order.
-SLOW=(e2e43 e2e59 e2e52 e2e53 e2e40 e2e e2e9 e2e44 e2e58 e2e42 e2e57 e2e19 e2e11 e2e27 e2e10)
+SLOW=(e2e43 e2e59 e2e61 e2e52 e2e53 e2e40 e2e e2e9 e2e44 e2e58 e2e42 e2e57 e2e19 e2e11 e2e27 e2e10)
 queue="$OUT/.queue"; results="$OUT/.results"
 : > "$results"
 {

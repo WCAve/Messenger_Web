@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-6',
+    date: '13 November 2026',
+    items: [
+      'Opening a chat full of photos and videos no longer jumps around: every photo, GIF, video and link picture gets its final size straight away, before it has loaded. Videos only start loading once you scroll near them. (For older messages the sizes are filled in once in the background after the update.)',
+    ],
+  },
+  {
     id: '2026-11-13-5',
     date: '13 November 2026',
     items: [

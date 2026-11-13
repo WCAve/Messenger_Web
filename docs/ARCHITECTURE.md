@@ -124,6 +124,10 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   (web/src/shrink.ts, with a note in the message box); what the browser can't read or convert (HEIC, TIFF,
   video other than MP4/H.264) is converted by ffmpeg on the server just before sending (convert.ts,
   `makeSendable` in routes.ts). Audio to WhatsApp goes as a voice message, converted by WAHA.
+- **No jumping while a chat opens**: every photo and video carries its width and height (from Signal or
+  WhatsApp, else read from the file by mediasize.ts: when it arrives, after sending, and once in the
+  background for older messages, `media_sizes_upto` in kv). The web app gives each its final space from
+  that (`shapeOf`, `LazyVideo` in Chat.tsx); videos load only when scrolled near.
 - **Big files** (over 20 MB) are uploaded in pieces first (server/src/uploads.ts, `uploadInPieces` in
   web/src/api.ts), so a proxy's upload limit doesn't matter, then sent as `{upload: id}`. Their base64 is
   only made in `makeSendable` (an empty entry = "read the stored file"), after videos over

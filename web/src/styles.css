@@ -899,7 +899,9 @@ p {
   min-height: 80px;
   object-fit: cover;
 }
-.images:not(.n1) .img-btn img {
+.images:not(.n1) .img-btn img,
+.images:not(.n1) .gif-video,
+.images:not(.n1) .img-btn.pending {
   aspect-ratio: 1;
   height: 100%;
 }
@@ -919,6 +921,20 @@ p {
   border-radius: 12px;
   margin: 2px 0 4px;
   background: #000;
+  overflow: hidden;
+}
+.video video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.video-wait {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.85);
 }
 .audio {
   display: block;
@@ -2436,6 +2452,7 @@ body.resizing * {
 }
 .link-preview img {
   width: 100%;
+  aspect-ratio: 1.91 / 1; /* the usual shape of link pictures: its space is kept before it loads */
   max-height: 220px;
   object-fit: cover;
   display: block;

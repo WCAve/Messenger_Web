@@ -617,7 +617,13 @@ function LinkPreviewCard({ p, onLoad }: { p: LinkPreview; onLoad: () => void }) 
   );
 }
 
-function GifVideo({ a, onLoad }: { a: Attachment; onLoad?: () => void }) {
+/**
+ * The space a photo, GIF or video takes before it has loaded: its real shape when we know it (the
+ * server fills sizes in, mediasize.ts), else 4:3. So a chat full of pictures doesn't jump while it opens.
+ */
+const shapeOf = (a: Attachment) => (a.width && a.height ? `${a.width} / ${a.height}` : '4 / 3');
+
+function GifVideo({ a, onLoad, single }: { a: Attachment; onLoad?: () => void; single: boolean }) {
   const ref = useRef<HTMLVideoElement>(null);
   return (
     <video
@@ -631,7 +637,7 @@ function GifVideo({ a, onLoad }: { a: Attachment; onLoad?: () => void }) {
       disablePictureInPicture
       onLoadedData={onLoad}
       // A click opens it large (the button around it), where it plays even with reduced motion.
-      style={a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}
+      style={single ? { aspectRatio: shapeOf(a) } : undefined}
       aria-label="GIF"
     />
   );
@@ -752,7 +758,7 @@ const MessageItem = memo(function MessageItem({
                 <PendingImage key={a.id} a={a} />
               ) : a.contentType.startsWith('video/') ? (
                 <button key={a.id} className="img-btn" onClick={() => onOpenImage(a, m)} aria-label="Open GIF">
-                  <GifVideo a={a} onLoad={onMediaLoad} />
+                  <GifVideo a={a} onLoad={onMediaLoad} single={visual.length === 1} />
                   <span className="gif-tag">GIF</span>
                 </button>
               ) : (
@@ -763,7 +769,7 @@ const MessageItem = memo(function MessageItem({
                     loading="lazy"
                     onLoad={onMediaLoad}
                     onError={(e) => a.id.startsWith('wa-') && e.currentTarget.parentElement?.classList.add('failed')}
-                    style={visual.length === 1 && a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}
+                    style={visual.length === 1 ? { aspectRatio: shapeOf(a) } : undefined}
                   />
                   {i === 3 && visual.length > 4 && <span className="more-images">+{visual.length - 4}</span>}
                   {isLoopingMedia(a) && <span className="gif-tag">GIF</span>}
@@ -983,7 +989,7 @@ function PendingImage({ a }: { a: Attachment }) {
     return () => io.disconnect();
   }, [a.id]);
   return (
-    <div ref={ref} className="img-btn pending" title="Getting it from WhatsApp…" style={a.width && a.height ? { aspectRatio: `${a.width} / ${a.height}` } : undefined}>
+    <div ref={ref} className="img-btn pending" title="Getting it from WhatsApp…" style={{ aspectRatio: shapeOf(a) }}>
       <span className="pending-label">{a.contentType.startsWith('video/') ? 'GIF' : 'Photo'} · getting it from WhatsApp…</span>
     </div>
   );
@@ -1012,12 +1018,42 @@ function PendingPlayable({ a }: { a: Attachment }) {
   );
 }
 
+/**
+ * A video in a chat: its final size straight away (its own shape, at most 420 px high), and the video
+ * itself only once it's scrolled near (until then a play sign), so opening a chat full of videos
+ * doesn't start loading all of them.
+ */
+function LazyVideo({ a }: { a: Attachment }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = box.current;
+    if (!el || near) return;
+    if (typeof IntersectionObserver === 'undefined') return setNear(true);
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && (io.disconnect(), setNear(true)), { rootMargin: '400px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [near]);
+  const ratio = a.width && a.height ? a.width / a.height : 16 / 9;
+  return (
+    <div ref={box} className="video" style={{ aspectRatio: String(ratio), width: `min(340px, 60vw, ${Math.round(420 * ratio)}px)` }}>
+      {near ? (
+        <video src={attachmentUrl(a.id)} controls preload="metadata" />
+      ) : (
+        <span className="video-wait" aria-label="Video">
+          <Icon name="play" size={34} />
+        </span>
+      )}
+    </div>
+  );
+}
+
 function AttachmentView({ a, m }: { a: Attachment; m?: Message }) {
   const url = attachmentUrl(a.id);
   if (a.missing) return <MissingMedia a={a} />;
   const playable = a.contentType.startsWith('video/') || a.contentType.startsWith('audio/') || a.voiceNote;
   if (a.pending && playable) return <PendingPlayable a={a} />;
-  if (a.contentType.startsWith('video/')) return <video className="video" src={url} controls preload="metadata" />;
+  if (a.contentType.startsWith('video/')) return <LazyVideo a={a} />;
   if (a.contentType.startsWith('audio/') || a.voiceNote) return m ? <VoicePlayer a={a} m={m} /> : <audio className="audio" src={url} controls preload="metadata" />;
   return (
     <a className="file" href={attachmentUrl(a.id, a.filename ?? a.id)}>

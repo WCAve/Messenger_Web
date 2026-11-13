@@ -11,6 +11,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fillMessageSizes } from './mediasize.js';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import zlib from 'node:zlib';
@@ -765,6 +766,7 @@ export function startMediaScan() {
             return b;
           });
           emitMessage(updateMessage(m.id, { attachments: JSON.stringify(atts) }));
+          await fillMessageSizes(m.id); // its space in the chat, before it has loaded
         }
       }
       const missing = i - found;

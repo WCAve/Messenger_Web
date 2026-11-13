@@ -3,6 +3,7 @@
  * Envelope schema: see the "receive.*" definitions in signal-cli-rest-api's swagger.json.
  */
 import { fetchAttachment, isSilentVideo } from './attachments.js';
+import { fillMessageSizes } from './mediasize.js';
 import { getManifest, getStickerImage } from './stickers.js';
 import { broadcast } from './events.js';
 import {
@@ -365,6 +366,7 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     fetchAttachment(a.id).then((ok) => {
       if (!ok) return ingestHooks.log(`could not fetch attachment ${a.id}`);
       if (a.contentType.startsWith('video/')) markGifVideos(row.id);
+      void fillMessageSizes(row.id); // when Signal didn't say how big a photo or video is
     });
   }
 }

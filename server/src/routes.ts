@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, newOutgoingId, saveOutgoing } from './attachments.js';
 import { db } from './db.js';
+import { fillMessageSizes, parseImageSize } from './mediasize.js';
 import { TooBig, canConvert, convertForSending, needsConverting, videoConversion } from './convert.js';
 import { cancelUpload, receivePiece, startUpload, takeUpload } from './uploads.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
@@ -371,6 +372,7 @@ async function deliver(
 ) {
   try {
     payload = await makeSendable(messageId, payload, log, isWa(c) ? config.waSendLimitMb : config.sendLimitMb);
+    void fillMessageSizes(messageId); // videos (and converted files): their space in the chat
   } catch (e) {
     log(`send: ${(e as Error).message}`);
     emitMessageRow(messageId, { status: 'failed', error: e instanceof TooBig ? e.message : `Couldn't prepare the file: ${(e as Error).message}` });
@@ -911,7 +913,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       }
       const buf = Buffer.from(f.data!, 'base64');
       const id = saveOutgoing(buf, type, name);
-      attachments.push({ id, contentType: type, filename: name, size: buf.length });
+      const dims = type.startsWith('image/') ? parseImageSize(buf) : null; // known right away, so the bubble doesn't jump
+      attachments.push({ id, contentType: type, filename: name, size: buf.length, ...(dims ?? {}) });
       base64.push(`data:${type};filename=${name};base64,${f.data}`);
     }
 

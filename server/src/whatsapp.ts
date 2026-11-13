@@ -31,6 +31,7 @@
  * labels only exist for labels set after WAHA was linked (older ones come from the Android backup); video
  * sending needs WAHA's Chrome image (devlikeapro/waha:chrome).
  */
+import { fillMessageSizes } from './mediasize.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -812,6 +813,7 @@ export function fetchWaMedia(id: string): Promise<boolean> {
           return b;
         });
         emitMessage(updateMessage(m.id, { attachments: JSON.stringify(next) }));
+        if (ok) void fillMessageSizes(m.id); // its space in the chat, before it has loaded
       }
       return ok;
     });
