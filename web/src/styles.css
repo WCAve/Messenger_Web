@@ -2005,6 +2005,18 @@ button.member:disabled {
   height: 180px;
   object-fit: contain;
 }
+.sticker-btn {
+  display: block;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: zoom-in;
+}
+/* Stickers in the viewer: large (they're 512 px), not their own small size */
+.lightbox img.lightbox-sticker {
+  width: min(70vh, 80vw);
+  height: min(70vh, 80vw);
+}
 .sticker-img.small {
   width: 96px;
   height: 96px;

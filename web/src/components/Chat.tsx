@@ -45,6 +45,8 @@ export interface LightboxItem {
   /** Where it came from: with these, ← → step through the chat's other photos and videos. */
   conversationId?: number;
   messageId?: number;
+  /** Shown from here instead of the attachment's own address (Signal pack stickers aren't attachments) */
+  src?: string;
 }
 
 const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal allows edits for 24 hours
@@ -235,7 +237,7 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
           onReplyPrivately={(m) => void replyPrivately(m)}
           onEdit={(m) => (setReplyTo(null), setEditing(m))}
           onMoreReactions={setReactTo}
-          onOpenImage={(att, msg) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt, conversationId: conversation.id, messageId: msg.id })}
+          onOpenImage={(att, msg, src) => onOpenMedia({ att, authorName: msg.authorName, sentAt: msg.sentAt, conversationId: conversation.id, messageId: msg.id, src })}
         />
       )}
 
@@ -294,7 +296,7 @@ function MessageList({
   onReplyPrivately: (m: Message) => void;
   onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
-  onOpenImage: (a: Attachment, m: Message) => void;
+  onOpenImage: (a: Attachment, m: Message, src?: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true); // keep pinned to the bottom while the user is there
@@ -672,7 +674,7 @@ const MessageItem = memo(function MessageItem({
   onReplyPrivately: (m: Message) => void;
   onEdit: (m: Message) => void;
   onMoreReactions: (m: Message) => void;
-  onOpenImage: (a: Attachment, m: Message) => void;
+  onOpenImage: (a: Attachment, m: Message, src?: string) => void;
   onJump: (sentAt: number) => void;
   onMediaLoad: () => void;
 }) {
@@ -801,10 +803,16 @@ const MessageItem = memo(function MessageItem({
           ) : waSticker.pending ? (
             <PendingImage a={waSticker} />
           ) : (
-            <img className="sticker-img" src={attachmentUrl(waSticker.id)} alt="Sticker" width={180} height={180} onLoad={onMediaLoad} />
+            <button className="sticker-btn" onClick={() => onOpenImage(waSticker, m)} aria-label="Open sticker">
+              <img className="sticker-img" src={attachmentUrl(waSticker.id)} alt="Sticker" width={180} height={180} onLoad={onMediaLoad} />
+            </button>
           )
         ) : sticker ? (
-          <StickerImage sticker={sticker} onLoad={onMediaLoad} />
+          <StickerImage
+            sticker={sticker}
+            onLoad={onMediaLoad}
+            onOpen={() => onOpenImage({ id: `sticker-${sticker.packId}-${sticker.stickerId}`, contentType: 'image/webp', filename: 'sticker.webp', sticker: true }, m, sticker.url)}
+          />
         ) : m.kind === 'sticker' ? (
           <p className="body">
             <em>Sticker</em>
@@ -928,7 +936,7 @@ const MessageItem = memo(function MessageItem({
   );
 });
 
-function StickerImage({ sticker, onLoad }: { sticker: NonNullable<Message['sticker']>; onLoad: () => void }) {
+function StickerImage({ sticker, onLoad, onOpen }: { sticker: NonNullable<Message['sticker']>; onLoad: () => void; onOpen?: () => void }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
     return (
@@ -937,7 +945,7 @@ function StickerImage({ sticker, onLoad }: { sticker: NonNullable<Message['stick
       </p>
     );
   }
-  return (
+  const img = (
     <img
       className="sticker-img"
       src={sticker.url}
@@ -947,6 +955,13 @@ function StickerImage({ sticker, onLoad }: { sticker: NonNullable<Message['stick
       onLoad={onLoad}
       onError={() => setFailed(true)}
     />
+  );
+  return onOpen ? (
+    <button className="sticker-btn" onClick={onOpen} aria-label="Open sticker">
+      {img}
+    </button>
+  ) : (
+    img
   );
 }
 
@@ -1231,7 +1246,7 @@ export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () =>
   );
 
   useEffect(() => {
-    if (conversationId === undefined || messageId === undefined) return;
+    if (conversationId === undefined || messageId === undefined || item.att.sticker) return; // a sticker: on its own
     let cancelled = false;
     api
       .conversationMedia(conversationId, { around: messageId, attachment: item.att.id, limit: MEDIA_PAGE })
@@ -1305,14 +1320,14 @@ export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () =>
           <strong>{shown.authorName}</strong> {formatDay(shown.sentAt)}, {formatTime(shown.sentAt)}
           {pos !== null && total > 1 && <span className="lightbox-count">{`${pos + 1} of ${total}`}</span>}
         </span>
-        <a className="icon-btn" href={attachmentUrl(att.id, att.filename ?? att.id)} aria-label="Download">
+        <a className="icon-btn" href={pos === null && item.src ? item.src : attachmentUrl(att.id, att.filename ?? att.id)} download={pos === null && item.src ? 'sticker.webp' : undefined} aria-label="Download">
           <Icon name="download" />
         </a>
         <button className="icon-btn" onClick={close} aria-label="Close">
           <Icon name="close" />
         </button>
       </header>
-      <LightboxMedia key={att.id} att={att} />
+      <LightboxMedia key={att.id} att={att} src={pos === null ? item.src : undefined} />
       {canPrev && (
         <button className="lightbox-nav prev" onClick={(e) => (e.stopPropagation(), void go(-1))} aria-label="Previous photo or video">
           <Icon name="prev" size={32} />
@@ -1329,7 +1344,7 @@ export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () =>
 
 /** One photo or video in the viewer. Remounted per item, so a playing video stops when you step away. A
  *  file from imported WhatsApp history that isn't here yet is fetched; it's tried again until it arrives. */
-function LightboxMedia({ att }: { att: Attachment }) {
+function LightboxMedia({ att, src: own }: { att: Attachment; src?: string }) {
   const [tries, setTries] = useState(0);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -1338,9 +1353,9 @@ function LightboxMedia({ att }: { att: Attachment }) {
     setTimeout(() => setTries((t) => t + 1), 3000);
   };
   const waiting = tries > 0 && !loaded && !failed;
-  const src = attachmentUrl(att.id) + (tries ? `?try=${tries}` : '');
+  const src = own ?? attachmentUrl(att.id) + (tries ? `?try=${tries}` : '');
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  if (failed) return <p className="lightbox-note">Couldn’t get this from WhatsApp.</p>;
+  if (failed) return <p className="lightbox-note">{own ? 'This sticker couldn’t be loaded.' : 'Couldn’t get this from WhatsApp.'}</p>;
   return (
     <>
       {att.contentType.startsWith('video/') ? (
@@ -1350,7 +1365,15 @@ function LightboxMedia({ att }: { att: Attachment }) {
           <video key={tries} src={src} controls autoPlay onClick={stop} onError={retry} onLoadedData={() => setLoaded(true)} />
         )
       ) : (
-        <img key={tries} src={src} alt={att.caption ?? att.filename ?? 'Image'} onClick={stop} onError={retry} onLoad={() => setLoaded(true)} />
+        <img
+          key={tries}
+          className={att.sticker ? 'lightbox-sticker' : undefined}
+          src={src}
+          alt={att.sticker ? 'Sticker' : (att.caption ?? att.filename ?? 'Image')}
+          onClick={stop}
+          onError={own ? () => setFailed(true) : retry}
+          onLoad={() => setLoaded(true)}
+        />
       )}
       {waiting && <p className="lightbox-note">Getting this from WhatsApp…</p>}
     </>
