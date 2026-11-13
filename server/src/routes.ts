@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, newOutgoingId, saveOutgoing } from './attachments.js';
+import { db } from './db.js';
 import { TooBig, canConvert, convertForSending, needsConverting, videoConversion } from './convert.js';
 import { cancelUpload, receivePiece, startUpload, takeUpload } from './uploads.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
@@ -428,10 +429,14 @@ function settingsDto() {
  * "marked unread" on the phone), or null when there's nothing to send.
  */
 function markRead(c: ConversationRow): (() => Promise<void>) | null {
-  if (isWa(c)) noteWaRead(c.id); // later copies of anything before this count as read
   const unread = unreadMessages(c.id);
   const wasMarked = !!c.marked_unread;
-  if (wasMarked) setConversationFlags(c.id, { markedUnread: false });
+  // All the writes at once (one trip to the disk, not four)
+  db.transaction(() => {
+    if (isWa(c)) noteWaRead(c.id); // later copies of anything before this count as read
+    if (wasMarked) setConversationFlags(c.id, { markedUnread: false });
+    if (unread.length) markConversationRead(c.id);
+  })();
   if (!unread.length) {
     if (!wasMarked) return null;
     emitConversation(getConversation(c.id)!);
@@ -439,7 +444,6 @@ function markRead(c: ConversationRow): (() => Promise<void>) | null {
     if (isWa(c) && getSettings().sendReadReceipts && getWaState().status === 'connected') return () => markReadWa(c, []).catch(() => {});
     return null;
   }
-  markConversationRead(c.id);
   emitConversation(getConversation(c.id)!);
   if (isWa(c)) {
     if (getSettings().sendReadReceipts && getWaState().status === 'connected') return () => markReadWa(c, unread).catch(() => {});

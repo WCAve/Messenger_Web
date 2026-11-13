@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-5',
+    date: '13 November 2026',
+    items: [
+      'Fixed: opening a chat could take several seconds now and then. Saving to the database (for example marking a chat read) waited for the disk each time, and on a busy server that held everything else up. Saving no longer waits like that, and marking read saves everything in one go.',
+    ],
+  },
+  {
     id: '2026-11-13-4',
     date: '13 November 2026',
     items: [

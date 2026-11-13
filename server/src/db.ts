@@ -13,7 +13,10 @@ fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(config.attachmentsDir, { recursive: true });
 
 const sqlite = new DatabaseSync(config.dbPath);
-sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+// synchronous = NORMAL: with WAL this is safe (no damage on a crash or power cut; at most the last moments
+// are lost) and a write no longer waits for the disk to confirm it. With FULL every write did, and on a
+// busy Unraid share that froze the whole server for seconds (nothing else can be answered meanwhile).
+sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
 
 type Params = SQLInputValue[] | [Record<string, SQLInputValue>];
 
