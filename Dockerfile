@@ -15,7 +15,9 @@ RUN npm run build
 # The server has no runtime npm dependencies (Node 22 ships sqlite, fetch and WebSocket).
 FROM node:22-alpine
 # ffmpeg (and heif-dec for iPhone photos) convert files the networks can't take as they are (server/src/convert.ts).
-RUN apk add --no-cache su-exec tzdata ffmpeg libheif-tools
+# On Intel machines, the drivers for the video chip (Quick Sync through VAAPI): used when /dev/dri is passed in.
+RUN apk add --no-cache su-exec tzdata ffmpeg libheif-tools \
+ && if [ "$(apk --print-arch)" = x86_64 ]; then apk add --no-cache intel-media-driver libva-intel-driver; fi
 WORKDIR /app
 ENV NODE_ENV=production \
     DATA_DIR=/data \

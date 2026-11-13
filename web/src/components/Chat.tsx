@@ -1322,7 +1322,7 @@ let pendingKey = 0;
 // What the server takes (asked once); until it answers, the usual values.
 const MB = 1024 * 1024;
 const PIECES_OVER = 20 * MB; // bigger files are uploaded in pieces, with progress
-let limits: UploadLimits = { sendLimitMb: 95, maxFileMb: 2048, oneGoMb: 100, canShrinkVideo: true };
+let limits: UploadLimits = { sendLimitMb: 95, waSendLimitMb: 36, maxFileMb: 2048, oneGoMb: 100, canShrinkVideo: true };
 let limitsAsked: Promise<UploadLimits> | null = null;
 function getLimits() {
   limitsAsked ??= api.uploadLimits().then(
@@ -1335,12 +1335,13 @@ const isVideo = (f: File) => f.type.startsWith('video/') || /\.(mp4|m4v|mov|mkv|
 const sizeText = (mb: number) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
 /** A note for a file that's too big to send as it is (or at all), from its size. */
-function sizeCheck(f: File, l: UploadLimits): { problem?: string; bigNote?: string } {
+function sizeCheck(f: File, l: UploadLimits, network: Network): { problem?: string; bigNote?: string } {
   if (f.size > l.maxFileMb * MB) return { problem: `Too big: ${formatSize(f.size)} (at most ${sizeText(l.maxFileMb)})` };
-  if (f.size <= l.sendLimitMb * MB || f.type.startsWith('image/')) return {}; // photos are made smaller anyway
+  const limit = network === 'whatsapp' ? l.waSendLimitMb : l.sendLimitMb;
+  if (f.size <= limit * MB || f.type.startsWith('image/')) return {}; // photos are made smaller anyway
   if (isVideo(f) && l.canShrinkVideo)
-    return { bigNote: `Big video (${formatSize(f.size)}): it'll be made smaller on the server to fit (about ${l.sendLimitMb} MB). That can take a few minutes.` };
-  return { problem: `Too big to send: Signal and WhatsApp take files up to ${l.sendLimitMb} MB (this is ${formatSize(f.size)})` };
+    return { bigNote: `Big video (${formatSize(f.size)}): it'll be made smaller on the server to fit (about ${limit} MB). That can take a few minutes.` };
+  return { problem: `Too big to send: ${NETWORK_LABEL[network]} takes files up to ${limit} MB (this is ${formatSize(f.size)})` };
 }
 
 /** The "@name" being typed right before the caret, if any (group chats). */
@@ -1548,10 +1549,10 @@ function Composer({
   }, [text]);
 
   function addFiles(list: File[]) {
-    const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file), ...sizeCheck(file, limits) }));
+    const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file), ...sizeCheck(file, limits, conversation.network) }));
     setFiles((prev) => [...prev, ...added]);
     // Check again with what this server takes (asked once)
-    void getLimits().then((l) => setFiles((prev) => prev.map((x) => (added.some((a) => a.key === x.key) ? { ...x, problem: undefined, bigNote: undefined, ...sizeCheck(x.original ?? x.file, l) } : x))));
+    void getLimits().then((l) => setFiles((prev) => prev.map((x) => (added.some((a) => a.key === x.key) ? { ...x, problem: undefined, bigNote: undefined, ...sizeCheck(x.original ?? x.file, l, conversation.network) } : x))));
     // Large photos are made smaller here before sending (shrink.ts); the chip says so.
     for (const p of added.filter((x) => x.shrinking)) {
       void shrinkPhoto(p.file)

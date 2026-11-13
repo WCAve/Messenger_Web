@@ -12,6 +12,11 @@
  *                                           tried again lower if it still came out too big
  *
  * Without ffmpeg (running outside Docker) files are sent as they are, like before.
+ *
+ * Video is done by the computer's video chip when it can (Intel Quick Sync through VAAPI: the container
+ * needs /dev/dri; HW_VIDEO=off turns it off), several times faster than by the processor. Each video
+ * tries: all on the chip → read by the processor, the rest on the chip → all by the processor (libx264),
+ * so a format or phone rotation the chip can't handle still works.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -50,6 +55,76 @@ export async function canConvert() {
   ffmpeg ??= await exists('ffmpeg');
   heifDec ??= await exists('heif-dec', '--version');
   return ffmpeg;
+}
+
+// ---------- the video chip (Quick Sync / VAAPI) ----------
+
+let chip: string | null | undefined; // the render device that works, null when there's none
+let chipNote = '';
+
+/** The video chip's device when it can encode H.264, checked once with a tiny test video. */
+export async function videoChip(log?: (m: string) => void): Promise<string | null> {
+  if (chip !== undefined) return chip;
+  chip = null;
+  if (/^(off|0|false|no)$/i.test(process.env.HW_VIDEO ?? '') || !(await canConvert())) return (chipNote = 'switched off'), null;
+  const dir = '/dev/dri';
+  const devices = process.env.HW_VIDEO_DEVICE ? [process.env.HW_VIDEO_DEVICE] : fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.startsWith('renderD')).map((f) => path.join(dir, f)) : [];
+  if (!devices.length) return (chipNote = 'no /dev/dri in the container'), null;
+  for (const dev of devices) {
+    try {
+      await run('ffmpeg', ['-v', 'error', '-init_hw_device', `vaapi=chip:${dev}`, '-filter_hw_device', 'chip', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=10', '-t', '0.5', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi', '-f', 'null', '-'], 30_000);
+      log?.(`video conversion: using the video chip (${dev})`);
+      chip = dev;
+      chipNote = dev;
+      return chip;
+    } catch (e) {
+      chipNote = `${dev}: ${(e as Error).message}`;
+    }
+  }
+  log?.(`video conversion: the video chip can't be used (${chipNote}); using the processor`);
+  return null;
+}
+
+/** For the settings page: what converts video. */
+export async function videoConversion(): Promise<string> {
+  if (!(await canConvert())) return 'Not available (no ffmpeg)';
+  return (await videoChip()) ? `Video chip (Quick Sync / VAAPI, ${chip})` : `Processor (${chipNote || 'no video chip'})`;
+}
+
+interface VideoJob {
+  input: string;
+  out: string;
+  /** Size of the result, as two ffmpeg expressions (width, height) */
+  size: [string, string];
+  /** A target bitrate (bits/s); without it, a fixed quality */
+  bitrate?: number;
+  audio: string[];
+}
+
+/** Encode to MP4/H.264: on the chip when possible, else by the processor. Returns what did it. */
+async function encodeVideo(j: VideoJob, log: (m: string) => void, timeoutMs: number): Promise<string> {
+  const [w, h] = j.size;
+  const rate = j.bitrate ? ['-b:v', String(j.bitrate), '-maxrate', String(Math.floor(j.bitrate * 1.4)), '-bufsize', String(j.bitrate * 2)] : [];
+  const tail = [...j.audio, '-movflags', '+faststart', j.out];
+  const dev = await videoChip(log);
+  const attempts: [string, string[]][] = [];
+  if (dev) {
+    const enc = ['-c:v', 'h264_vaapi', ...(j.bitrate ? rate : ['-qp', '24'])];
+    attempts.push(['video chip', ['-hwaccel', 'vaapi', '-hwaccel_device', dev, '-hwaccel_output_format', 'vaapi', '-i', j.input, '-vf', `scale_vaapi=w='${w}':h='${h}':format=nv12`, ...enc]]);
+    attempts.push(['processor + video chip', ['-init_hw_device', `vaapi=chip:${dev}`, '-filter_hw_device', 'chip', '-i', j.input, '-vf', `scale='${w}':'${h}',format=nv12,hwupload`, ...enc]]);
+  }
+  attempts.push(['processor', ['-i', j.input, '-c:v', 'libx264', '-preset', 'veryfast', ...(j.bitrate ? rate : ['-crf', '23']), '-pix_fmt', 'yuv420p', '-vf', `scale='${w}':'${h}'`]]);
+  let last: Error | null = null;
+  for (const [what, args] of attempts) {
+    try {
+      await run('ffmpeg', ['-v', 'error', '-y', ...args, ...tail], timeoutMs);
+      return what;
+    } catch (e) {
+      last = e as Error;
+      if (what !== 'processor') log(`video ${what} didn't work (${last.message}); trying the next way`);
+    }
+  }
+  throw last!;
 }
 
 const BIG_PHOTO = 16 * 1024 * 1024;
@@ -122,12 +197,10 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
       // Video: only when it isn't MP4/H.264 already
       if (vcodec === 'h264' && mp4ish && f.type === 'video/mp4' && (!acodec || acodec === 'aac')) return null;
       const reencode = vcodec !== 'h264';
-      const args = ['-v', 'error', '-y', '-i', input];
-      if (reencode) args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p', '-vf', "scale='min(1920,iw)':-2");
-      else args.push('-c:v', 'copy');
-      args.push(...audioArgs, '-movflags', '+faststart', out);
-      await run('ffmpeg', args, 15 * 60_000);
-      if (fs.statSync(out).size <= limit) return result(reencode ? 'converted' : 'repacked');
+      let how = '';
+      if (reencode) how = await encodeVideo({ input, out, size: ['min(1920,iw)', '-2'], audio: audioArgs }, log, 15 * 60_000);
+      else await run('ffmpeg', ['-v', 'error', '-y', '-i', input, '-c:v', 'copy', ...audioArgs, '-movflags', '+faststart', out], 15 * 60_000);
+      if (fs.statSync(out).size <= limit) return result(reencode ? `converted (${how})` : 'repacked');
       // came out too big: make it smaller below
     }
     // Too big for the network: a bitrate that fits its length, and a smaller picture when that's low
@@ -140,11 +213,19 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
       const vbit = Math.floor(total - audio - 8_000); // a little room for the MP4 itself
       if (vbit < 120_000) throw new TooBig(`${f.name} is too long to make small enough to send (${Math.round(seconds / 60)} minutes; at most about ${Math.floor((limit * 8) / 250_000 / 60)} minutes fit)`);
       const side = Math.min(short, vbit >= 2_500_000 ? 1080 : vbit >= 1_000_000 ? 720 : vbit >= 500_000 ? 480 : 360);
-      const scale = `scale='if(gte(iw,ih),-2,${side})':'if(gte(iw,ih),${side},-2)'`;
-      const args = ['-v', 'error', '-y', '-i', input, '-c:v', 'libx264', '-preset', 'veryfast', '-b:v', String(vbit), '-maxrate', String(Math.floor(vbit * 1.4)), '-bufsize', String(vbit * 2), '-pix_fmt', 'yuv420p', '-vf', scale];
-      args.push(...(acodec ? ['-c:a', 'aac', '-b:a', String(Math.max(32_000, Math.floor(audio))), '-ac', '2'] : ['-an']), '-movflags', '+faststart', out);
-      await run('ffmpeg', args, 3 * 3600_000);
-      if (fs.statSync(out).size <= limit) return result(`made smaller (${side}p)`);
+      const started = Date.now();
+      const how = await encodeVideo(
+        {
+          input,
+          out,
+          size: [`if(gte(iw,ih),-2,${side})`, `if(gte(iw,ih),${side},-2)`],
+          bitrate: vbit,
+          audio: acodec ? ['-c:a', 'aac', '-b:a', String(Math.max(32_000, Math.floor(audio))), '-ac', '2'] : ['-an'],
+        },
+        log,
+        3 * 3600_000,
+      );
+      if (fs.statSync(out).size <= limit) return result(`made smaller (${side}p, ${how}, ${Math.round((Date.now() - started) / 1000)} s)`);
       log(`${f.name}: ${mb(fs.statSync(out).size)} is still too big, trying lower`);
     }
     throw new TooBig(`${f.name} couldn't be made small enough to send`);

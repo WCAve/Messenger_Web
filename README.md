@@ -192,7 +192,9 @@ Back up both appdata folders:
 | `SESSION_DAYS` | `30` | How long a browser stays signed in |
 | `MAX_UPLOAD_MB` | `100` | Largest attachment sent in one go (bigger files are uploaded in pieces) |
 | `MAX_FILE_MB` | `2048` | Largest file you can pick to send; uploaded in pieces with a progress bar |
-| `SEND_LIMIT_MB` | `95` | Largest attachment Signal and WhatsApp take; bigger videos are made smaller on the server (ffmpeg) to fit |
+| `SEND_LIMIT_MB` | `95` | Largest attachment Signal takes; bigger videos are made smaller on the server (ffmpeg) to fit |
+| `WA_SEND_LIMIT_MB` | `36` | The same for WhatsApp (WAHA takes at most 50 MB per request, and a file grows by a third on the way) |
+| `HW_VIDEO` | `auto` | `off`: never use the video chip (Quick Sync) for converting video. With `auto` it's used when `/dev/dri` is passed to the container (`--device=/dev/dri`); Settings → Account shows which is used |
 | `PUID` / `PGID` | `99` / `100` | Owner of files in `/data` |
 | `DATA_DIR` | `/data` | Database and attachments |
 | `PORT` | `3000` | HTTP port |

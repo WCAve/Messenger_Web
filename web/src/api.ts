@@ -173,6 +173,7 @@ export interface ServerSettings {
   apiVersion: string | null;
   deviceName: string;
   giphyConfigured: boolean;
+  videoConversion?: string; // what converts video: the video chip or the processor
   sessions: number;
 }
 
@@ -205,7 +206,8 @@ export function uploadBackup(file: File, onProgress: (p: number) => void): Promi
 }
 
 export interface UploadLimits {
-  sendLimitMb: number; // the most Signal and WhatsApp take
+  sendLimitMb: number; // the most Signal takes
+  waSendLimitMb: number; // the most WhatsApp takes (through WAHA)
   maxFileMb: number; // the most you can pick
   oneGoMb: number; // bigger than this is uploaded in pieces
   canShrinkVideo: boolean;

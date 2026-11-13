@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-3',
+    date: '13 November 2026',
+    items: [
+      'Fixed: big videos to WhatsApp failed with “request entity too large”. WhatsApp (through WAHA) takes files up to about 36 MB, so videos for WhatsApp are made smaller to that size; the message box says so. Signal stays at 95 MB. A failed one can be sent again with Try again.',
+      'Converting videos can use the video chip of an Intel processor (Quick Sync), several times faster. It needs /dev/dri passed to the container; Settings → Account → Video conversion shows which is used.',
+    ],
+  },
+  {
     id: '2026-11-13-2',
     date: '13 November 2026',
     items: [

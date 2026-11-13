@@ -161,7 +161,9 @@ function json(res, code, data) {
 }
 async function body(req) {
   const chunks = [];
-  for await (const c of req) chunks.push(c);
+  let size = 0;
+  for await (const c of req) (size += c.length), chunks.push(c);
+  if (size > 50 * 1024 * 1024) return { tooLarge: size }; // like WAHA: json({ limit: '50mb' })
   const s = Buffer.concat(chunks).toString();
   return s ? JSON.parse(s) : {};
 }
@@ -546,8 +548,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (m === 'POST' || m === 'PUT') {
       const b = await body(req);
+      if (b.tooLarge) {
+        sent.push({ path: p, method: m, tooLarge: b.tooLarge });
+        return json(res, 500, { statusCode: 500, exception: { message: 'request entity too large', name: 'PayloadTooLargeError', length: b.tooLarge, limit: 52428800 } });
+      }
       const chatId = b.chatId;
-      const record = { path: p, method: m, ...b, file: b.file ? { ...b.file, data: String(b.file.data ?? '').slice(0, 40) + '…' } : undefined, preview: b.preview ? { ...b.preview, image: b.preview.image ? { mimetype: b.preview.image.mimetype, bytes: b.preview.image.data?.length } : undefined } : undefined };
+      const fileBytes = b.file?.data ? Buffer.from(String(b.file.data).replace(/^data:[^,]*,/, ''), 'base64').length : undefined;
+      const record = { path: p, method: m, ...b, file: b.file ? { ...b.file, data: String(b.file.data ?? '').slice(0, 40) + '…', bytes: fileBytes } : undefined, preview: b.preview ? { ...b.preview, image: b.preview.image ? { mimetype: b.preview.image.mimetype, bytes: b.preview.image.data?.length } : undefined } : undefined };
       sent.push(record);
       if (p === '/api/sendSeen') markedUnread.delete(chatId);
       if (p === '/api/sendVoice' && mockConfig.noVoice) return json(res, 500, { message: 'ffmpeg not available' }); // tests: conversion fails

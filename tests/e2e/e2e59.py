@@ -1,7 +1,8 @@
 """Big files: uploaded in pieces with progress; a video too big for the network is made smaller on the
 server to fit; files that can't be sent say so straight away (and can't be sent); the piece upload
-picks up where it was."""
-# server-env: SEND_LIMIT_MB=3 MAX_FILE_MB=40
+picks up where it was. WhatsApp: a video over 36 MB is made smaller to fit through WAHA (which refuses
+requests over 50 MB, like the mock); a 36 MB limit says so for other files."""
+# server-env: SEND_LIMIT_MB=3 MAX_FILE_MB=60
 import sys, time, json, os, base64, subprocess, urllib.request
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
@@ -15,7 +16,13 @@ print('video:', os.path.getsize(vid) // 1024 // 1024, 'MB')
 assert os.path.getsize(vid) > 22 * 1024 * 1024
 big = os.path.join(S, 'Archief.zip'); huge = os.path.join(S, 'Enorm.bin')
 with open(big, 'wb') as f: f.truncate(25 * 1024 * 1024)
-with open(huge, 'wb') as f: f.truncate(45 * 1024 * 1024)
+with open(huge, 'wb') as f: f.truncate(65 * 1024 * 1024)
+# for WhatsApp: about 45 MB, over its 36 MB
+wavid = os.path.join(S, 'Groot filmpje.mp4')
+subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=330',
+                '-t', '20', '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', '18M', '-c:a', 'aac', '-shortest', wavid], check=True)
+print('whatsapp video:', os.path.getsize(wavid) // 1024 // 1024, 'MB')
+assert os.path.getsize(wavid) > 40 * 1024 * 1024
 with sync_playwright() as p:
     b = p.chromium.launch(); page = b.new_page(viewport={'width': 1400, 'height': 900})
     page.on('pageerror', lambda e: errors.append(str(e)))
@@ -28,7 +35,8 @@ with sync_playwright() as p:
     page.wait_for_selector('.pending-file.unsendable >> nth=1')
     notes = page.locator('.shrink-note.problem').all_inner_texts(); print('problems:', notes)
     assert 'Too big to send' in notes[0] and '3 MB' in notes[0], notes
-    assert 'Too big: 45.0 MB (at most 40 MB)' in notes[1], notes
+    assert 'Signal takes files up to 3 MB' in notes[0], notes
+    assert 'Too big: 65.0 MB (at most 60 MB)' in notes[1], notes
     page.locator('.pending-files').screenshot(path=S + '/e2e59-problems.png')
     page.click('textarea'); page.keyboard.type('mag niet')
     assert page.locator('button.send-btn').is_disabled()
@@ -92,6 +100,28 @@ with sync_playwright() as p:
     assert r['a'] == [200, {'received': 5}] and r['b'][0] == 409 and r['b'][1]['received'] == 5
     assert r['c'][0] == 413 and r['d'] == [200, {'received': 10}] and r['e'][0] == 400
     print('pieces ok')
+
+    # 4. WhatsApp: its own limit (36 MB, for WAHA's 50 MB requests)
+    page.click('.chat-row:has-text("Jan Bakker")'); page.wait_for_selector('.msg')
+    page.set_input_files('input[type=file][multiple]', big)  # 25 MB: fine for WhatsApp
+    time.sleep(0.5); assert not page.locator('.pending-file.unsendable').count()
+    page.click('.pending-file .remove')
+    page.set_input_files('input[type=file][multiple]', wavid)
+    page.wait_for_selector('.shrink-note:has-text("about 36 MB")')
+    page.click('textarea'); page.keyboard.type('Groot'); page.keyboard.press('Enter')
+    wa = None
+    for _ in range(300):
+        wa = [x for x in get(8090, '/mock/sent') if x['path'] in ('/api/sendVideo', '/api/sendFile') or x.get('tooLarge')]
+        if wa: break
+        time.sleep(0.5)
+    print('whatsapp sent:', wa)
+    assert wa and not wa[0].get('tooLarge') and wa[0]['path'] == '/api/sendVideo', wa
+    assert 30 * 1024 * 1024 < wa[0]['file']['bytes'] <= 36 * 1024 * 1024, wa[0]['file']
+    print('whatsapp limit ok')
+
+    # 5. Settings say what converts video (no video chip here)
+    conv = page.evaluate("fetch('/api/settings').then((r) => r.json()).then((s) => s.videoConversion)"); print('video conversion:', conv)
+    assert conv.startswith('Processor'), conv
 
     assert not errors, errors
     b.close()

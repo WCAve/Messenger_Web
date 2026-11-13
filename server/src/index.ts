@@ -20,6 +20,7 @@ import { startExpiry, stopExpiry } from './expiry.js';
 import { seedWaReadMarks, startWhatsApp, stopWhatsApp } from './whatsapp.js';
 import { refreshBackupInfo, setBackupLogger } from './wabackup.js';
 import { clearUploads } from './uploads.js';
+import { videoChip } from './convert.js';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 const minLevel = LEVELS[(config.logLevel as keyof typeof LEVELS) ?? 'info'] ?? 20;
@@ -36,6 +37,7 @@ if (!config.password || config.password.length < 8) {
 
 const router = buildRouter(log);
 clearUploads(); // half-finished uploads from before a restart can't be finished
+void videoChip((m) => log('info', m)); // checked once at start, so the log says which is used
 
 // ---------- static web UI ----------
 const here = path.dirname(fileURLToPath(import.meta.url));

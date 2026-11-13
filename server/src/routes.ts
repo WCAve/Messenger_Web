@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchAttachment, isSafeId, localPath, newOutgoingId, saveOutgoing } from './attachments.js';
-import { TooBig, canConvert, convertForSending, needsConverting } from './convert.js';
+import { TooBig, canConvert, convertForSending, needsConverting, videoConversion } from './convert.js';
 import { cancelUpload, receivePiece, startUpload, takeUpload } from './uploads.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
 import { getSettings, updateSettings } from './settings.js';
@@ -324,12 +324,12 @@ function readBase64(a: Attachment) {
  * Throws TooBig when a file can't be sent at all.
  */
 const LAZY = '';
-async function makeSendable<P extends { base64: string[] }>(messageId: number, payload: P, log: (m: string) => void): Promise<P> {
+async function makeSendable<P extends { base64: string[] }>(messageId: number, payload: P, log: (m: string) => void, limitMb: number): Promise<P> {
   if (!payload.base64.length) return payload;
   const row = getMessage(messageId);
   const atts: Attachment[] = row?.attachments ? JSON.parse(row.attachments) : [];
   if (atts.length !== payload.base64.length) return payload;
-  const limit = config.sendLimitMb * 1024 * 1024;
+  const limit = limitMb * 1024 * 1024;
   const base64 = [...payload.base64];
   let changed = false;
   for (const [i, a] of atts.entries()) {
@@ -346,7 +346,7 @@ async function makeSendable<P extends { base64: string[] }>(messageId: number, p
         continue;
       }
     }
-    if (size > limit) throw new TooBig(`${a.filename ?? 'This file'} is too big to send (${(size / 1024 / 1024).toFixed(0)} MB; at most ${config.sendLimitMb} MB)`);
+    if (size > limit) throw new TooBig(`${a.filename ?? 'This file'} is too big to send (${(size / 1024 / 1024).toFixed(0)} MB; at most ${limitMb} MB)`);
     if (base64[i] === LAZY) base64[i] = readBase64(a);
   }
   if (changed) emitMessageRow(messageId, { attachments: JSON.stringify(atts) });
@@ -369,7 +369,7 @@ async function deliver(
   log: (m: string) => void,
 ) {
   try {
-    payload = await makeSendable(messageId, payload, log);
+    payload = await makeSendable(messageId, payload, log, isWa(c) ? config.waSendLimitMb : config.sendLimitMb);
   } catch (e) {
     log(`send: ${(e as Error).message}`);
     emitMessageRow(messageId, { status: 'failed', error: e instanceof TooBig ? e.message : `Couldn't prepare the file: ${(e as Error).message}` });
@@ -624,11 +624,11 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return conversationDto(c);
   });
 
-  r.get('/api/settings', () => settingsDto());
-  r.post('/api/settings', (ctx) => {
+  r.get('/api/settings', async () => ({ ...settingsDto(), videoConversion: await videoConversion() }));
+  r.post('/api/settings', async (ctx) => {
     updateSettings(ctx.body ?? {});
     if (ctx.body?.waHistoryMedia === true) void downloadPendingMedia().catch(() => {});
-    return settingsDto();
+    return { ...settingsDto(), videoConversion: await videoConversion() };
   });
 
   // Sign out every browser (all sessions), including this one.
@@ -865,7 +865,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // Big files are uploaded in pieces first (uploads.ts), then sent as { upload: id }.
-  r.get('/api/uploads/limits', async () => ({ sendLimitMb: config.sendLimitMb, maxFileMb: config.maxFileMb, oneGoMb: config.maxUploadMb, canShrinkVideo: await canConvert() }));
+  r.get('/api/uploads/limits', async () => ({ sendLimitMb: config.sendLimitMb, waSendLimitMb: config.waSendLimitMb, maxFileMb: config.maxFileMb, oneGoMb: config.maxUploadMb, canShrinkVideo: await canConvert() }));
   r.post('/api/uploads', (ctx) => startUpload(ctx.body));
   r.upload('/api/uploads/:id', (ctx) => receivePiece(ctx));
   r.delete('/api/uploads/:id', (ctx) => (cancelUpload(ctx.params.id), { ok: true }));

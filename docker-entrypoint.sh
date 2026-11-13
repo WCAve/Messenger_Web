@@ -13,6 +13,11 @@ if [ "$(id -u)" = "0" ]; then
       [ -e "$f" ] && chown "$PUID:$PGID" "$f"
     done
   fi
+  # The video chip (Quick Sync), when passed in with --device=/dev/dri: su-exec gives the app no extra
+  # groups, so let it use this container's copy of the device (Docker made it; the host's stays as it is).
+  for d in /dev/dri/renderD*; do
+    [ -e "$d" ] && chmod a+rw "$d" 2>/dev/null || true
+  done
   exec su-exec "$PUID:$PGID" "$@"
 fi
 exec "$@"

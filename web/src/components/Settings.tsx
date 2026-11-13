@@ -971,6 +971,8 @@ export function SettingsView({ onClose, onLogout, initialPage = null }: { onClos
                 <dd>{server ? `${server.apiVersion ?? 'unknown version'} (${server.status})` : '…'}</dd>
                 <dt>GIF search</dt>
                 <dd>{server ? (server.giphyConfigured ? 'Giphy key set' : 'No Giphy key set') : '…'}</dd>
+                <dt>Video conversion</dt>
+                <dd>{server?.videoConversion ?? '…'}</dd>
                 <dt>Signed-in browsers</dt>
                 <dd>{server?.sessions ?? '…'}</dd>
               </dl>

@@ -50,6 +50,8 @@ export const config = {
   maxFileMb: Number(process.env.MAX_FILE_MB ?? 2048),
   /** Biggest file Signal and WhatsApp take as an attachment, in MB; bigger videos are shrunk to fit. */
   sendLimitMb: Number(process.env.SEND_LIMIT_MB ?? 95),
+  /** The same for WhatsApp: WAHA takes at most 50 MB per request, and a file grows by a third as text (base64). */
+  waSendLimitMb: Number(process.env.WA_SEND_LIMIT_MB ?? 36),
   uploadsDir: path.join(dataDir, 'uploads'),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Giphy API key for the GIF picker (free at developers.giphy.com). Without it the GIF tab explains how to add one. */
