@@ -124,6 +124,11 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   (web/src/shrink.ts, with a note in the message box); what the browser can't read or convert (HEIC, TIFF,
   video other than MP4/H.264) is converted by ffmpeg on the server just before sending (convert.ts,
   `makeSendable` in routes.ts). Audio to WhatsApp goes as a voice message, converted by WAHA.
+- **Big files** (over 20 MB) are uploaded in pieces first (server/src/uploads.ts, `uploadInPieces` in
+  web/src/api.ts), so a proxy's upload limit doesn't matter, then sent as `{upload: id}`. Their base64 is
+  only made in `makeSendable` (an empty entry = "read the stored file"), after videos over
+  `SEND_LIMIT_MB` (95) are made smaller by ffmpeg to fit. Other files over that limit can't be sent: the
+  message box says so before you try.
 - **Browsers allow ~6 connections per site.** Nothing may hold a request open: pictures and files that
   aren't ready answer at once (404 + retry) and are fetched in the background.
 - **Signal's REST API** can't upload sticker packs, join groups by link, make a new invite link or remove

@@ -91,8 +91,13 @@ const EXT: Record<string, string> = {
 
 /** Store an outgoing attachment; returns its local id. */
 export function saveOutgoing(data: Buffer, contentType: string, filename?: string): string {
-  const ext = path.extname(filename ?? '').replace(/[^A-Za-z0-9.]/g, '').slice(0, 10) || EXT[contentType] || '';
-  const id = 'out-' + crypto.randomBytes(12).toString('hex') + ext;
+  const id = newOutgoingId(contentType, filename);
   fs.writeFileSync(localPath(id), data);
   return id;
+}
+
+/** A fresh id for an outgoing attachment (the file is put at localPath(id) by the caller). */
+export function newOutgoingId(contentType: string, filename?: string): string {
+  const ext = path.extname(filename ?? '').replace(/[^A-Za-z0-9.]/g, '').slice(0, 10) || EXT[contentType] || '';
+  return 'out-' + crypto.randomBytes(12).toString('hex') + ext;
 }

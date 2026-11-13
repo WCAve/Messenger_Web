@@ -463,7 +463,7 @@ const server = http.createServer(async (req, res) => {
       const b = await body(req);
       await new Promise((r) => setTimeout(r, 150)); // signal-cli assigns the timestamp a moment after the request
       const ts = Date.now();
-      sent.push({ ...b, base64_attachments: b.base64_attachments?.map((a) => a.slice(0, 60) + '…'), ts });
+      sent.push({ ...b, base64_attachments: b.base64_attachments?.map((a) => a.slice(0, 60) + '…'), attachment_sizes: b.base64_attachments?.map((a) => Buffer.from(a.slice(a.indexOf('base64,') + 7), 'base64').length), ts });
       if (String(b.message).includes('fail')) return json(res, 400, { error: 'Mock failure: recipient unreachable' });
       if (b.edit_timestamp) return json(res, 201, [{ timestamp: String(ts) }]); // edits: no receipts or auto-reply
       const recipient = b.recipients?.[0];

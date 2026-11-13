@@ -15,7 +15,7 @@
  * What each network can do comes from capsFor (networks.ts); the server decides how to send.
  */
 import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { api, attachmentUrl } from '../api';
+import { type UploadLimits, api, attachmentUrl, uploadInPieces } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
@@ -1313,8 +1313,35 @@ interface Pending {
   original?: File; // set when `file` is a smaller version
   useOriginal?: boolean; // "Send the original as a file instead"
   shrinking?: boolean;
+  problem?: string; // can't be sent (too big): says why
+  bigNote?: string; // a big video the server will make smaller
+  progress?: number; // 0–1 while it's uploaded in pieces
 }
 let pendingKey = 0;
+
+// What the server takes (asked once); until it answers, the usual values.
+const MB = 1024 * 1024;
+const PIECES_OVER = 20 * MB; // bigger files are uploaded in pieces, with progress
+let limits: UploadLimits = { sendLimitMb: 95, maxFileMb: 2048, oneGoMb: 100, canShrinkVideo: true };
+let limitsAsked: Promise<UploadLimits> | null = null;
+function getLimits() {
+  limitsAsked ??= api.uploadLimits().then(
+    (l) => (limits = l),
+    () => ((limitsAsked = null), limits),
+  );
+  return limitsAsked;
+}
+const isVideo = (f: File) => f.type.startsWith('video/') || /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpe?g|3gp|mts|flv)$/i.test(f.name);
+const sizeText = (mb: number) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+
+/** A note for a file that's too big to send as it is (or at all), from its size. */
+function sizeCheck(f: File, l: UploadLimits): { problem?: string; bigNote?: string } {
+  if (f.size > l.maxFileMb * MB) return { problem: `Too big: ${formatSize(f.size)} (at most ${sizeText(l.maxFileMb)})` };
+  if (f.size <= l.sendLimitMb * MB || f.type.startsWith('image/')) return {}; // photos are made smaller anyway
+  if (isVideo(f) && l.canShrinkVideo)
+    return { bigNote: `Big video (${formatSize(f.size)}): it'll be made smaller on the server to fit (about ${l.sendLimitMb} MB). That can take a few minutes.` };
+  return { problem: `Too big to send: Signal and WhatsApp take files up to ${l.sendLimitMb} MB (this is ${formatSize(f.size)})` };
+}
 
 /** The "@name" being typed right before the caret, if any (group chats). */
 function mentionAtCaret(text: string, caret: number): { start: number; term: string } | null {
@@ -1521,8 +1548,10 @@ function Composer({
   }, [text]);
 
   function addFiles(list: File[]) {
-    const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file) }));
+    const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file), ...sizeCheck(file, limits) }));
     setFiles((prev) => [...prev, ...added]);
+    // Check again with what this server takes (asked once)
+    void getLimits().then((l) => setFiles((prev) => prev.map((x) => (added.some((a) => a.key === x.key) ? { ...x, problem: undefined, bigNote: undefined, ...sizeCheck(x.original ?? x.file, l) } : x))));
     // Large photos are made smaller here before sending (shrink.ts); the chip says so.
     for (const p of added.filter((x) => x.shrinking)) {
       void shrinkPhoto(p.file)
@@ -1531,6 +1560,8 @@ function Composer({
     }
   }
   const shrinking = files.some((f) => f.shrinking);
+  const unsendable = files.some((f) => f.problem);
+  const uploadAbort = useRef<AbortController | null>(null);
 
   function stopTyping() {
     clearTimeout(typingStop.current);
@@ -1660,19 +1691,32 @@ function Composer({
       }
       return;
     }
-    if ((!body && !files.length) || sending || shrinking) return;
+    if ((!body && !files.length) || sending || shrinking || unsendable) return;
     setSending(true);
     setError(null);
     setSuggest(null);
     stopTyping();
     try {
-      const attachments = await Promise.all(
-        files.map(async (p) => {
-          // The original, when asked for: as a plain file, so the network doesn't try to treat it as a photo
-          const f = p.useOriginal && p.original ? p.original : p.file;
-          return { name: f.name || 'file', type: p.useOriginal ? 'application/octet-stream' : f.type || 'application/octet-stream', data: await fileToBase64(f) };
-        }),
-      );
+      const abort = (uploadAbort.current = new AbortController());
+      const attachments: ({ name: string; type: string; data: string } | { name: string; type: string; upload: string })[] = [];
+      for (const p of files) {
+        // The original, when asked for: as a plain file, so the network doesn't try to treat it as a photo
+        const f = p.useOriginal && p.original ? p.original : p.file;
+        const meta = { name: f.name || 'file', type: p.useOriginal ? 'application/octet-stream' : f.type || 'application/octet-stream' };
+        if (f.size <= PIECES_OVER) {
+          attachments.push({ ...meta, data: await fileToBase64(f) });
+          continue;
+        }
+        // Big: uploaded in pieces first, with progress on its chip
+        const setProgress = (progress: number | undefined) => setFiles((all) => all.map((x) => (x.key === p.key ? { ...x, progress } : x)));
+        setProgress(0);
+        try {
+          attachments.push({ ...meta, upload: await uploadInPieces(f, setProgress, abort.signal) });
+        } finally {
+          setProgress(undefined);
+        }
+      }
+      uploadAbort.current = null;
       const previewUrl = linkCard && linkCard.url === firstLink && rich.text.includes(linkCard.url) ? linkCard.url : undefined;
       const msg = await api.send(id, { ...rich, quoteId: replyTo?.id, attachments: attachments.length ? attachments : undefined, previewUrl });
       setLinkCard(null);
@@ -1686,8 +1730,9 @@ function Composer({
       setFiles([]);
       clearReply();
     } catch (e) {
-      setError((e as Error).message);
+      if ((e as Error).name !== 'AbortError') setError((e as Error).message);
     } finally {
+      uploadAbort.current = null;
       setSending(false);
       area.current?.focus();
     }
@@ -1913,10 +1958,25 @@ function Composer({
       {files.length > 0 && (
         <div className="pending-files">
           {files.map((p, i) => (
-            <div key={p.key} className={`pending-file${p.original || p.shrinking ? ' noted' : ''}`}>
+            <div key={p.key} className={`pending-file${p.original || p.shrinking || p.problem || p.bigNote || p.progress !== undefined ? ' noted' : ''}${p.problem ? ' unsendable' : ''}`}>
               {p.preview ? <img src={p.preview} alt="" /> : <Icon name="file" size={28} />}
               <span>{p.useOriginal && p.original ? p.original.name : p.file.name}</span>
               {p.shrinking && <small className="shrink-note">Making it smaller…</small>}
+              {p.problem && (
+                <small className="shrink-note problem" role="alert">
+                  {p.problem}
+                </small>
+              )}
+              {p.bigNote && p.progress === undefined && <small className="shrink-note">{p.bigNote}</small>}
+              {p.progress !== undefined && (
+                <small className="shrink-note upload-progress">
+                  <span>Uploading… {Math.floor(p.progress * 100)}%</span>
+                  <progress max={1} value={p.progress} aria-label={`Uploading ${p.file.name}`} />
+                  <button className="link-btn" onClick={() => uploadAbort.current?.abort()}>
+                    Cancel
+                  </button>
+                </small>
+              )}
               {p.original && (
                 <small className="shrink-note" title="Large photos are made smaller so they can be sent">
                   {p.useOriginal ? `Original, as a file (${formatSize(p.original.size)})` : `Made smaller: ${formatSize(p.original.size)} → ${formatSize(p.file.size)}`}
@@ -1925,7 +1985,7 @@ function Composer({
                   </button>
                 </small>
               )}
-              <button className="remove" onClick={() => setFiles((f) => f.filter((_, j) => j !== i))} aria-label={`Remove ${p.file.name}`}>
+              <button className="remove" onClick={() => (uploadAbort.current?.abort(), setFiles((f) => f.filter((_, j) => j !== i)))} aria-label={`Remove ${p.file.name}`}>
                 <Icon name="close" size={14} />
               </button>
             </div>
@@ -2041,7 +2101,7 @@ function Composer({
         <button
           className="send-btn"
           onClick={send}
-          disabled={disabled || sending || shrinking || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
+          disabled={disabled || sending || shrinking || unsendable || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
           aria-label={editing ? (text.trim() ? 'Save edit' : 'Delete message') : 'Send'}
           title={editing ? (text.trim() ? 'Save edit' : 'Everything erased: delete the message') : undefined}
         >

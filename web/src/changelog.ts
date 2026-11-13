@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-2',
+    date: '13 November 2026',
+    items: [
+      'Big files: anything over 20 MB is uploaded in pieces with a progress bar (and a Cancel link), so large files no longer fail with “File could not be read”. Files up to 2 GB can be picked.',
+      'Videos too big for Signal or WhatsApp (over about 95 MB) are made smaller on the server so they fit; the message box says so before you send. Other files that are too big say so straight away.',
+    ],
+  },
+  {
     id: '2026-11-13',
     date: '13 November 2026',
     items: [

@@ -190,7 +190,9 @@ Back up both appdata folders:
 | `SECURE_COOKIES` | `false` | Set `true` when served over HTTPS through a proxy (automatic with `TLS_CERT_FILE`) |
 | `TLS_CERT_FILE` / `TLS_KEY_FILE` | (none) | PEM certificate and key: serve HTTPS directly |
 | `SESSION_DAYS` | `30` | How long a browser stays signed in |
-| `MAX_UPLOAD_MB` | `100` | Largest attachment you can send |
+| `MAX_UPLOAD_MB` | `100` | Largest attachment sent in one go (bigger files are uploaded in pieces) |
+| `MAX_FILE_MB` | `2048` | Largest file you can pick to send; uploaded in pieces with a progress bar |
+| `SEND_LIMIT_MB` | `95` | Largest attachment Signal and WhatsApp take; bigger videos are made smaller on the server (ffmpeg) to fit |
 | `PUID` / `PGID` | `99` / `100` | Owner of files in `/data` |
 | `DATA_DIR` | `/data` | Database and attachments |
 | `PORT` | `3000` | HTTP port |

@@ -24,6 +24,7 @@ them use the usual ports without clashing, plus its own data folder. Suites must
 path or log name: use `E2E_DATA` (the app's data folder), `E2E_SERVER_LOG`, `E2E_WAHA_LOG` and
 `E2E_MOCK_LOG` from the environment. Slow suites start first (`SLOW` in run.sh). Waits that take a
 minute in real life are seconds in the tests (`WAHA_EVENT_SAVE_MS`, `EVENTS_PING_MS` … set in run.sh).
+A suite that needs its own server settings says so in a line `# server-env: SEND_LIMIT_MB=3 …` (e2e59).
 
 Logs and screenshots go to `.test-out/` (`<suite>.log`, and `server-<n>.log`, `waha-<n>.log`,
 `mock-<n>.log` per runner). Each suite prints one line:

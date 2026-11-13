@@ -21,7 +21,8 @@ How it all fits together: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 | `signal.ts` | The receive websocket and the Signal connection state; contacts/groups directory |
 | `ingest.ts` | Signal envelopes → messages, receipts, reactions, edits, calls, typing |
 | `attachments.ts` | Files: copied out of signal-cli into DATA_DIR/attachments, served by id |
-| `convert.ts` | Making files sendable with ffmpeg (in the Docker image): HEIC/TIFF → JPEG, odd video → MP4/H.264, huge photos |
+| `convert.ts` | Making files sendable with ffmpeg (in the Docker image): HEIC/TIFF → JPEG, odd video → MP4/H.264, huge photos, videos too big to send made smaller |
+| `uploads.ts` | Big files you send, uploaded in pieces (DATA_DIR/uploads) before the message is sent |
 | `avatars.ts` | Signal profile and group pictures, cached on disk |
 | `stickers.ts` | Signal sticker packs: download and decrypt from Signal's CDN (`signal-ca.ts` = its root cert) |
 | `expiry.ts` | Disappearing messages |

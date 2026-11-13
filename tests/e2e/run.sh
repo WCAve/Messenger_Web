@@ -69,7 +69,7 @@ PY
       WAHA_URL="$waha" WAHA_API_KEY=test-waha-key GIPHY_API_KEY=test-key LINK_PREVIEW_INSECURE=1 \
       WAHA_HISTORY_ROUNDS_MS="${ROUNDS:-1500,7000}" WAHA_RESUME_SETTLE_MS=1500 WAHA_RESTART_AFTER_MS=2000 WAHA_AFTER_CONNECT_PAUSE_MS=1500 WAHA_CATCHUP_MARGIN_MS=2000 \
       WAHA_EVENT_SAVE_MS=1000 EVENTS_PING_MS=2000 E2E_HOOKS=1 \
-      node --no-warnings=ExperimentalWarning server/dist/index.js > "$OUT/server-$N.log" 2>&1 &
+      env ${SUITE_ENV:-} node --no-warnings=ExperimentalWarning server/dist/index.js > "$OUT/server-$N.log" 2>&1 &
     pids+=($!)
     for _ in $(seq 1 50); do # until the app answers
       python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:3000/healthz', timeout=1)" 2>/dev/null && break
@@ -81,6 +81,8 @@ PY
   while :; do
     t=$(flock "$QUEUE.lock" sh -c 'head -n1 "$1"; sed -i 1d "$1"' _ "$QUEUE")
     [ -z "$t" ] && break
+    # A suite can ask for its own settings with a line "# server-env: NAME=value …"
+    SUITE_ENV=$(sed -n 's/^# server-env: //p' "tests/e2e/$t.py" | head -1)
     if [ "$t" = e2e ]; then start_all nowa unlinked; else start_all; fi # the first suite: Signal only, not linked yet
     python3 "tests/e2e/$t.py" "$OUT" > "$OUT/$t.log" 2>&1
     code=$?
@@ -98,7 +100,7 @@ if [ ${#suites[@]} -eq 0 ]; then
   mapfile -t suites < <(ls tests/e2e/e2e*.py | xargs -n1 basename | sed 's/\.py$//' | sort -V)
 fi
 # Slowest first (they wait on purpose), then the rest in order.
-SLOW=(e2e43 e2e52 e2e53 e2e40 e2e e2e9 e2e44 e2e58 e2e42 e2e57 e2e19 e2e11 e2e27 e2e10)
+SLOW=(e2e43 e2e59 e2e52 e2e53 e2e40 e2e e2e9 e2e44 e2e58 e2e42 e2e57 e2e19 e2e11 e2e27 e2e10)
 queue="$OUT/.queue"; results="$OUT/.results"
 : > "$results"
 {

@@ -46,6 +46,11 @@ export const config = {
   sendTypingIndicators: bool(process.env.SEND_TYPING_INDICATORS, true),
   /** Max upload size for outgoing attachments, in MB. */
   maxUploadMb: Number(process.env.MAX_UPLOAD_MB ?? 100),
+  /** Biggest file you can pick to send, in MB (uploaded in pieces; big videos are made smaller to fit). */
+  maxFileMb: Number(process.env.MAX_FILE_MB ?? 2048),
+  /** Biggest file Signal and WhatsApp take as an attachment, in MB; bigger videos are shrunk to fit. */
+  sendLimitMb: Number(process.env.SEND_LIMIT_MB ?? 95),
+  uploadsDir: path.join(dataDir, 'uploads'),
   logLevel: process.env.LOG_LEVEL ?? 'info',
   /** Giphy API key for the GIF picker (free at developers.giphy.com). Without it the GIF tab explains how to add one. */
   giphyApiKey: process.env.GIPHY_API_KEY?.trim() || null,

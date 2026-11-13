@@ -1,7 +1,7 @@
 /**
  * Every call to the server, typed. `call()` does JSON over fetch with the session cookie; a 401
  * anywhere sends the app back to the login screen (onUnauthorized). Big uploads (Android backups) go
- * through uploadBackup (XMLHttpRequest, for progress). Server routes: server/src/routes.ts and
+ * through uploadBackup (XMLHttpRequest, for progress); big files to send through uploadInPieces. Server routes: server/src/routes.ts and
  * groups.ts.
  */
 import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, WaContact, WaState } from './types';
@@ -113,9 +113,10 @@ export const api = {
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,
-    b: RichText & { quoteId?: number; previewUrl?: string; attachments?: { name: string; type: string; data: string }[]; sticker?: { packId: string; stickerId: number } },
+    b: RichText & { quoteId?: number; previewUrl?: string; attachments?: ({ name: string; type: string; data: string } | { name: string; type: string; upload: string })[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
+  uploadLimits: () => call<UploadLimits>('GET', '/api/uploads/limits'),
   edit: (id: number, b: RichText) => call<Message>('POST', `/api/messages/${id}/edit`, b),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
@@ -201,6 +202,77 @@ export function uploadBackup(file: File, onProgress: (p: number) => void): Promi
     xhr.onerror = () => reject(new ApiError('Upload failed (connection lost). For very large files, copy the file into the backup folder instead.', 0));
     xhr.send(file);
   });
+}
+
+export interface UploadLimits {
+  sendLimitMb: number; // the most Signal and WhatsApp take
+  maxFileMb: number; // the most you can pick
+  oneGoMb: number; // bigger than this is uploaded in pieces
+  canShrinkVideo: boolean;
+}
+
+/** One piece, with progress; resolves with the server's answer and status. */
+function sendPiece(id: string, offset: number, piece: Blob, onProgress: (loaded: number) => void, signal?: AbortSignal) {
+  return new Promise<{ status: number; data: { received?: number; error?: string } }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/uploads/${id}`);
+    xhr.setRequestHeader('content-type', 'application/octet-stream');
+    xhr.setRequestHeader('x-messenger-upload', '1');
+    xhr.setRequestHeader('x-offset', String(offset));
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {
+        /* a proxy's own error page */
+      }
+      resolve({ status: xhr.status, data });
+    };
+    xhr.onerror = () => resolve({ status: 0, data: {} });
+    xhr.onabort = () => reject(new DOMException('Cancelled', 'AbortError'));
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
+    xhr.send(piece);
+  });
+}
+
+/**
+ * Upload a big file in pieces (server/src/uploads.ts), so a reverse proxy's upload limit doesn't matter
+ * and nothing big is held in memory. Picks up where it was after a hiccup; pieces get smaller when a
+ * proxy refuses them as too large. Returns the upload id to send the message with.
+ */
+export async function uploadInPieces(file: File, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<string> {
+  const start = await call<{ id: string; chunkMb: number }>('POST', '/api/uploads', { name: file.name, type: file.type, size: file.size });
+  let pieceSize = start.chunkMb * 1024 * 1024;
+  let offset = 0;
+  let failures = 0;
+  try {
+    while (offset < file.size) {
+      if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const piece = file.slice(offset, offset + pieceSize);
+      const { status, data } = await sendPiece(start.id, offset, piece, (loaded) => onProgress((offset + loaded) / file.size), signal);
+      if (status >= 200 && status < 300 && typeof data.received === 'number') {
+        offset = data.received;
+        failures = 0;
+      } else if (status === 409 && typeof data.received === 'number') {
+        offset = data.received; // out of step: go on from what arrived
+      } else if (status === 413 && pieceSize > 256 * 1024) {
+        pieceSize = Math.max(256 * 1024, Math.floor(pieceSize / 4)); // a proxy with a small upload limit
+      } else if (status === 401) {
+        onUnauthorized.dispatchEvent(new Event('unauthorized'));
+        throw new ApiError('Not logged in', 401);
+      } else if (status === 404 || ++failures > 6) {
+        throw new ApiError(data.error ?? (status ? `Upload failed (${status})` : 'Upload failed (connection lost)'), status);
+      } else {
+        await new Promise((r) => setTimeout(r, 1000 * failures)); // a hiccup: wait a little, then go on
+      }
+      onProgress(offset / file.size);
+    }
+  } catch (e) {
+    void call('DELETE', `/api/uploads/${start.id}`).catch(() => {});
+    throw e;
+  }
+  return start.id;
 }
 
 export interface WaProfile {

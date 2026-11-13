@@ -11,8 +11,9 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { fetchAttachment, isSafeId, localPath, saveOutgoing } from './attachments.js';
-import { convertForSending, needsConverting } from './convert.js';
+import { fetchAttachment, isSafeId, localPath, newOutgoingId, saveOutgoing } from './attachments.js';
+import { TooBig, canConvert, convertForSending, needsConverting } from './convert.js';
+import { cancelUpload, receivePiece, startUpload, takeUpload } from './uploads.js';
 import { getAvatar, invalidateAvatar, readAvatar } from './avatars.js';
 import { getSettings, updateSettings } from './settings.js';
 import { getManifest, getStickerImage, isPackId, listPacks, parsePackLink, refreshPacks } from './stickers.js';
@@ -315,31 +316,40 @@ function readBase64(a: Attachment) {
   return `data:${a.contentType};filename=${(a.filename ?? 'file').replace(/[;,\r\n/\\]/g, '_')};base64,${fs.readFileSync(localPath(a.id)).toString('base64')}`;
 }
 
-/** Hand a stored message to signal-cli and record the outcome. */
 /**
- * Files the networks can't take as they are (iPhone photos, odd video formats, huge photos) are
- * converted first (convert.ts); the stored message then shows the converted file. The message stays
- * "pending" meanwhile.
+ * Files the networks can't take as they are (iPhone photos, odd video formats, huge photos, videos too
+ * big to send) are converted first (convert.ts), working from the stored file; the stored message then
+ * shows the converted file. The message stays "pending" meanwhile. An empty entry in `base64` (LAZY)
+ * means "read it from the stored file": big uploads are only turned into text here, after shrinking.
+ * Throws TooBig when a file can't be sent at all.
  */
+const LAZY = '';
 async function makeSendable<P extends { base64: string[] }>(messageId: number, payload: P, log: (m: string) => void): Promise<P> {
   if (!payload.base64.length) return payload;
   const row = getMessage(messageId);
   const atts: Attachment[] = row?.attachments ? JSON.parse(row.attachments) : [];
-  if (atts.length !== payload.base64.length || !atts.some((a) => needsConverting(a.contentType, a.filename ?? '', a.size ?? 0))) return payload;
+  if (atts.length !== payload.base64.length) return payload;
+  const limit = config.sendLimitMb * 1024 * 1024;
   const base64 = [...payload.base64];
   let changed = false;
   for (const [i, a] of atts.entries()) {
-    if (!needsConverting(a.contentType, a.filename ?? '', a.size ?? 0)) continue;
-    const comma = base64[i].indexOf('base64,');
-    const out = await convertForSending({ buf: Buffer.from(base64[i].slice(comma + 7), 'base64'), type: a.contentType, name: a.filename ?? 'file' }, log);
-    if (!out) continue;
-    const id = saveOutgoing(out.buf, out.type, out.name);
-    atts[i] = { ...a, id, contentType: out.type, filename: out.name, size: out.buf.length };
-    base64[i] = `data:${out.type};filename=${out.name};base64,${out.buf.toString('base64')}`;
-    changed = true;
+    const file = localPath(a.id);
+    const size = fs.statSync(file).size;
+    if (needsConverting(a.contentType, a.filename ?? '', size, limit)) {
+      const out = await convertForSending({ file, type: a.contentType, name: a.filename ?? 'file', size }, log, limit);
+      if (out) {
+        const id = saveOutgoing(out.buf, out.type, out.name);
+        if (size > limit && a.id.startsWith('out-')) fs.rmSync(file, { force: true }); // an upload too big to ever send
+        atts[i] = { ...a, id, contentType: out.type, filename: out.name, size: out.buf.length };
+        base64[i] = `data:${out.type};filename=${out.name};base64,${out.buf.toString('base64')}`;
+        changed = true;
+        continue;
+      }
+    }
+    if (size > limit) throw new TooBig(`${a.filename ?? 'This file'} is too big to send (${(size / 1024 / 1024).toFixed(0)} MB; at most ${config.sendLimitMb} MB)`);
+    if (base64[i] === LAZY) base64[i] = readBase64(a);
   }
-  if (!changed) return payload;
-  emitMessageRow(messageId, { attachments: JSON.stringify(atts) });
+  if (changed) emitMessageRow(messageId, { attachments: JSON.stringify(atts) });
   return { ...payload, base64 };
 }
 
@@ -358,7 +368,14 @@ async function deliver(
   },
   log: (m: string) => void,
 ) {
-  payload = await makeSendable(messageId, payload, log);
+  try {
+    payload = await makeSendable(messageId, payload, log);
+  } catch (e) {
+    log(`send: ${(e as Error).message}`);
+    emitMessageRow(messageId, { status: 'failed', error: e instanceof TooBig ? e.message : `Couldn't prepare the file: ${(e as Error).message}` });
+    emitConversation(getConversation(c.id)!);
+    return;
+  }
   if (isWa(c)) {
     try {
       await deliverWa(c, messageId, payload);
@@ -847,12 +864,18 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     return conversationDto(updated);
   });
 
+  // Big files are uploaded in pieces first (uploads.ts), then sent as { upload: id }.
+  r.get('/api/uploads/limits', async () => ({ sendLimitMb: config.sendLimitMb, maxFileMb: config.maxFileMb, oneGoMb: config.maxUploadMb, canShrinkVideo: await canConvert() }));
+  r.post('/api/uploads', (ctx) => startUpload(ctx.body));
+  r.upload('/api/uploads/:id', (ctx) => receivePiece(ctx));
+  r.delete('/api/uploads/:id', (ctx) => (cancelUpload(ctx.params.id), { ok: true }));
+
   // Send a message. Returns immediately with a "pending" message; delivery status follows over /api/events.
   r.post('/api/conversations/:id/messages', async (ctx) => {
     const c = conv(ctx);
     const account = accountFor(c);
     const { text, ranges } = richInput(ctx.body);
-    const files: { name?: string; type?: string; data: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
+    const files: { name?: string; type?: string; data?: string; upload?: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
     const rawSticker = ctx.body?.sticker;
     const sticker =
       rawSticker && typeof rawSticker.packId === 'string' && isPackId(rawSticker.packId) && Number.isInteger(rawSticker.stickerId)
@@ -864,11 +887,19 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
 
     const attachments: Attachment[] = [];
     const base64: string[] = [];
+    for (const f of files) if (typeof f?.data !== 'string' && typeof f?.upload !== 'string') throw new HttpError(400, 'Bad attachment');
     for (const f of files) {
-      if (typeof f?.data !== 'string') throw new HttpError(400, 'Bad attachment');
       const type = String(f.type || 'application/octet-stream').replace(/[^\w.+/-]/g, '');
       const name = String(f.name || 'file').replace(/[;,\r\n/\\]/g, '_').slice(0, 120);
-      const buf = Buffer.from(f.data, 'base64');
+      if (typeof f.upload === 'string') {
+        // uploaded in pieces beforehand (uploads.ts): moved into place, read when it's sent
+        let id = '';
+        const u = takeUpload(f.upload, () => localPath((id = newOutgoingId(type, name))));
+        attachments.push({ id, contentType: type, filename: name, size: u.size });
+        base64.push(LAZY);
+        continue;
+      }
+      const buf = Buffer.from(f.data!, 'base64');
       const id = saveOutgoing(buf, type, name);
       attachments.push({ id, contentType: type, filename: name, size: buf.length });
       base64.push(`data:${type};filename=${name};base64,${f.data}`);
@@ -1047,7 +1078,8 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const c = getConversation(m.conversation_id)!;
     const account = accountFor(c);
     const atts: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
-    const base64 = atts.map(readBase64);
+    if (atts.some((a) => !fs.existsSync(localPath(a.id)))) throw new HttpError(409, "The file isn't on the server any more");
+    const base64 = atts.map(() => LAZY); // read when it's sent (after any shrinking)
     const quote = m.quote ? JSON.parse(m.quote) : null;
     const sticker = m.sticker ? JSON.parse(m.sticker) : null;
     const updated = emitMessageRow(m.id, { status: 'pending', error: null })!;
