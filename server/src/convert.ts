@@ -15,8 +15,9 @@
  *
  * Video is done by the computer's video chip when it can (Intel Quick Sync through VAAPI: the container
  * needs /dev/dri; HW_VIDEO=off turns it off), several times faster than by the processor. Each video
- * tries: all on the chip → read by the processor, the rest on the chip → all by the processor (libx264),
- * so a format or phone rotation the chip can't handle still works.
+ * tries: all on the chip (only formats it reads, chipCanRead) → read by the processor, resized and
+ * encoded on the chip → all by the processor (libx264). The start-up check (videoChip) runs both chip
+ * ways on a small clip. Failures are logged with the video's format.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -46,7 +47,7 @@ function run(cmd: string, args: string[], timeoutMs: number): Promise<string> {
     p.on('exit', (code) => {
       clearTimeout(t);
       if (code === 0) resolve(out);
-      else reject(new Error(`${cmd} failed (${code}): ${err.trim().split('\n').pop() ?? ''}`));
+      else reject(new Error(`${cmd} failed (${code}): ${err.trim().split('\n').slice(-3).join(' | ')}`));
     });
   });
 }
@@ -60,6 +61,7 @@ export async function canConvert() {
 // ---------- the video chip (Quick Sync / VAAPI) ----------
 
 let chip: string | null | undefined; // the render device that works, null when there's none
+let chipReads = false; // it also reads (decodes) and resizes video itself, not only encodes
 let chipNote = '';
 
 /** The video chip's device when it can encode H.264, checked once with a tiny test video. */
@@ -70,16 +72,32 @@ export async function videoChip(log?: (m: string) => void): Promise<string | nul
   const dir = '/dev/dri';
   const devices = process.env.HW_VIDEO_DEVICE ? [process.env.HW_VIDEO_DEVICE] : fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.startsWith('renderD')).map((f) => path.join(dir, f)) : [];
   if (!devices.length) return (chipNote = 'no /dev/dri in the container'), null;
-  for (const dev of devices) {
-    try {
-      await run('ffmpeg', ['-v', 'error', '-init_hw_device', `vaapi=chip:${dev}`, '-filter_hw_device', 'chip', '-f', 'lavfi', '-i', 'testsrc2=size=320x240:rate=10', '-t', '0.5', '-vf', 'format=nv12,hwupload', '-c:v', 'h264_vaapi', '-f', 'null', '-'], 30_000);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-chip-'));
+  try {
+    // A second of ordinary video with sound, put through both ways the chip is used (as encodeVideo does)
+    const clip = path.join(tmp, 'clip.mp4');
+    await run('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=30', '-f', 'lavfi', '-i', 'sine', '-t', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', clip], 60_000);
+    for (const dev of devices) {
+      const job = { input: clip, out: path.join(tmp, 'out.mp4'), size: ['if(gte(iw,ih),-2,240)', 'if(gte(iw,ih),240,-2)'] as [string, string], bitrate: 500_000, audio: ['-c:a', 'aac', '-b:a', '64000'] };
+      try {
+        await run('ffmpeg', chipArgs(job, dev, false), 60_000);
+      } catch (e) {
+        chipNote = `${dev}: ${(e as Error).message}`;
+        continue;
+      }
+      chipReads = await run('ffmpeg', chipArgs(job, dev, true), 60_000).then(
+        () => true,
+        (e: Error) => (log?.(`video conversion: the video chip can't read video here (${e.message}); the processor reads, the chip does the rest`), false),
+      );
       log?.(`video conversion: using the video chip (${dev})`);
       chip = dev;
       chipNote = dev;
       return chip;
-    } catch (e) {
-      chipNote = `${dev}: ${(e as Error).message}`;
     }
+  } catch (e) {
+    chipNote = (e as Error).message;
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
   log?.(`video conversion: the video chip can't be used (${chipNote}); using the processor`);
   return null;
@@ -88,8 +106,47 @@ export async function videoChip(log?: (m: string) => void): Promise<string | nul
 /** For the settings page: what converts video. */
 export async function videoConversion(): Promise<string> {
   if (!(await canConvert())) return 'Not available (no ffmpeg)';
-  return (await videoChip()) ? `Video chip (Quick Sync / VAAPI, ${chip})` : `Processor (${chipNote || 'no video chip'})`;
+  return (await videoChip()) ? `Video chip (Quick Sync / VAAPI, ${chip}${chipReads ? '' : '; the processor reads the video'})` : `Processor (${chipNote || 'no video chip'})`;
 }
+
+/**
+ * Whether the chip can read this video itself. Intel's chips read ordinary 8-bit H.264 and 8/10-bit
+ * HEVC and VP9; not 10-bit or 4:2:2 H.264 (some cameras). Turned videos (phones store "rotate 90"
+ * instead of turning the picture) are turned by the processor, so those are read by the processor too.
+ */
+function chipCanRead(v: VideoInfo | undefined): boolean {
+  if (!v) return false;
+  const rotation = Number(v.side_data_list?.find((d) => d.rotation !== undefined)?.rotation ?? v.tags?.rotate ?? 0);
+  if (rotation % 360 !== 0) return false;
+  const fmt = v.pix_fmt ?? '';
+  if (v.codec_name === 'h264') return /^(yuv420p|yuvj420p|nv12)$/.test(fmt) && !/10|4:2:2|4:4:4/.test(v.profile ?? '');
+  if (v.codec_name === 'hevc' || v.codec_name === 'vp9') return /^(yuv420p|yuvj420p|nv12|yuv420p10le|p010le)$/.test(fmt);
+  return v.codec_name === 'mpeg2video';
+}
+
+interface VideoInfo {
+  codec_type: string;
+  codec_name: string;
+  width?: number;
+  height?: number;
+  pix_fmt?: string;
+  profile?: string;
+  r_frame_rate?: string;
+  side_data_list?: { rotation?: number }[];
+  tags?: { rotate?: string };
+}
+
+/** ffmpeg arguments for a job on the chip: `reads` = the chip also reads and resizes, else the processor reads. */
+function chipArgs(j: VideoJob, dev: string, reads: boolean): string[] {
+  const [w, h] = j.size;
+  const scale = `scale_vaapi=w='${w}':h='${h}':format=nv12`;
+  const input = reads
+    ? ['-hwaccel', 'vaapi', '-hwaccel_device', dev, '-hwaccel_output_format', 'vaapi', '-i', j.input, '-vf', scale]
+    : ['-init_hw_device', `vaapi=chip:${dev}`, '-filter_hw_device', 'chip', '-i', j.input, '-vf', `format=nv12,hwupload,${scale}`]; // only reading on the processor; resizing on the chip
+  return ['-v', 'warning', '-y', ...input, '-c:v', 'h264_vaapi', ...(j.bitrate ? rateArgs(j.bitrate) : ['-qp', '24']), ...(j.fps ? ['-r', String(j.fps)] : []), ...j.audio, '-movflags', '+faststart', j.out];
+}
+
+const rateArgs = (b: number) => ['-b:v', String(b), '-maxrate', String(Math.floor(b * 1.4)), '-bufsize', String(b * 2)];
 
 interface VideoJob {
   input: string;
@@ -98,34 +155,40 @@ interface VideoJob {
   size: [string, string];
   /** A target bitrate (bits/s); without it, a fixed quality */
   bitrate?: number;
+  /** Lower the frame rate to this (made-smaller videos: 60 → 30 fps leaves more for each picture) */
+  fps?: number;
   audio: string[];
+  /** The probed video stream, to decide whether the chip can read it */
+  video?: VideoInfo;
 }
 
 /** Encode to MP4/H.264: on the chip when possible, else by the processor. Returns what did it. */
 async function encodeVideo(j: VideoJob, log: (m: string) => void, timeoutMs: number): Promise<string> {
   const [w, h] = j.size;
-  const rate = j.bitrate ? ['-b:v', String(j.bitrate), '-maxrate', String(Math.floor(j.bitrate * 1.4)), '-bufsize', String(j.bitrate * 2)] : [];
-  const tail = [...j.audio, '-movflags', '+faststart', j.out];
   const dev = await videoChip(log);
   const attempts: [string, string[]][] = [];
   if (dev) {
-    const enc = ['-c:v', 'h264_vaapi', ...(j.bitrate ? rate : ['-qp', '24'])];
-    attempts.push(['video chip', ['-hwaccel', 'vaapi', '-hwaccel_device', dev, '-hwaccel_output_format', 'vaapi', '-i', j.input, '-vf', `scale_vaapi=w='${w}':h='${h}':format=nv12`, ...enc]]);
-    attempts.push(['processor + video chip', ['-init_hw_device', `vaapi=chip:${dev}`, '-filter_hw_device', 'chip', '-i', j.input, '-vf', `scale='${w}':'${h}',format=nv12,hwupload`, ...enc]]);
+    if (chipReads && chipCanRead(j.video)) attempts.push(['video chip', chipArgs(j, dev, true)]);
+    attempts.push(['processor reads, video chip does the rest', chipArgs(j, dev, false)]);
   }
-  attempts.push(['processor', ['-i', j.input, '-c:v', 'libx264', '-preset', 'veryfast', ...(j.bitrate ? rate : ['-crf', '23']), '-pix_fmt', 'yuv420p', '-vf', `scale='${w}':'${h}'`]]);
+  attempts.push([
+    'processor',
+    ['-v', 'warning', '-y', '-i', j.input, '-c:v', 'libx264', '-preset', 'veryfast', ...(j.bitrate ? rateArgs(j.bitrate) : ['-crf', '23']), '-pix_fmt', 'yuv420p', '-vf', `scale='${w}':'${h}'`, ...(j.fps ? ['-r', String(j.fps)] : []), ...j.audio, '-movflags', '+faststart', j.out],
+  ]);
   let last: Error | null = null;
   for (const [what, args] of attempts) {
     try {
-      await run('ffmpeg', ['-v', 'error', '-y', ...args, ...tail], timeoutMs);
+      await run('ffmpeg', args, timeoutMs);
       return what;
     } catch (e) {
       last = e as Error;
-      if (what !== 'processor') log(`video ${what} didn't work (${last.message}); trying the next way`);
+      if (what !== 'processor') log(`video: "${what}" didn't work (${last.message}; video: ${describe(j.video)}); trying the next way`);
     }
   }
   throw last!;
 }
+
+const describe = (v?: VideoInfo) => (v ? `${v.codec_name} ${v.profile ?? ''} ${v.pix_fmt ?? ''} ${v.width}x${v.height} ${v.r_frame_rate ?? ''}`.replace(/\s+/g, ' ').trim() : 'unknown');
 
 const BIG_PHOTO = 16 * 1024 * 1024;
 const isHeic = (type: string, name: string) => /^image\/hei[cf]/.test(type) || /\.hei[cf]$/i.test(name);
@@ -153,7 +216,7 @@ export function needsConverting(type: string, name: string, size: number, limit 
 
 interface Probe {
   format?: { format_name?: string; duration?: string };
-  streams?: { codec_type: string; codec_name: string; width?: number; height?: number }[];
+  streams?: VideoInfo[];
 }
 
 /**
@@ -179,7 +242,7 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
       log(`converted ${f.name} (${f.type}, ${mb(f.size)}) to JPEG (${mb(buf.length)})`);
       return { buf, type: 'image/jpeg', name: swapExt(f.name, '.jpg') };
     }
-    const probe = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=format_name,duration:stream=codec_type,codec_name,width,height', '-of', 'json', input], 60_000).catch(() => '');
+    const probe = await run('ffprobe', ['-v', 'error', '-show_entries', 'format=format_name,duration:stream=codec_type,codec_name,width,height,pix_fmt,profile,r_frame_rate:stream_side_data=rotation:stream_tags=rotate', '-of', 'json', input], 60_000).catch(() => '');
     const info: Probe = probe ? JSON.parse(probe) : {};
     const video = info.streams?.find((s) => s.codec_type === 'video');
     const vcodec = video?.codec_name;
@@ -198,7 +261,7 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
       if (vcodec === 'h264' && mp4ish && f.type === 'video/mp4' && (!acodec || acodec === 'aac')) return null;
       const reencode = vcodec !== 'h264';
       let how = '';
-      if (reencode) how = await encodeVideo({ input, out, size: ['min(1920,iw)', '-2'], audio: audioArgs }, log, 15 * 60_000);
+      if (reencode) how = await encodeVideo({ input, out, size: ['min(1920,iw)', '-2'], audio: audioArgs, video }, log, 15 * 60_000);
       else await run('ffmpeg', ['-v', 'error', '-y', '-i', input, '-c:v', 'copy', ...audioArgs, '-movflags', '+faststart', out], 15 * 60_000);
       if (fs.statSync(out).size <= limit) return result(reencode ? `converted (${how})` : 'repacked');
       // came out too big: make it smaller below
@@ -207,6 +270,9 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
     const seconds = Number(info.format?.duration);
     if (!(seconds > 0)) throw new TooBig(`${f.name} is too big to send (${mb(f.size)}) and its length can't be read to make it smaller`);
     const short = Math.min(video?.width ?? 1080, video?.height ?? 1080);
+    const [num, den] = (video?.r_frame_rate ?? '').split('/').map(Number);
+    const fps = num && den ? num / den : 0;
+    log(`making ${f.name} smaller (${mb(f.size)}, ${Math.round(seconds)} s; ${describe(video)}${chipCanRead(video) ? '' : ', the chip can\'t read this one'})`);
     for (const share of [0.9, 0.75, 0.6]) {
       const total = (limit * share * 8) / seconds; // bits per second for sound and picture together
       const audio = acodec ? Math.min(96_000, total * 0.15) : 0;
@@ -220,6 +286,8 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
           out,
           size: [`if(gte(iw,ih),-2,${side})`, `if(gte(iw,ih),${side},-2)`],
           bitrate: vbit,
+          fps: fps > 31 ? 30 : undefined,
+          video,
           audio: acodec ? ['-c:a', 'aac', '-b:a', String(Math.max(32_000, Math.floor(audio))), '-ac', '2'] : ['-an'],
         },
         log,

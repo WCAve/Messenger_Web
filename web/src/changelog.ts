@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-13-4',
+    date: '13 November 2026',
+    items: [
+      'Video chip: videos it can’t read itself (phone videos filmed upright, some 10-bit videos) are no longer tried on it first; the processor only reads them and the chip does the resizing and the rest, so much less load on the processor. Videos made smaller go from 60 to 30 frames per second, which leaves more quality for each picture.',
+    ],
+  },
+  {
     id: '2026-11-13-3',
     date: '13 November 2026',
     items: [
