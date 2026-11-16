@@ -10,6 +10,7 @@
  * Test hooks:
  *   POST /mock/incoming {"from":"jan","text":"hi","group":false,"extra":{…}}   incoming message
  *   POST /mock/event {"event":"message.reaction","payload":{…}}                any raw event
+ *   POST /mock/config {"silentMessages":true}                                    stop passing new messages on (until a session restart)
  *   GET  /mock/sent                                                             everything Messenger Web sent
  */
 import crypto from 'node:crypto';
@@ -79,6 +80,7 @@ function wsSend(socket, text) {
   socket.write(Buffer.concat([header, payload]));
 }
 function emit(event, payload) {
+  if (mockConfig.silentMessages && event.startsWith('message')) return;
   const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: 'WEBJS', event, payload, me: status === 'WORKING' ? ME : null });
   for (const s of sockets) wsSend(s, msg);
 }
@@ -174,7 +176,9 @@ function authed(req, url) {
 const blocked = new Set();
 const archivedOnPhone = new Set(); // POST /mock/archive {"jid":…,"archived":true}
 const profile = { name: 'Wouter', status: 'Hallo daar', picture: null };
-const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0, fileDelayMs: 0 }; // POST /mock/config
+// POST /mock/config. silentMessages: like WAHA's WEBJS engine sometimes does, new messages stop being passed on
+// (the connection stays up; they're still in WhatsApp Web to fetch) until the session is restarted.
+const mockConfig = { messagesDelayMs: 0, mediaDelayMs: 0, fileDelayMs: 0, silentMessages: false };
 const stats = { singleFetches: 0, pages: [], restarts: 0 }; // GET /mock/stats
 const pinnedOnPhone = new Set(); // POST /mock/pin {"jid":…,"pinned":true} changes it
 const markedUnread = new Set([PEOPLE.lid.id]); // "Mark as unread" on the phone (WEBJS: unreadCount -1)
@@ -241,6 +245,7 @@ const server = http.createServer(async (req, res) => {
         const person = PEOPLE[b.from ?? 'jan'];
         const chat = b.group === 'buren' ? GROUP2.id : b.group ? GROUP.id : person.id;
         const mm = msg({ chat, author: b.group ? person.id : undefined, body: b.text ?? 'Hallo!', media: b.media, ...(b.extra ?? {}) });
+        if (mockConfig.silentMessages) addHistory({ ...mm, ...(b.payload ?? {}) }); // not passed on, but WhatsApp Web has it
         emit('message.any', { ...mm, ...(b.payload ?? {}) });
         // WAHA also sends a separate "message" event for the same message (WEBJS), straight after.
         for (const ev of b.alsoAs ?? []) emit(ev, { ...mm, ...(b.payload ?? {}) });
@@ -305,6 +310,7 @@ const server = http.createServer(async (req, res) => {
     // Like WAHA: a failed session only comes back when someone restarts it
     if (p === `/api/sessions/${SESSION}/restart` && m === 'POST') {
       stats.restarts++;
+      mockConfig.silentMessages = false; // a restart gets messages flowing again
       status = 'STARTING';
       emit('session.status', { name: SESSION, status });
       setTimeout(() => {

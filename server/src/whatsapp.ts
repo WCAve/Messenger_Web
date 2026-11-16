@@ -54,6 +54,8 @@ import {
   findMessageByExt,
   quotedMedia,
   findWaChat,
+  newestSentTs,
+  recentWaChats,
   freeTimestamp,
   getConversation,
   getMessage,
@@ -545,6 +547,94 @@ export function startWhatsApp(logger: Logger) {
   // Mutes and pins change more often than names: check those every 15 minutes. (Not more often: with
   // WEBJS every chat-list request makes WhatsApp Web look up all your groups at once.)
   setInterval(() => state.status === 'connected' && syncMutes().catch(() => {}), 15 * 60_000).unref();
+  // And that live messages keep coming (WAHA's WhatsApp Web can quietly stop passing them on).
+  setInterval(() => void watchLive().catch((e) => log.warn(`whatsapp: checking live messages: ${(e as Error).message}`)), WATCH_MS).unref();
+}
+
+// ---------- live messages keep coming ----------
+// With the WEBJS engine, WAHA sometimes stops passing new messages on while its connection and session
+// look fine (no error, no dropped connection): messages then only came in with the ↻ button. Every few
+// minutes, the newest message of the 3 most active chats is asked for (3 small requests); the chat list
+// that syncMutes() fetches every 15 minutes is compared too (no extra request). A message WAHA has had for
+// over a minute that never came in: what's missed is fetched, and the connection to WAHA is made again;
+// still stuck next time: the session in WAHA is restarted (at most once an hour).
+const WATCH_MS = Number(process.env.WAHA_WATCH_MS) || 3 * 60_000;
+const WATCH_GRACE = Number(process.env.WAHA_WATCH_GRACE_MS) || 60_000; // a message may take a moment to arrive
+let stuckStrikes = 0; // times messages were found missing since the last one that came in live
+let lastSessionRestart = 0;
+// Newest messages that turned out to be nothing missed (kinds that aren't stored): not looked into again
+const notMissed = new Set<string>();
+
+const watchReady = () => state.status === 'connected' && !catchingUp && !importing && !afterConnectBusy && kvGet(HISTORY_KEY) === 'done';
+
+async function watchLive() {
+  if (!watchReady()) return;
+  let oldest = Infinity; // the oldest message WAHA has that isn't here
+  const keys: string[] = [];
+  for (const c of recentWaChats(3)) {
+    const [m] = (await waha.messages(c.wa_id, 1, false).catch(() => null)) ?? [];
+    const ts = Number(m?.timestamp) * 1000;
+    const key = String(m?.id ?? '');
+    if (!key || !ts || ts > Date.now() - WATCH_GRACE || notMissed.has(key) || findMessageByExt(key)) continue;
+    // (not older than what's here: then it's something that isn't stored, like a deletion notice; the same
+    // second counts, a busy group has several messages a second)
+    if (ts >= newestSentTs(c.id) - 1000) (oldest = Math.min(oldest, ts)), keys.push(key);
+    await pause(300);
+  }
+  if (oldest === Infinity) return;
+  if (!(await liveStuck('newest messages', oldest))) for (const k of keys) notMissed.add(k);
+}
+
+/** From the chat list (syncMutes): a chat whose last message is newer than what's here, by more than a minute. */
+async function compareChatList(chats: Json[]) {
+  if (!watchReady()) return;
+  let oldest = Infinity;
+  const keys: string[] = [];
+  for (const c of chats.slice(0, 50)) {
+    const idRaw = idString(c.id);
+    const ts = Number(c.timestamp ?? c.conversationTimestamp ?? c._chat?.t ?? 0) * 1000;
+    const key = `${idRaw}@${ts}`;
+    if (!idRaw || skipChat(idRaw) || !ts || ts > Date.now() - WATCH_GRACE || notMissed.has(key)) continue;
+    const jid = await resolve(idRaw);
+    const conv = jid ? findWaChat(jid) : undefined;
+    if (conv && ts > newestSentTs(conv.id) + 1000) (oldest = Math.min(oldest, ts)), keys.push(key);
+  }
+  if (oldest < Infinity && !(await liveStuck('chat list', oldest))) for (const k of keys) notMissed.add(k);
+}
+
+/** Fetch what's missed since then; true when there was something (then: reconnect, or restart the session). */
+async function liveStuck(how: string, since: number): Promise<boolean> {
+  const r = await catchUpWa(`live messages stopped (${how})`, since - 60_000).catch(() => ({ messages: 0, chats: 0 }));
+  if (!r.messages) return false; // only something that isn't stored anyway (a notification): nothing missed
+  stuckStrikes++;
+  if (stuckStrikes >= 2 && Date.now() - lastSessionRestart > 3600_000) {
+    log.warn(`whatsapp: live messages are still not coming in; restarting the WhatsApp session in WAHA`);
+    lastSessionRestart = Date.now();
+    stuckStrikes = 0;
+    await waha.restartSession().catch((e) => log.warn(`whatsapp: restarting the session failed: ${(e as Error).message}`));
+    reconnectWs();
+    recheckWa(5_000);
+    return true;
+  }
+  log.warn(`whatsapp: ${r.messages} message${r.messages === 1 ? '' : 's'} didn't come in live (fetched them now); connecting to WAHA again`);
+  reconnectWs();
+  return true;
+}
+
+/** A new connection for events now, without waiting for the old one to finish closing (a stuck one may never). */
+function reconnectWs() {
+  const old = ws;
+  ws = undefined;
+  if (old) {
+    old.onclose = old.onmessage = old.onerror = null;
+    try {
+      old.close();
+    } catch {
+      /* already gone */
+    }
+  }
+  eventsInterrupted();
+  connectWs();
 }
 
 export function stopWhatsApp() {
@@ -1348,6 +1438,7 @@ let muteNoticeShown = false;
  */
 async function syncMutes(list?: Json[]) {
   const chats = list ?? (await waha.chats(2000));
+  if (!list && chats?.length) await compareChatList(chats).catch((e) => log.warn(`whatsapp: checking live messages: ${(e as Error).message}`));
   let known = 0;
   let changed = 0;
   for (const c of chats ?? []) {
@@ -1510,6 +1601,7 @@ async function handleEvent(e: Json) {
       return;
     case 'message':
     case 'message.any':
+      stuckStrikes = 0; // messages come in live (again)
       await ingestMessage(p);
       return;
     case 'message.reaction': {

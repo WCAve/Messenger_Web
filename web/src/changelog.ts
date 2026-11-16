@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-16-2',
+    date: '16 November 2026',
+    items: [
+      'WhatsApp: when WAHA quietly stops passing new messages on (they then only came in with the ↻ button), Messenger now notices within a few minutes by itself, fetches what was missed and connects to WAHA again. If that doesn’t help, it restarts the WhatsApp session in WAHA (at most once an hour). The log says when this happens.',
+    ],
+  },
+  {
     id: '2026-11-16',
     date: '16 November 2026',
     items: ['Fixed: the “What’s new” window opened on every refresh.'],

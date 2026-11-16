@@ -790,6 +790,20 @@ export function listWaContacts() {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** The WhatsApp chats with the most recent messages here (for the check that live messages keep coming). */
+export function recentWaChats(limit: number): { id: number; wa_id: string }[] {
+  return db
+    .prepare<[number], { id: number; wa_id: string }>(
+      `SELECT id, wa_id FROM conversations WHERE network = 'whatsapp' AND wa_id IS NOT NULL ORDER BY last_message_at DESC LIMIT ?`,
+    )
+    .all(limit);
+}
+
+/** When the newest message in a chat was sent (0: none). */
+export function newestSentTs(conversationId: number): number {
+  return lastMessageStmt.get(conversationId)?.sent_ts ?? 0;
+}
+
 export function findWaChat(jid: string): ConversationRow | undefined {
   return db.prepare<[string], ConversationRow>('SELECT * FROM conversations WHERE wa_id = ?').get(jid);
 }

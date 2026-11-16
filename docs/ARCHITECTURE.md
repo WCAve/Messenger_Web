@@ -124,6 +124,13 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   (web/src/shrink.ts, with a note in the message box); what the browser can't read or convert (HEIC, TIFF,
   video other than MP4/H.264) is converted by ffmpeg on the server just before sending (convert.ts,
   `makeSendable` in routes.ts). Audio to WhatsApp goes as a voice message, converted by WAHA.
+- **WhatsApp messages that stop coming in live**: WAHA's WEBJS engine can stop passing new messages on
+  while its connection and session look fine. `watchLive()` (every 3 min, `WAHA_WATCH_MS`) asks for the
+  newest message of the 3 most active chats; the chat list `syncMutes()` fetches every 15 minutes is
+  compared too. A message WAHA has had for over a minute that isn't here: a catch-up from then, a fresh
+  event connection (`reconnectWs`, not waiting for the old one to close); missing again before anything
+  came in live: the session in WAHA is restarted (at most once an hour). Kinds that aren't stored are
+  remembered (`notMissed`) so they don't trigger again. Log: "didn't come in live".
 - **No jumping while a chat opens**: every photo and video carries its width and height (from Signal or
   WhatsApp, else read from the file by mediasize.ts: when it arrives, after sending, and once in the
   background for older messages, `media_sizes_upto` in kv). The web app gives each its final space from
