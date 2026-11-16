@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-16',
+    date: '16 November 2026',
+    items: ['Fixed: the “What’s new” window opened on every refresh.'],
+  },
+  {
     id: '2026-11-13-10',
     date: '13 November 2026',
     items: ['Dark green theme: unread chats stand out more, with a bright green count and time. Muted chats with unread messages now show a calmer green count instead of grey.'],
@@ -191,7 +196,11 @@ export function unseenChanges(): ChangelogEntry[] {
     markChangesSeen();
     return [];
   }
-  return CHANGELOG.filter((e) => e.id > seen!);
+  // Newest first: everything above the one last seen. (Not by comparing ids as text: "13-10" sorts
+  // before "13-9", which showed the window on every visit.) An id that's no longer listed: by its date.
+  const at = CHANGELOG.findIndex((e) => e.id === seen);
+  if (at >= 0) return CHANGELOG.slice(0, at);
+  return CHANGELOG.filter((e) => e.id.slice(0, 10) > seen!.slice(0, 10));
 }
 
 export function markChangesSeen() {
