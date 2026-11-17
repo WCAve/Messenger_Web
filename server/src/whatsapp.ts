@@ -88,6 +88,7 @@ import {
   waNumberOf,
 } from './store.js';
 import { recordLabelEvent, refreshWaLabels } from './groups.js';
+import { applyPin, applyUnpin } from './pins.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
 export type WaStatus = 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
@@ -1200,6 +1201,28 @@ function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise<Messa
   return job;
 }
 
+/**
+ * "… pinned a message": WhatsApp sends it as a message of its own (type pinned_message) that points at
+ * the pinned one (pinParentKey) and says pin (pinMessageType 1) or unpin (2), and for how long. Not
+ * documented by WAHA: the raw notice is logged (without text) so the shape can be checked.
+ */
+function pinNotice(m: Json, conv: ConversationRow, author: string, extId: string) {
+  const d = m._data ?? {};
+  const seen = `wapin:${extRawOf(extId)}`;
+  if (kvGet(seen)) return;
+  kvSet(seen, '1');
+  const k = d.pinParentKey ?? d.parentMsgKey ?? {};
+  const parentId = typeof k === 'string' ? k : k._serialized ?? (typeof k.id === 'string' ? k.id : k.id?._serialized ?? k.id?.id);
+  const pinType = Number(d.pinMessageType);
+  const seconds = Number(d.pinExpiryDuration ?? d.pinDuration) || null;
+  console.log(`[whatsapp] pin notice: type=${pinType} parent=${parentId ? extRawOf(String(parentId)) : '?'} seconds=${seconds} keys=${Object.keys(d).filter((x) => /pin|parent/i.test(x)).join(',')}`);
+  const target = parentId ? findMessageByExt(String(parentId)) : undefined;
+  if (!target || target.conversation_id !== conv.id) return;
+  const at = Number(d.senderTimestampMs) || Number(m.timestamp) * 1000 || Date.now();
+  if (pinType === 2) applyUnpin(target, author, at);
+  else applyPin(target, author, seconds ?? 7 * 86400, at); // WhatsApp's own default is 7 days
+}
+
 async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
   if (!m?.id) return;
   const fromMe = !!m.fromMe;
@@ -1244,6 +1267,8 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     else if (!waContact(sender)) upsertWaContact({ jid: sender });
   }
   if (!isGroup && !fromMe && !waContact(chatId)) upsertWaContact({ jid: chatId });
+
+  if (m._data?.type === 'pinned_message' || m._data?.pinMessageType != null) return void pinNotice(m, conv, author, extId);
 
   // Our own messages sent through the API come back as events too: link them to the row we stored.
   if (fromMe && !opts.history) {
@@ -2117,6 +2142,11 @@ function ext(m: MessageRow) {
 
 export async function reactWa(m: MessageRow, emoji: string) {
   await waha.react(ext(m), emoji);
+}
+
+export async function pinWa(conv: ConversationRow, m: MessageRow, seconds: number | null) {
+  if (seconds) await waha.pin(conv.wa_id!, ext(m), seconds);
+  else await waha.unpin(conv.wa_id!, ext(m));
 }
 
 export async function editWa(conv: ConversationRow, m: MessageRow, text: string, ranges: Ranges | null) {

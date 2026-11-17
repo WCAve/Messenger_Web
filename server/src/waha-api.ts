@@ -145,6 +145,10 @@ export const waha = {
   /** A contact card (WEBJS sends one vCard as a contact message). */
   sendContactVcard: (chatId: string, contacts: { fullName: string; phoneNumber: string; whatsappId?: string; organization?: string }[]) =>
     call<Json>('POST', '/api/sendContactVcard', { session: S(), chatId, contacts }),
+  /** duration in seconds: 86400, 604800 or 2592000 (what WhatsApp offers) */
+  pin: (chatId: string, messageId: string, duration: number) =>
+    call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(messageId)}/pin`, { duration }, 20_000),
+  unpin: (chatId: string, messageId: string) => call<Json>('POST', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(messageId)}/unpin`, undefined, 20_000),
   vote: (chatId: string, pollMessageId: string, votes: string[]) => call<Json>('POST', '/api/sendPollVote', { session: S(), chatId, pollMessageId, votes }),
 
   /** Media files WAHA stored for a message. The URL WAHA reports may use its own hostname; we only keep the path. */

@@ -5,7 +5,7 @@
  * groups.ts.
  */
 import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, WaContact, WaState } from './types';
-import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
+import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Pin, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
 export interface RichText {
@@ -122,6 +122,9 @@ export const api = {
   uploadLimits: () => call<UploadLimits>('GET', '/api/uploads/limits'),
   edit: (id: number, b: RichText) => call<Message>('POST', `/api/messages/${id}/edit`, b),
   retry: (id: number) => call<Message>('POST', `/api/messages/${id}/retry`),
+  pins: (conversationId: number) => call<Pin[]>('GET', `/api/conversations/${conversationId}/pins`),
+  pin: (id: number, duration: number) => call<Pin[]>('POST', `/api/messages/${id}/pin`, { duration }),
+  unpin: (id: number) => call<Pin[]>('DELETE', `/api/messages/${id}/pin`),
   react: (id: number, emoji: string) => call<Message>('POST', `/api/messages/${id}/reactions`, { emoji }),
   remove: (id: number) => call<Message>('DELETE', `/api/messages/${id}`),
   opened: (id: number) => call<{ ok: true; presence?: { online: boolean; lastSeen: number | null } | null }>('POST', `/api/conversations/${id}/open`),

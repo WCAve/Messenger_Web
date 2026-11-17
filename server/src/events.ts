@@ -11,6 +11,7 @@ export type ServerEvent =
   | { type: 'receipt'; messageId: number } // per-recipient receipt changed (overall status didn't)
   | { type: 'remove'; conversationId: number; messageId: number } // disappeared
   | { type: 'group'; conversationId: number } // group details changed: open group info reloads
+  | { type: 'pins'; conversationId: number; pins: unknown[] } // pinned messages changed
   | { type: 'ping'; every: number }; // every 25 s: a page that hears nothing for a minute knows its connection is dead
 
 const clients = new Set<ServerResponse>();

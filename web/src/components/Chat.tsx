@@ -230,6 +230,8 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         </div>
       </header>
 
+      <PinnedBar conversation={conversation} />
+
       {loadError ? (
         <div className="chat-empty">
           <p className="form-error">{loadError}</p>
@@ -765,6 +767,8 @@ const MessageItem = memo(function MessageItem({
   onMediaLoad: () => void;
 }) {
   const [picker, setPicker] = useState(false);
+  const [pinMenu, setPinMenu] = useState(false);
+  const pinned = useStore((s) => !!s.pins[m.conversationId]?.some((p) => p.messageId === m.id && (!p.expiresAt || p.expiresAt > Date.now())));
   const quickReactions = useQuickReactions();
   // Selecting messages: undefined when not selecting in this chat, else whether this one is picked
   const picked = useStore((s) => (s.selecting?.conversationId === m.conversationId ? s.selecting.ids.includes(m.id) : undefined));
@@ -777,6 +781,7 @@ const MessageItem = memo(function MessageItem({
     window.clearTimeout(lingerTimer.current);
     setLingering(false);
     setPicker(false);
+    setPinMenu(false);
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -1034,6 +1039,22 @@ const MessageItem = memo(function MessageItem({
               <Icon name="info" size={18} />
             </button>
           )}
+          {canAct && pinned && (
+            <button className="icon-btn sm" onClick={() => act(() => api.unpin(m.id))} aria-label="Unpin" title="Unpin message">
+              <Icon name="pin" size={17} />
+            </button>
+          )}
+          {canAct && !pinned && (
+            <button
+              className="icon-btn sm"
+              onClick={() => canPinIn(network, group) && (setPicker(false), setPinMenu((v) => !v))}
+              aria-label="Pin"
+              aria-disabled={!canPinIn(network, group)}
+              title={canPinIn(network, group) ? 'Pin message' : 'Signal can only pin messages in groups from here'}
+            >
+              <Icon name="pin" size={17} />
+            </button>
+          )}
           {canAct && (
             <button className="icon-btn sm" onClick={() => setState({ selecting: { conversationId: m.conversationId, ids: [m.id] } })} aria-label="Select" title="Select messages">
               <Icon name="check" size={18} />
@@ -1048,6 +1069,15 @@ const MessageItem = memo(function MessageItem({
             >
               <Icon name="trash" size={17} />
             </button>
+          )}
+          {pinMenu && (
+            <div className="menu pin-menu" role="menu">
+              {PIN_CHOICES.map(([label, seconds]) => (
+                <button key={seconds} role="menuitem" onClick={() => (setPinMenu(false), act(() => api.pin(m.id, seconds)))}>
+                  Pin for {label}
+                </button>
+              ))}
+            </div>
           )}
           {picker && (
             <div className="quick-react" role="menu">
@@ -2576,5 +2606,78 @@ function Composer({
         )}
       </div>
     </footer>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/** Signal's API can only pin in groups; WhatsApp can pin anywhere. */
+export const canPinIn = (network: Network, group: boolean) => network === 'whatsapp' || group;
+const PIN_CHOICES: [string, number][] = [
+  ['24 hours', 86400],
+  ['7 days', 7 * 86400],
+  ['30 days', 30 * 86400],
+];
+
+/**
+ * The pinned messages, in a bar under the chat's header (like on the phones). Clicking it goes to the
+ * pinned message shown and moves the bar on to the next one; with several, little stripes on the left
+ * say which one it is.
+ */
+function PinnedBar({ conversation }: { conversation: Conversation }) {
+  const id = conversation.id;
+  const all = useStore((s) => s.pins[id]);
+  const [now, setNow] = useState(Date.now());
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    setIndex(0);
+    api
+      .pins(id)
+      .then((pins) => setState((s) => ({ pins: { ...s.pins, [id]: pins } })))
+      .catch(() => {});
+  }, [id]);
+  const pins = (all ?? []).filter((p) => !p.expiresAt || p.expiresAt > now);
+  // Pins run out while the chat is open: look again at the next end.
+  const nextEnd = Math.min(...pins.map((p) => p.expiresAt ?? Infinity));
+  useEffect(() => {
+    if (!Number.isFinite(nextEnd)) return;
+    const t = window.setTimeout(() => setNow(Date.now()), Math.min(Math.max(nextEnd - Date.now(), 0) + 500, 2 ** 31 - 1));
+    return () => window.clearTimeout(t);
+  }, [nextEnd]);
+  if (!pins.length) return null;
+  const i = index % pins.length;
+  const p = pins[i];
+  const canUnpin = canPinIn(conversation.network, conversation.kind === 'group');
+  return (
+    <div className="pinned-bar">
+      <button
+        className="pinned-main"
+        onClick={() => {
+          void jumpToMessage(id, p.sentAt).catch(() => {});
+          setIndex(i + 1);
+        }}
+        title={pins.length > 1 ? 'Go to this message (and show the next pinned one)' : 'Go to this message'}
+      >
+        {pins.length > 1 && (
+          <span className="pinned-stripes" aria-hidden>
+            {pins.map((x, n) => (
+              <span key={x.messageId} className={n === i ? 'on' : undefined} />
+            ))}
+          </span>
+        )}
+        <Icon name="pin" size={16} />
+        <span className="pinned-text">
+          <strong>{pins.length > 1 ? `Pinned message ${i + 1} of ${pins.length}` : 'Pinned message'}</strong>
+          <span>
+            {p.authorName}: <Emojified text={p.text} />
+          </span>
+        </span>
+      </button>
+      {canUnpin && (
+        <button className="icon-btn sm" onClick={() => void api.unpin(p.messageId).catch((e) => alert(e instanceof Error ? e.message : String(e)))} aria-label="Unpin" title="Unpin">
+          <Icon name="close" size={16} />
+        </button>
+      )}
+    </div>
   );
 }

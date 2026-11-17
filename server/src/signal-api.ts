@@ -111,6 +111,12 @@ export const signalApi = {
   unreact: (number: string, body: { recipient: string; reaction: string; target_author: string; timestamp: number }) =>
     call<void>('DELETE', `/v1/reactions/${enc(number)}`, body),
 
+  /** Pinning only works in groups (the API has no way to pin in a one-to-one chat). duration in seconds; left out: no end. */
+  pin: (number: string, groupId: string, body: { target_author: string; timestamp: number; duration?: number }) =>
+    call<void>('POST', `/v1/groups/${enc(number)}/${enc(groupId)}/pin-message`, body, 60_000),
+  unpin: (number: string, groupId: string, body: { target_author: string; timestamp: number }) =>
+    call<void>('DELETE', `/v1/groups/${enc(number)}/${enc(groupId)}/pin-message`, body, 60_000),
+
   /** Every sticker pack signal-cli knows; url is a signal.art link that includes the pack key. */
   stickerPacks: (number: string) =>
     call<{ pack_id: string; url: string; installed: boolean; title: string; author: string }[]>('GET', `/v1/sticker-packs/${enc(number)}`),

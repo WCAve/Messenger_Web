@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-5',
+    date: '17 November 2026',
+    items: [
+      'Pinned messages: pin a message for 24 hours, 7 days or 30 days (📌 in its toolbar). Pinned messages show in a bar under the chat’s name; click it to go to the message (with several, each click moves on to the next). Pins made by others or on your phone show up too. Signal can only pin in groups from here, so in one-to-one Signal chats the button is greyed out.',
+    ],
+  },
+  {
     id: '2026-11-17-4',
     date: '17 November 2026',
     items: [

@@ -1,6 +1,6 @@
 /** App state in one small external store (useSyncExternalStore), fed by the API and the event stream. */
 import { useSyncExternalStore } from 'react';
-import type { Conversation, Message, ServerEvent, SignalState, WaState } from './types';
+import type { Conversation, Message, Pin, ServerEvent, SignalState, WaState } from './types';
 
 export interface Typing {
   author: string;
@@ -53,6 +53,7 @@ export interface State {
   /** Bumped when per-recipient receipts change, so an open message-info panel refreshes. */
   receiptTick: number;
   groupTick: Record<number, number>; // bumped when a group's details change
+  pins: Record<number, Pin[]>; // pinned messages by conversation (loaded when a chat opens)
   /** The sticker manager is open (in the chat list column). */
   stickerManager: boolean;
   whatsNew: 'unseen' | 'all' | null; // the What's new window
@@ -73,6 +74,7 @@ let state: State = {
   panel: null,
   receiptTick: 0,
   groupTick: {},
+  pins: {},
   stickerManager: false,
   whatsNew: null,
   drafts: loadDrafts(),
@@ -211,6 +213,9 @@ export function applyEvent(e: ServerEvent) {
       break;
     case 'group':
       setState((s) => ({ groupTick: { ...s.groupTick, [e.conversationId]: (s.groupTick[e.conversationId] ?? 0) + 1 } }));
+      break;
+    case 'pins':
+      setState((s) => ({ pins: { ...s.pins, [e.conversationId]: e.pins } }));
       break;
     case 'receipt':
       setState((s) => ({ receiptTick: s.receiptTick + 1 }));

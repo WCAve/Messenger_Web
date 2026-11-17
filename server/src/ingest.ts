@@ -32,6 +32,7 @@ import {
   upsertContact,
 } from './store.js';
 import { db } from './db.js';
+import { applyPin, applyUnpin } from './pins.js';
 import type { LinkPreview, MessageRow, Poll, SharedContact } from './store.js';
 import { contactsText, setConversationTimer } from './store.js';
 import { type Ranges, cleanRanges } from './richtext.js';
@@ -270,6 +271,14 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
   if (dm.editMessage) return applyEdit(conv, dm.editMessage);
   if (dm.pollVote) return applyPollVote(conv, dm.pollVote, authorKey);
   if (dm.pollTerminate) return applyPollClose(conv, dm.pollTerminate.targetSentTimestamp, authorKey);
+  if (dm.pinMessage || dm.unpinMessage) {
+    const p = dm.pinMessage ?? dm.unpinMessage;
+    const target = findMessage(conv.id, Number(p.targetSentTimestamp));
+    if (!target) return;
+    const at = Number(dm.timestamp) || Date.now();
+    if (dm.pinMessage) return applyPin(target, authorKey, Number(p.pinDurationSeconds) || null, at);
+    return applyUnpin(target, authorKey, at);
+  }
 
   const attachments = mapAttachments(dm.attachments);
   const rich = richFromSignal(dm.message, dm.mentions, dm.textStyles);

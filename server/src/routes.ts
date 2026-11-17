@@ -25,6 +25,7 @@ import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
 import { forgetQuickReactions, quickReactions } from './reactions.js';
+import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
@@ -60,6 +61,7 @@ import {
   refreshGroupInfoWa,
   waAbout,
   reactWa,
+  pinWa,
   refreshDirectory as refreshWaDirectory,
   restartWhatsApp,
   subscribePresenceWa,
@@ -1215,6 +1217,32 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     forgetQuickReactions();
     return messageDto(emitMessageRow(m.id, { reactions: reactions.length ? JSON.stringify(reactions) : null })!);
   });
+
+  // Pinned messages (pins.ts). Signal can only pin in groups from here.
+  r.get('/api/conversations/:id/pins', (ctx) => listPins(conv(ctx).id));
+  const pinRoute = (pin: boolean) => async (ctx: Ctx) => {
+    const m = message(ctx);
+    const c = getConversation(m.conversation_id)!;
+    if (m.deleted || m.kind === 'system') throw new HttpError(400, 'This message can’t be pinned');
+    if (m.status === 'pending' || m.status === 'failed') throw new HttpError(400, 'Message has not been sent yet');
+    let seconds: number | null = null;
+    if (pin) {
+      seconds = Number(ctx.body?.duration);
+      if (!PIN_DURATIONS.includes(seconds)) throw new HttpError(400, 'Pick 24 hours, 7 days or 30 days');
+    }
+    if (isWa(c)) await wa(() => pinWa(c, m, seconds));
+    else {
+      if (c.kind !== 'group') throw new HttpError(400, 'Signal can only pin messages in groups from here');
+      const body = { target_author: addressForKey(m.author), timestamp: m.sent_ts };
+      if (pin) await signalApi.pin(accountFor(c), groupRecipientId(c.group_id!), { ...body, duration: seconds! });
+      else await signalApi.unpin(accountFor(c), groupRecipientId(c.group_id!), body);
+    }
+    if (pin) applyPin(m, 'self', seconds);
+    else applyUnpin(m, 'self');
+    return listPins(c.id);
+  };
+  r.post('/api/messages/:id/pin', pinRoute(true));
+  r.delete('/api/messages/:id/pin', pinRoute(false));
 
   // Delete for everyone
   r.delete('/api/messages/:id', async (ctx) => {

@@ -4289,3 +4289,77 @@ video.deleted-media {
   width: 100%;
   height: 32px;
 }
+
+/* ---- Pinned messages: the bar under the chat's header, and the "Pin for …" choice in the toolbar */
+.pinned-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px 0 6px;
+  background: var(--header);
+  border-bottom: 1px solid var(--mist);
+}
+.pinned-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  text-align: left;
+  border-radius: 8px;
+}
+.pinned-main:hover {
+  background: var(--haze);
+}
+.pinned-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.pinned-text strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ultra, var(--ink));
+}
+.pinned-text > span {
+  font-size: 13.5px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pinned-stripes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-self: stretch;
+  justify-content: center;
+}
+.pinned-stripes span {
+  width: 3px;
+  flex: 1;
+  max-height: 10px;
+  border-radius: 2px;
+  background: var(--mist);
+}
+.pinned-stripes span.on {
+  background: var(--ultra, var(--ink-2));
+}
+.actions .icon-btn[aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.actions .pin-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+  min-width: 170px;
+}
+.msg.in .actions .pin-menu {
+  left: 0;
+  right: auto;
+}

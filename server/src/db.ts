@@ -247,6 +247,17 @@ const MIGRATIONS: string[] = [
   -- Contact cards in a message: JSON [{name, numbers, organization?}] (the body keeps "👤 name" as text)
   ALTER TABLE messages ADD COLUMN contacts TEXT;
   `,
+  `
+  -- Pinned messages (pins.ts): which message is pinned in which chat, by whom, until when (null: no end)
+  CREATE TABLE message_pins (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    conversation_id INTEGER NOT NULL,
+    pinned_by TEXT NOT NULL,        -- 'self' or a contact key
+    pinned_at INTEGER NOT NULL,     -- ms
+    expires_at INTEGER              -- ms
+  );
+  CREATE INDEX message_pins_conv ON message_pins (conversation_id);
+  `,
 ];
 
 function migrate() {

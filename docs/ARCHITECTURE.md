@@ -76,6 +76,7 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 | `waquote:<msgId>` | which id spelling WhatsApp Web accepts for replying to a message |
 | `waalias:<raw>` | an HD copy's raw id → the message row it was merged into |
 | `wahd_wait:<raw>` | an HD copy that arrived before its original |
+| `wapin:<raw>` | a WhatsApp "pinned a message" notice already handled (pins.ts; repeats are skipped) |
 | `gset:<convId>` | group settings as last seen (who may send/edit/add, approval) |
 | `glabels:<convId>`, `glabels_bk:<convId>`, `glabels_ev:<convId>` | member labels: shown / from the backup / from live changes |
 | `sgedit:`, `sglink:`, `sglink_want:<convId>` | Signal group settings the API doesn't report correctly |

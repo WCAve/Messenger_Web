@@ -367,6 +367,16 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === `/api/${SESSION}/chats/overview`) sent.push({ path: p, method: m });
     if (p === `/api/${SESSION}/chats/overview`) return json(res, 200, overview().slice(0, Number(url.searchParams.get('limit') ?? 20)));
+    // Pinning a message (WhatsApp sends a "pinned a message" notice back, like WhatsApp Web does)
+    const pinM = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/messages/([^/]+)/(pin|unpin)$`));
+    if (pinM && m === 'POST') {
+      const b = await body(req);
+      sent.push({ path: p, method: m, ...b });
+      const chat = decodeURIComponent(pinM[1]);
+      const notice = msg({ chat, fromMe: true, body: '', data: { type: 'pinned_message', pinMessageType: pinM[3] === 'pin' ? 1 : 2, pinParentKey: { _serialized: decodeURIComponent(pinM[2]) }, pinExpiryDuration: b?.duration } });
+      setTimeout(() => emit('message.any', notice), 300);
+      return json(res, 200, { success: true });
+    }
     const msgs = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/messages(?:/([^/]+))?$`));
     if (msgs && m === 'GET') {
       const chat = decodeURIComponent(msgs[1]);

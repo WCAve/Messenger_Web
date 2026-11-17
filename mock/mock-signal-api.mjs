@@ -386,6 +386,12 @@ const server = http.createServer(async (req, res) => {
       sent.push({ path: p, method: m, name: b.name, about: b.about, avatarBytes: selfAvatar?.length ?? 0 });
       return json(res, 204);
     }
+    // Pinning a message in a group
+    if (/^\/v1\/groups\/[^/]+\/[^/]+\/pin-message$/.test(p)) {
+      const b = await body(req);
+      sent.push({ path: p, method: m, ...b });
+      return json(res, 204);
+    }
     // ---------- groups (stateful) ----------
     const gp = p.match(/^\/v1\/groups\/[^/]+(?:\/([^/]+))?(?:\/(members|admins|quit))?$/);
     if (gp) {

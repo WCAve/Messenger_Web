@@ -287,4 +287,17 @@ export type ServerEvent =
   | { type: 'receipt'; messageId: number }
   | { type: 'remove'; conversationId: number; messageId: number }
   | { type: 'group'; conversationId: number }
+  | { type: 'pins'; conversationId: number; pins: Pin[] }
   | { type: 'ping'; every?: number };
+
+/** A pinned message (the bar under the chat's header) */
+export interface Pin {
+  messageId: number;
+  sentAt: number;
+  author: string;
+  authorName: string;
+  text: string;
+  pinnedBy: string;
+  pinnedAt: number;
+  expiresAt: number | null;
+}
