@@ -18,6 +18,8 @@ const DEFAULTS = {
   waHistoryMedia: false,
   // WhatsApp shows you as online while Messenger Web is open in a browser (otherwise: never).
   waShowOnline: false,
+  // The quick reactions above a message: the ones you use most (otherwise the usual seven). reactions.ts
+  quickReactionsMostUsed: true,
 };
 export type ServerSettings = typeof DEFAULTS;
 

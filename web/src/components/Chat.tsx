@@ -19,6 +19,7 @@ import { type RichText, type UploadLimits, api, attachmentUrl, thumbUrl, tinyBeh
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
+import { refreshQuickReactions, useQuickReactions } from '../quickReactions';
 import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { VoicePlayer } from './VoicePlayer';
@@ -34,7 +35,6 @@ import { ChatRowMenu } from './Sidebar';
 import { type Command, type CommandContext, findCommand, matchCommands, parseCommand } from '../commands';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 
-const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
 const PAGE = 50;
 const NO_TYPING: never[] = []; // stable reference: store selectors must not allocate
 const reducedMotion = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -684,6 +684,7 @@ const MessageItem = memo(function MessageItem({
   onMediaLoad: () => void;
 }) {
   const [picker, setPicker] = useState(false);
+  const quickReactions = useQuickReactions();
   // The toolbar (and its reaction row) stays a moment after the pointer leaves the message, so it can be
   // reached on a slanted path; pointing at another message ends that at once (see endLinger).
   const [lingering, setLingering] = useState(false);
@@ -879,7 +880,7 @@ const MessageItem = memo(function MessageItem({
               key={emoji}
               className={`reaction${emoji === myReaction ? ' mine' : ''}`}
               title={names.join(', ')}
-              onClick={() => canAct && act(() => api.react(m.id, emoji))}
+              onClick={() => canAct && act(() => api.react(m.id, emoji).finally(() => refreshQuickReactions()))}
             >
               <Emojified text={emoji} />
               {names.length > 1 && <span>{names.length}</span>}
@@ -947,8 +948,8 @@ const MessageItem = memo(function MessageItem({
           )}
           {picker && (
             <div className="quick-react" role="menu">
-              {QUICK_REACTIONS.map((e) => (
-                <button key={e} className={e === myReaction ? 'mine' : undefined} onClick={() => (setPicker(false), act(() => api.react(m.id, e)))}>
+              {quickReactions.map((e) => (
+                <button key={e} className={e === myReaction ? 'mine' : undefined} onClick={() => (setPicker(false), act(() => api.react(m.id, e).finally(() => refreshQuickReactions())))}>
                   <Emojified text={e} />
                 </button>
               ))}
@@ -2011,6 +2012,7 @@ function Composer({
     if (!target) return;
     try {
       await api.react(target.id, e);
+      refreshQuickReactions();
       refreshUsageSoon();
     } catch (err) {
       setError((err as Error).message);

@@ -87,6 +87,7 @@ export const api = {
   closePoll: (id: number) => call<Message>('DELETE', `/api/messages/${id}/poll`),
   pinnedOrder: (ids: number[]) => call<{ conversations: Conversation[] }>('POST', '/api/pinned/order', { ids }),
   setFlags: (id: number, f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) => call<Conversation>('POST', `/api/conversations/${id}/flags`, f),
+  quickReactions: () => call<{ mostUsed: boolean; list: string[] }>('GET', '/api/reactions/quick'),
   emojiUsage: () => call<{ usage: Record<string, { score: number; alias?: string }> }>('GET', '/api/emoji/usage'),
   emojiAlias: (emoji: string, code: string) => call<{ ok: true }>('POST', '/api/emoji/alias', { emoji, code }),
   setTimer: (id: number, seconds: number) => call<Conversation>('POST', `/api/conversations/${id}/timer`, { seconds }),
@@ -100,7 +101,7 @@ export const api = {
     call<{ name: string; description: string | null; size: number | null; approval: boolean; already: boolean }>('GET', `/api/groups/join-info?link=${encodeURIComponent(link)}`),
   joinGroup: (link: string) => call<{ conversation: Conversation | null }>('POST', '/api/groups/join', { link }),
   settings: () => call<ServerSettings>('GET', '/api/settings'),
-  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia' | 'waShowOnline'>>) =>
+  updateSettings: (patch: Partial<Pick<ServerSettings, 'sendReadReceipts' | 'sendTypingIndicators' | 'sendLinkPreviews' | 'waHistoryChats' | 'waHistoryMessages' | 'waNativeForward' | 'waHistoryMedia' | 'waShowOnline' | 'quickReactionsMostUsed'>>) =>
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[]; local: LocalStickers }>('GET', '/api/stickers'),
@@ -169,6 +170,7 @@ export interface ServerSettings {
   waNativeForward: boolean;
   waHistoryMedia: boolean;
   waShowOnline: boolean;
+  quickReactionsMostUsed: boolean;
   account: string | null;
   status: string;
   apiVersion: string | null;

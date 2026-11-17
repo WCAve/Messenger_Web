@@ -4153,3 +4153,12 @@ video.deleted-media {
   margin: 0;
   color: var(--ultra);
 }
+
+/* Settings → Chats: the quick reactions shown now */
+.quick-preview {
+  display: block;
+  margin-top: 4px;
+  font-size: 17px;
+  white-space: nowrap;
+  color: var(--ink);
+}

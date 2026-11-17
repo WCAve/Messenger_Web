@@ -6,6 +6,7 @@
  * Browser-only settings live in prefs.ts; settings that change what others see go to the server
  * (server/src/settings.ts).
  */
+import { refreshQuickReactions, useQuickReactions } from '../quickReactions';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Profile, type ServerSettings, type WaProfile, api, uploadBackup } from '../api';
 import type { BackupFile } from '../types';
@@ -680,6 +681,7 @@ const THEMES: { value: Prefs['theme']; label: string }[] = [
 export type SettingsPage = 'profile' | 'chats' | 'appearance' | 'notifications' | 'privacy' | 'whatsapp' | 'history' | 'account';
 
 export function SettingsView({ onClose, onLogout, initialPage = null }: { onClose: () => void; onLogout: () => void; initialPage?: SettingsPage | null }) {
+  const quickReactions = useQuickReactions();
   const prefs = usePrefs();
   const [server, setServer] = useState<ServerSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -738,7 +740,7 @@ export function SettingsView({ onClose, onLogout, initialPage = null }: { onClos
   const emojiLabel = EMOJI_STYLES.find((e) => e.value === prefs.emoji)?.label ?? '';
   const pages: { id: SettingsPage; title: string; icon: string; summary: string }[] = [
     ...(signalOn || waConnected ? [{ id: 'profile' as const, title: 'Profile', icon: 'user', summary: `${[signalOn && 'Signal', waConnected && 'WhatsApp'].filter(Boolean).join(' and ')}: name, about, picture` }] : []),
-    { id: 'chats', title: 'Chats', icon: 'chat', summary: `${prefs.enterToSend ? 'Enter sends' : 'Ctrl+Enter sends'}${waOn ? ` · ${server?.waNativeForward ? 'native' : 'copied'} WhatsApp forwards` : ''}` },
+    { id: 'chats', title: 'Chats', icon: 'chat', summary: `${prefs.enterToSend ? 'Enter sends' : 'Ctrl+Enter sends'} · ${server?.quickReactionsMostUsed === false ? 'usual' : 'most used'} reactions${waOn ? ` · ${server?.waNativeForward ? 'native' : 'copied'} WhatsApp forwards` : ''}` },
     { id: 'appearance', title: 'Appearance', icon: 'palette', summary: `${themeLabel} · ${emojiLabel} emoji` },
     {
       id: 'notifications',
@@ -817,6 +819,37 @@ export function SettingsView({ onClose, onLogout, initialPage = null }: { onClos
                 checked={prefs.enterToSend}
                 onChange={(v) => setPrefs({ enterToSend: v })}
               />
+              <div className="setting-row">
+                <span className="setting-text">
+                  <strong>Quick reactions</strong>
+                  <small>
+                    The row of emoji above a message.{' '}
+                    {server?.quickReactionsMostUsed ? 'The ones you react with most, recent ones counting more (also reactions from your phone).' : 'The usual seven.'}
+                    <span className="quick-preview" aria-label="Shown now">
+                      {quickReactions.join(' ')}
+                    </span>
+                  </small>
+                </span>
+                <div className="segmented" role="radiogroup" aria-label="Quick reactions">
+                  {(
+                    [
+                      [false, 'Usual'],
+                      [true, 'Most used'],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <button
+                      key={label}
+                      role="radio"
+                      aria-checked={!!server?.quickReactionsMostUsed === v}
+                      className={!!server?.quickReactionsMostUsed === v ? 'on' : undefined}
+                      disabled={!server}
+                      onClick={() => void saveServer({ quickReactionsMostUsed: v }).then(() => refreshQuickReactions(0))}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               {waOn && (
                 <Toggle
                   label="Forward WhatsApp messages natively"

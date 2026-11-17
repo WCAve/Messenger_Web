@@ -24,6 +24,7 @@ import { applyPendingReceipts, humanDuration } from './ingest.js';
 import { type Ranges, cleanRanges, toApiMarkup } from './richtext.js';
 import { linkPreview } from './linkpreview.js';
 import { emojiIn, emojiUsage, recordAlias, recordEmoji } from './emojiusage.js';
+import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
@@ -835,6 +836,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   r.get('/api/emoji/usage', () => ({ usage: emojiUsage() }));
+  r.get('/api/reactions/quick', () => quickReactions());
   r.post('/api/emoji/alias', (ctx) => {
     recordAlias(String(ctx.body?.emoji ?? ''), String(ctx.body?.code ?? '').toLowerCase());
     return { ok: true };
@@ -1153,6 +1155,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     reactions = reactions.filter((x) => x.author !== 'self');
     if (!removing) reactions.push({ emoji, author: 'self' });
     if (!removing) recordEmoji([emoji]);
+    forgetQuickReactions();
     return messageDto(emitMessageRow(m.id, { reactions: reactions.length ? JSON.stringify(reactions) : null })!);
   });
 

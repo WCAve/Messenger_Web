@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-3',
+    date: '17 November 2026',
+    items: [
+      'The row of quick reactions above a message now shows the emoji you react with most (counted from your reactions, also the ones from your phone; recent ones count more), filled up with the usual ones. Settings → Chats → Quick reactions switches between “Most used” and “Usual”.',
+    ],
+  },
+  {
     id: '2026-11-17-2',
     date: '17 November 2026',
     items: ['The little toolbar next to a message (react, reply, forward …) and its row of reactions no longer vanish while you move the mouse to them: they stay for half a second after you leave the message.'],

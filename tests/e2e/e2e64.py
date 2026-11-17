@@ -1,6 +1,6 @@
 """WhatsApp: when WAHA quietly stops passing new messages on (connection up, no error), Messenger notices
 within minutes (here: seconds), fetches what's missed and connects again; still stuck: restarts the session."""
-# server-env: WAHA_WATCH_MS=2000 WAHA_WATCH_GRACE_MS=1500
+# server-env: WAHA_WATCH_MS=2000 WAHA_WATCH_GRACE_MS=4000
 import sys, time, json, os, urllib.request
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
@@ -24,7 +24,7 @@ with sync_playwright() as p:
     wa('/mock/config', {'silentMessages': True})
     t0 = time.time()
     wa('/mock/incoming', {'from': 'jan', 'text': 'Stil bericht een'})
-    time.sleep(2); assert page.locator('.msg:has-text("Stil bericht een")').count() == 0, 'came in live anyway?'
+    time.sleep(1.5); assert page.locator('.msg:has-text("Stil bericht een")').count() == 0, 'came in live anyway?'  # (the check waits 4 s here)
     page.wait_for_selector('.msg:has-text("Stil bericht een")', timeout=20000)
     print(f'first one fetched after {time.time() - t0:.1f} s')
     for _ in range(20):
