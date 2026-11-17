@@ -356,8 +356,8 @@ function dayString(ts: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-export function SearchPanel({ conversation, date = false }: { conversation: Conversation; date?: boolean }) {
-  const [q, setQ] = useState('');
+export function SearchPanel({ conversation, date = false, initial = '' }: { conversation: Conversation; date?: boolean; initial?: string }) {
+  const [q, setQ] = useState(initial);
   const [results, setResults] = useState<SearchResult[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [range, setRange] = useState<{ first: number | null; last: number | null } | null>(null);

@@ -1618,6 +1618,44 @@ p {
   color: var(--ink-2);
   font-size: 14px;
 }
+/* Slash commands: the list while typing the name, a reminder line while typing what goes after it */
+.cmd-suggest {
+  min-width: min(440px, 100%);
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+}
+.cmd-suggest li {
+  justify-content: space-between;
+}
+.cmd-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cmd-args {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+.cmd-desc {
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: right;
+}
+.cmd-hint {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 15;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgba(27, 31, 59, 0.16);
+}
+.cmd-hint b {
+  color: var(--ink);
+}
 
 /* ---------- emoji / GIF panel ---------- */
 .picker-panel {

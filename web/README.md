@@ -14,6 +14,7 @@ with a comment saying what it does; this is the map.
 | `networks.ts` | What each network can do (`capsFor`), so the UI only offers what works |
 | `prefs.ts` | Browser-only settings (localStorage): theme, Enter sends, emoji style, notifications |
 | `format.ts` | WhatsApp-style formatting in the text box (`*bold*` …) ↔ text + style ranges; links |
+| `commands.ts` | Slash commands in the message box (/shrug, /mock, /spoiler, /gif, /poll, /mute, …): the list, what each does; Chat.tsx shows the list and runs them |
 | `jump.ts` | Opening a chat at a particular message |
 | `notifications.ts` | Browser notifications (permission state, pictures with initials) |
 | `favicon.ts` | Unread count inside the tab icon |

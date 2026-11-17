@@ -194,7 +194,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
         <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt, messageId) => setLightbox({ att, authorName, sentAt, conversationId: active.id, messageId })} />
       )}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
-      {active && panel?.kind === 'search' && <SearchPanel conversation={active} date={!!panel.date} />}
+      {active && panel?.kind === 'search' && <SearchPanel key={panel.query ?? ''} conversation={active} date={!!panel.date} initial={panel.query} />}
       {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}
       <WhatsNew />
       <EditHistory />

@@ -15,7 +15,7 @@
  * What each network can do comes from capsFor (networks.ts); the server decides how to send.
  */
 import { type ClipboardEvent, type DragEvent, Fragment, type KeyboardEvent, type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { type UploadLimits, api, attachmentUrl, thumbUrl, tinyBehind, uploadInPieces } from '../api';
+import { type RichText, type UploadLimits, api, attachmentUrl, thumbUrl, tinyBehind, uploadInPieces } from '../api';
 import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
@@ -31,6 +31,7 @@ import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor,
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { Dialog, PollDialog, PollView } from './Extras';
 import { ChatRowMenu } from './Sidebar';
+import { type Command, type CommandContext, findCommand, matchCommands, parseCommand } from '../commands';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
 
 const QUICK_REACTIONS = ['❤️', '👍', '👎', '😂', '😮', '😢', '🙏'];
@@ -1557,6 +1558,15 @@ function Composer({
   }, [replyTo?.id, conversation.network]);
   const mentions = useRef<ComposerMention[]>(getState().drafts[conversation.id]?.mentions ?? []); // people picked from the @ suggestions
   const [pollOpen, setPollOpen] = useState(false);
+  // Slash commands: the list while the name is typed (commands.ts)
+  const [cmdSuggest, setCmdSuggest] = useState<{ items: Command[]; index: number } | null>(null);
+  const [gifQuery, setGifQuery] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (panel !== 'gif') setGifQuery(undefined); // only for the GIF panel /gif opened
+  }, [panel]);
+  useEffect(() => {
+    document.querySelector('.cmd-suggest li.on')?.scrollIntoView({ block: 'nearest' }); // arrow keys past the visible part
+  }, [cmdSuggest?.index]);
   const [linkCard, setLinkCard] = useState<{ url: string; title: string; description: string | null; image: string | null } | null>(null);
   const dismissedLinks = useRef(new Set<string>());
   const pendingSelection = useRef<number | null>(null);
@@ -1660,6 +1670,9 @@ function Composer({
   }
   const shrinking = files.some((f) => f.shrinking);
   const unsendable = files.some((f) => f.problem);
+  // Typing what goes after a command ("/gif ca…"): what it takes, as a reminder
+  const typedCommand = !editing && /^\/[a-z]+\s/i.test(text) ? parseCommand(text) : null;
+  const commandHint = typedCommand ? findCommand(typedCommand.name, conversation) : undefined;
   const uploadAbort = useRef<AbortController | null>(null);
 
   function stopTyping() {
@@ -1671,6 +1684,15 @@ function Composer({
   }
 
   function updateSuggest(value: string, caret: number) {
+    // "/na…" at the very start, still typing the name: the commands that match
+    const cm = !editing && /^\/([a-z]*)$/i.exec(value.slice(0, caret)) && !/\s/.test(value);
+    if (cm) {
+      const items = matchCommands(value.slice(1, caret), conversation);
+      setCmdSuggest(items.length ? { items, index: 0 } : null);
+      setSuggest(null);
+      return setMentionSuggest(null);
+    }
+    setCmdSuggest(null);
     const mc = conversation.kind === 'group' ? mentionAtCaret(value, caret) : null;
     if (mc) {
       const term = mc.term.toLowerCase();
@@ -1747,9 +1769,75 @@ function Composer({
     setTextAndCaret(text.slice(0, start) + s + text.slice(end), start + s.length);
   }
 
-  async function send() {
-    const body = replaceShortcodes(text.trim());
-    const rich = composerToRich(body, mentions.current);
+  /**
+   * From the list: a command with nothing to add (/pin) runs straight away; one that takes something
+   * (/gif [search], /mock text) becomes "/name " to go on typing, and Enter then runs it. Tab: always that.
+   */
+  function chooseCommand(i: number, completeOnly = false) {
+    const cmd = cmdSuggest?.items[i];
+    if (!cmd) return;
+    setCmdSuggest(null);
+    if (completeOnly || cmd.args) return setTextAndCaret(`/${cmd.name} `, cmd.name.length + 2);
+    void runCommand(`/${cmd.name}`);
+  }
+
+  const commandContext: CommandContext = {
+    conversation,
+    myName: async () => {
+      if (conversation.network === 'whatsapp') return getState().whatsapp.name || 'Me';
+      const p = await api.profile().catch(() => null);
+      return [p?.givenName, p?.familyName].filter(Boolean).join(' ') || 'Me';
+    },
+    openGif: (q) => (setGifQuery(q || undefined), setPanel('gif')),
+    openStickers: () => setPanel('sticker'),
+    openFiles: () => fileInput.current?.click(),
+    openPoll: () => setPollOpen(true),
+    createPoll: async (question, options) => upsertMessages(id, [await api.createPoll(id, { question, options, multiple: false })]),
+    setFlags: async (f) => upsertConversation(await api.setFlags(id, f)),
+    markUnread: async () => {
+      if (getState().activeId === id) setState({ activeId: null });
+      upsertConversation(await api.markUnread(id));
+    },
+    setTimer: async (seconds) => upsertConversation(await api.setTimer(id, seconds)),
+    openSearch: (q) => setState({ panel: { kind: 'search', query: q || undefined } }),
+    openExport: () => setState({ exportDialog: { preselect: [id] } }),
+    openInfo: () => setState({ panel: { kind: 'chat' } }),
+  };
+
+  /**
+   * A slash command (commands.ts). Actions just happen; text is sent like a typed message (with what's
+   * attached and the reply, if any). Problems show under the box and the command stays, to fix it.
+   */
+  async function runCommand(typed: string) {
+    const p = parseCommand(typed);
+    const cmd = p && findCommand(p.name, conversation);
+    if (!p || !cmd) return setError(`There's no command ${typed.split(/\s/)[0]}. To send a message that starts with “/”, start it with “//”.`);
+    if (cmd.needsArgs && !p.arg.trim()) return setError(`/${cmd.name} needs something after it: /${cmd.name} ${cmd.args ?? ''}`.trim());
+    setError(null);
+    setCmdSuggest(null);
+    let r;
+    try {
+      r = await cmd.run(p.arg, commandContext);
+    } catch (e) {
+      return setError((e as Error).message);
+    }
+    if ('error' in r) return setError(r.error);
+    if ('done' in r) {
+      setText('');
+      mentions.current = [];
+      return area.current?.focus();
+    }
+    const rich = composerToRich(replaceShortcodes(r.send), mentions.current);
+    if (r.literal) rich.text = rich.text ? `${rich.text} ${r.literal}` : r.literal;
+    await send(rich);
+  }
+
+  async function send(fromCommand?: RichText) {
+    const typed = text.trim();
+    // A slash command ("//…" is a message that starts with "/")
+    if (!fromCommand && !editing && typed.startsWith('/') && !typed.startsWith('//')) return void runCommand(typed);
+    const body = fromCommand ? fromCommand.text : replaceShortcodes(typed.startsWith('//') ? typed.slice(1) : typed);
+    const rich = fromCommand ?? composerToRich(body, mentions.current);
     if (editing) {
       if (sending) return;
       if (!body) {
@@ -1904,6 +1992,24 @@ function Composer({
   }
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (cmdSuggest) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        const n = cmdSuggest.items.length;
+        setCmdSuggest({ ...cmdSuggest, index: (cmdSuggest.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n });
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        chooseCommand(cmdSuggest.index, e.key === 'Tab');
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setCmdSuggest(null);
+        return;
+      }
+    }
     if (mentionSuggest) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -1995,6 +2101,7 @@ function Composer({
           onTab={setPanel}
           allowGif={!reactTo}
           stickerNetwork={conversation.network}
+          gifQuery={gifQuery}
           onStickerImage={conversation.network === 'whatsapp' ? (f) => void sendWaSticker({ file: f }) : undefined}
           title={reactTo ? 'React' : undefined}
           onEmoji={(e) => (reactTo ? void react(e) : insertAtCaret(e))}
@@ -2117,6 +2224,35 @@ function Composer({
             ))}
           </ul>
         )}
+        {cmdSuggest && (
+          <ul className="emoji-suggest cmd-suggest" role="listbox" aria-label="Commands">
+            {cmdSuggest.items.map((c, i) => (
+              <li
+                key={c.name}
+                role="option"
+                aria-selected={i === cmdSuggest.index}
+                className={i === cmdSuggest.index ? 'on' : undefined}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // keep focus in the textarea
+                  chooseCommand(i);
+                }}
+                onMouseEnter={() => setCmdSuggest({ ...cmdSuggest, index: i })}
+              >
+                <span className="cmd-name">
+                  /{c.name}
+                  {c.args && <span className="cmd-args"> {c.args}</span>}
+                </span>
+                <span className="cmd-desc">{c.description}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!cmdSuggest && commandHint && (
+          <div className="cmd-hint" aria-live="polite">
+            <b>/{commandHint.name}</b>
+            {commandHint.args && <span className="cmd-args"> {commandHint.args}</span>} · {commandHint.description}
+          </div>
+        )}
         {suggest && (
           <ul className="emoji-suggest" role="listbox" aria-label="Emoji suggestions">
             {suggest.items.map((s, i) => (
@@ -2199,7 +2335,7 @@ function Composer({
         />
         <button
           className="send-btn"
-          onClick={send}
+          onClick={() => void send()}
           disabled={disabled || sending || shrinking || unsendable || (!editing && !text.trim() && !files.length) || (!!editing && text.trim() === editOriginal.current.trim())}
           aria-label={editing ? (text.trim() ? 'Save edit' : 'Delete message') : 'Send'}
           title={editing ? (text.trim() ? 'Save edit' : 'Everything erased: delete the message') : undefined}

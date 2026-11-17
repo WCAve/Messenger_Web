@@ -36,6 +36,7 @@ export function Picker({
   allowStickers = true,
   stickerNetwork = 'signal',
   onStickerImage,
+  gifQuery,
 }: {
   tab: PickerTab;
   onTab: (t: PickerTab) => void;
@@ -49,6 +50,8 @@ export function Picker({
   /** Which network the chat is on (how a sticker gets sent), and "image as sticker" for WhatsApp. */
   stickerNetwork?: 'signal' | 'whatsapp';
   onStickerImage?: (file: File) => void;
+  /** Start the GIF search with this (/gif cats) */
+  gifQuery?: string;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -87,7 +90,7 @@ export function Picker({
           }}
         />
       ) : tab === 'gif' ? (
-        <GifGrid onPick={onGif} />
+        <GifGrid onPick={onGif} initial={gifQuery} />
       ) : (
         <StickerGrid onPick={onSticker} network={stickerNetwork} onImage={onStickerImage} />
       )}
@@ -384,9 +387,9 @@ interface GiphyGif {
 
 let configPromise: Promise<{ giphyApiKey: string | null; giphyRating: string }> | null = null;
 
-function GifGrid({ onPick }: { onPick: (g: PickedGif) => void }) {
+function GifGrid({ onPick, initial = '' }: { onPick: (g: PickedGif) => void; initial?: string }) {
   const [cfg, setCfg] = useState<{ giphyApiKey: string | null; giphyRating: string } | null>(null);
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(initial);
   const [gifs, setGifs] = useState<GiphyGif[]>([]);
   const [offset, setOffset] = useState(0);
   const [more, setMore] = useState(true);

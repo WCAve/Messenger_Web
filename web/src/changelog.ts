@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17',
+    date: '17 November 2026',
+    items: [
+      'Slash commands: type / at the start of a message for the list. /shrug, /tableflip, /unflip, /lenny, /me, /mock (sPoNgEbOb TeXt), /spoiler (on WhatsApp: hidden behind “Read more”), /gif, /sticker, /poll Question | option | option, /file, /mute, /unmute, /pin, /unpin, /archive, /unarchive, /unread, /timer (Signal), /search, /export and /info.',
+      'To send a message that starts with a slash, start it with //.',
+    ],
+  },
+  {
     id: '2026-11-16-2',
     date: '16 November 2026',
     items: [
