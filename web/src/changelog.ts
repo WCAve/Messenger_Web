@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-6',
+    date: '17 November 2026',
+    items: [
+      'WhatsApp: when WhatsApp Web is slow and a message shows “Not sent” but did go out after all, the mark now goes away by itself. Replies sent while it’s slow stay real replies instead of becoming “quoted as text”.',
+    ],
+  },
+  {
     id: '2026-11-17-5',
     date: '17 November 2026',
     items: [

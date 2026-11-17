@@ -1274,13 +1274,15 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   if (fromMe && !opts.history) {
     const recent = db
       .prepare<[number, number], MessageRow>(
-        "SELECT * FROM messages WHERE conversation_id = ? AND outgoing = 1 AND ext_id IS NULL AND status IN ('pending','sent') AND sent_ts > ? ORDER BY sent_ts DESC",
+        "SELECT * FROM messages WHERE conversation_id = ? AND outgoing = 1 AND ext_id IS NULL AND status IN ('pending','sent','failed') AND sent_ts > ? ORDER BY sent_ts DESC",
       )
-      .all(conv.id, Date.now() - 120_000);
+      .all(conv.id, Date.now() - 600_000); // a slow WhatsApp Web can take minutes
     const body = String(m.body ?? '');
     const match = recent.find((r) => (r.body ?? '') === body || (!!r.body && body.includes(r.body.replace(/￼/g, ''))));
     if (match && m.source !== 'app') {
-      emitMessage(updateMessage(match.id, { ext_id: extId }));
+      // A send that timed out here can still have gone out (WhatsApp Web was slow): then it isn't "Not sent".
+      if (match.status === 'failed') log.info('whatsapp: a message marked "Not sent" did go out after all');
+      emitMessage(updateMessage(match.id, { ext_id: extId, ...(match.status === 'failed' ? { status: 'sent', error: null } : {}) }));
       if (match.kind === 'sticker' && m.hasMedia && !(match.attachments ?? '').includes('image/webp')) {
         const a = await downloadMedia(m, extId).catch(() => null);
         if (a) {
@@ -2027,15 +2029,23 @@ export async function linkableQuoteId(m: MessageRow): Promise<string | null> {
     for (const c of chats) for (const a of authors) candidates.add(`${fromMe}_${c}_${raw}${a ? '_' + a : ''}`);
   }
   const conv = getConversation(m.conversation_id)!;
+  let trouble = false; // WhatsApp Web didn't answer (timeout, error): that's not "it doesn't have it"
   const found = await Promise.all(
     [...candidates].map((id) =>
       waha
         .message(conv.wa_id!, id, false)
         .then((r) => (r && (r.id || r._data) ? id : null))
-        .catch(() => null),
+        .catch((e: { status?: number }) => {
+          if (e?.status !== 404) trouble = true;
+          return null;
+        }),
     ),
   );
   const id = found.find(Boolean) ?? null;
+  if (!id && trouble) {
+    log.warn(`whatsapp: couldn't check whether WhatsApp Web has the quoted message (it didn't answer); replying to it as is`);
+    return m.ext_id; // not remembered: ask again next time
+  }
   kvSet(cacheKey, JSON.stringify({ id, at: Date.now() }));
   return id;
 }
