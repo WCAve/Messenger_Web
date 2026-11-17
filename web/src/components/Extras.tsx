@@ -184,7 +184,8 @@ export function PollDialog({ conversationId, onClose }: { conversationId: number
 
 // ---------------------------------------------------------------------------
 
-export function ForwardDialog({ message, onClose }: { message: Message; onClose: () => void }) {
+export function ForwardDialog({ message, onClose }: { message: Message | Message[]; onClose: () => void }) {
+  const messages = Array.isArray(message) ? message : [message]; // several: in chat order, one after another
   const conversations = useStore((s) => s.conversations);
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<number[]>([]);
@@ -206,8 +207,10 @@ export function ForwardDialog({ message, onClose }: { message: Message; onClose:
     setBusy(true);
     setError(null);
     try {
-      const r = await api.forward(message.id, picked);
-      for (const m of r.messages) upsertMessages(m.conversationId, [m]);
+      for (const one of messages) {
+        const r = await api.forward(one.id, picked);
+        for (const m of r.messages) upsertMessages(m.conversationId, [m]);
+      }
       if (picked.length === 1) setState({ activeId: picked[0] });
       onClose();
     } catch (e) {
@@ -216,10 +219,16 @@ export function ForwardDialog({ message, onClose }: { message: Message; onClose:
     }
   }
 
-  const what = message.kind === 'sticker' ? 'Sticker' : message.body || (message.attachments.length ? `${message.attachments.length} attachment${message.attachments.length > 1 ? 's' : ''}` : '');
+  const first = messages[0];
+  const what =
+    messages.length > 1
+      ? `${messages.length} messages`
+      : first.kind === 'sticker'
+        ? 'Sticker'
+        : first.body || (first.attachments.length ? `${first.attachments.length} attachment${first.attachments.length > 1 ? 's' : ''}` : '');
 
   return (
-    <Dialog title="Forward message" onClose={onClose}>
+    <Dialog title={messages.length > 1 ? `Forward ${messages.length} messages` : 'Forward message'} onClose={onClose}>
       <div className="dialog-body">
         <p className="forward-what">{what}</p>
         <div className="search">

@@ -12,6 +12,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-4',
+    date: '17 November 2026',
+    items: [
+      'Record voice messages: the microphone button (where Send is when the box is empty). Stop, listen, then send; Esc throws it away. WhatsApp gets a real voice message; Signal a playable audio file (its API has no voice-message flag).',
+      'Select several messages (✓ in a message’s toolbar, then click others) to copy, forward or delete them at once. Esc stops selecting.',
+      'Contact cards: shared contacts show as a card with “Message” and “Copy number”. Share one with the person button next to the poll button, or /contact. On WhatsApp it’s a real contact card; Signal’s API can’t send those, so there it’s the name and number with a contact file to save.',
+      'Contact info shows the groups you have in common (Signal and WhatsApp).',
+      'Voice messages play on: when one ends, the next voice message in the chat starts.',
+    ],
+  },
+  {
     id: '2026-11-17-3',
     date: '17 November 2026',
     items: [

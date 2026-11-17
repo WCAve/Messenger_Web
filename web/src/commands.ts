@@ -3,7 +3,7 @@
  * Chat.tsx shows it, filtered as you type). "//" at the start sends a message that starts with "/".
  *
  *   text that gets sent   /shrug /tableflip /unflip /lenny /me /mock /spoiler
- *   making things         /gif /sticker /poll /file
+ *   making things         /gif /sticker /poll /file /contact
  *   this chat             /mute /unmute /pin /unpin /archive /unarchive /unread /timer /search /export /info
  *
  * A command either gives text to send (with the usual formatting markers: *italic*, ||spoiler||) or does
@@ -19,6 +19,7 @@ export interface CommandContext {
   openStickers: () => void;
   openFiles: () => void;
   openPoll: () => void;
+  openContact: () => void;
   createPoll: (question: string, options: string[]) => Promise<void>;
   setFlags: (f: { pinned?: boolean; archived?: boolean; mutedUntil?: number }) => Promise<void>;
   markUnread: () => Promise<void>;
@@ -127,6 +128,7 @@ export const COMMANDS: Command[] = [
     },
   },
   { name: 'file', description: 'Attach a file', run: (_a, ctx) => (ctx.openFiles(), { done: true }) },
+  { name: 'contact', description: 'Share a contact', run: (_a, ctx) => (ctx.openContact(), { done: true }) },
   // ---- this chat
   {
     name: 'mute',

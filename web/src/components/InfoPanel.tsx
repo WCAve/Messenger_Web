@@ -287,6 +287,27 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
 
         {group && <GroupManageSections conversation={conversation} group={g} members={info?.members ?? []} />}
 
+        {!group && !!info?.commonGroups?.length && (
+          <section className="panel-section members">
+            <h4>
+              {info.commonGroups.length} group{info.commonGroups.length === 1 ? '' : 's'} in common
+            </h4>
+            <ul className="member-list common-groups">
+              {info.commonGroups.map((cg) => (
+                <li key={cg.id} className="member-row">
+                  <button className="member" onClick={() => setState({ activeId: cg.id, panel: null })} title={`Open ${cg.title}`}>
+                    <Avatar name={cg.title} seed={String(cg.id)} size={40} src={cg.avatar} />
+                    <span className="member-text">
+                      <strong>{cg.title}</strong>
+                      <small>{cg.memberCount} members</small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {!group && conversation.network === 'whatsapp' && conversation.number && <WaContactSection conversation={conversation} />}
         <section className="panel-section">
           <button className="panel-action" onClick={() => setState({ exportDialog: { preselect: [conversation.id] } })}>

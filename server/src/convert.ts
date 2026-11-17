@@ -5,6 +5,7 @@
  *
  *   iPhone photos (HEIC/HEIF), TIFF       → JPEG
  *   very large photos that still got here → JPEG, at most 4096 px
+ *   audio phones can't all play           → M4A (AAC): browser recordings (WebM/Ogg Opus), WAV, FLAC
  *   video that isn't MP4 with H.264       → MP4 with H.264 (iPhone HEVC, .mov, .mkv, .webm, .avi …);
  *                                           an H.264 .mov is only repacked, without re-encoding
  *   video bigger than the networks take   → made smaller to fit (SEND_LIMIT_MB): a lower bitrate worked
@@ -208,8 +209,11 @@ export interface Sendable {
 }
 
 /** What to do with this file, if anything (cheap: from its type, name and size; videos are probed later). */
+const AWKWARD_AUDIO = /^audio\/(webm|ogg|opus|wav|x-wav|wave|vnd\.wave|flac|x-flac)\b/;
+
 export function needsConverting(type: string, name: string, size: number, limit = Infinity): boolean {
   if (isHeic(type, name) || type === 'image/tiff') return true;
+  if (AWKWARD_AUDIO.test(type)) return true;
   if (type.startsWith('image/') && !/gif|svg|webp/.test(type) && size > BIG_PHOTO) return true;
   return type.startsWith('video/') || (size > limit && /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpe?g|3gp|ts|mts|flv)$/i.test(name));
 }
@@ -229,6 +233,14 @@ export async function convertForSending(f: Source, log: (m: string) => void, lim
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mw-convert-'));
   const input = f.file;
   try {
+    // Audio → M4A (AAC), which every phone plays (WhatsApp makes its own voice format from it)
+    if (AWKWARD_AUDIO.test(f.type)) {
+      const out = path.join(dir, 'out.m4a');
+      await run('ffmpeg', ['-v', 'error', '-y', '-i', input, '-vn', '-c:a', 'aac', '-b:a', '96k', '-movflags', '+faststart', out], 5 * 60_000);
+      const buf = fs.readFileSync(out);
+      log(`converted ${f.name} (${f.type}, ${mb(f.size)}) to M4A (${mb(buf.length)})`);
+      return { buf, type: 'audio/mp4', name: swapExt(f.name, '.m4a') };
+    }
     // Photos → JPEG, at most 4096 px on the longest side
     if (f.type.startsWith('image/') || isHeic(f.type, f.name)) {
       const out = path.join(dir, 'out.jpg');

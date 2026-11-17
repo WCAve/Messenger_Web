@@ -31,7 +31,11 @@ Either network is optional: set `SIGNAL_API_URL=off` for WhatsApp only, or leave
 - Text formatting, both ways: `*bold*`, `_italic_`, `~strikethrough~`, `` `monospace` ``, `||spoiler||` (click to reveal). Ctrl+B, Ctrl+I, Ctrl+Shift+X and Ctrl+Shift+M wrap the selection
 - Link previews, both ways: when you type an https link, Messenger Web fetches the page's title and picture (like Signal Desktop; can be switched off in Settings → Privacy, or with `SEND_LINK_PREVIEWS=false`)
 - Polls: vote, create (📊 button next to the paperclip) and end your own polls
-- Forward messages (text, files, stickers) to up to 5 chats
+- Forward messages (text, files, stickers) to up to 5 chats; select several messages (✓ in the toolbar) to copy, forward or delete them together
+- Record voice messages (microphone button; listen before sending). WhatsApp gets a real voice message, Signal an audio file (its API has no voice-message flag); recordings are converted to M4A so every phone plays them
+- Contact cards: received ones show as a card (Message, Copy number); share one with the person button or `/contact` (Signal: as text plus a .vcf, its API can't send contact cards)
+- Contact info lists the groups you have in common; consecutive voice messages play one after another
+- Slash commands in the message box: type `/` for the list (`/shrug`, `/mock`, `/spoiler`, `/gif`, `/poll`, `/mute`, …)
 - Pin (up to 10), mute, archive and mark as unread from the ⋮ menu in the chat header, or the ⌄ button on a chat in the list. On Signal these stay in Messenger Web; on WhatsApp, mutes and "marked as unread" are kept in step with your phone, and chats you pin or unpin on your phone are copied (WAHA can't pin chats on the phone)
 - Call lines in the chat: incoming, missed and answered calls (calls themselves happen on your phone)
 - Drafts per chat (kept in this browser), and an "N unread messages" divider when you open a chat

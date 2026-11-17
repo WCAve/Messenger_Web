@@ -43,7 +43,9 @@ export interface State {
   /** Unsent text per chat (this browser only). */
   drafts: Record<number, Draft>;
   /** The message being forwarded (the forward dialog is open). */
-  forwarding: Message | null;
+  forwarding: Message | Message[] | null;
+  /** Selecting messages in a chat (to copy, forward or delete them together) */
+  selecting: { conversationId: number; ids: number[] } | null;
   editHistory: Message | null; // the edit history window
   deletedView: Message | null; // what a deleted message said
   exportDialog: { preselect: number[] } | null; // the Export window
@@ -75,6 +77,7 @@ let state: State = {
   whatsNew: null,
   drafts: loadDrafts(),
   forwarding: null,
+  selecting: null,
   editHistory: null,
   deletedView: null,
   exportDialog: null,

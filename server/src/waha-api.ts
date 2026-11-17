@@ -142,6 +142,9 @@ export const waha = {
   remove: (chatId: string, messageId: string) => call<Json>('DELETE', `/api/${enc(S())}/chats/${enc(chatId)}/messages/${enc(messageId)}`),
   sendPoll: (chatId: string, name: string, options: string[], multipleAnswers: boolean) =>
     call<Json>('POST', '/api/sendPoll', { session: S(), chatId, poll: { name, options, multipleAnswers } }),
+  /** A contact card (WEBJS sends one vCard as a contact message). */
+  sendContactVcard: (chatId: string, contacts: { fullName: string; phoneNumber: string; whatsappId?: string; organization?: string }[]) =>
+    call<Json>('POST', '/api/sendContactVcard', { session: S(), chatId, contacts }),
   vote: (chatId: string, pollMessageId: string, votes: string[]) => call<Json>('POST', '/api/sendPollVote', { session: S(), chatId, pollMessageId, votes }),
 
   /** Media files WAHA stored for a message. The URL WAHA reports may use its own hostname; we only keep the path. */

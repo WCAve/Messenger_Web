@@ -31,6 +31,7 @@ import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { Dialog, PollDialog, PollView } from './Extras';
+import { ContactCards, ShareContactDialog } from './ContactCards';
 import { ChatRowMenu } from './Sidebar';
 import { type Command, type CommandContext, findCommand, matchCommands, parseCommand } from '../commands';
 import { Avatar, Icon, StatusMark, useMenu } from './ui';
@@ -76,6 +77,11 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
   const hasMore = useStore((s) => s.hasMore[id] ?? true);
   const typing = useStore((s) => s.typing[id] ?? NO_TYPING);
   const connected = useNetworkReady(conversation.network);
+  const selecting = useStore((s) => s.selecting);
+  useEffect(() => {
+    const sel = getState().selecting;
+    if (sel && sel.conversationId !== conversation.id) setState({ selecting: null }); // another chat: stop selecting
+  }, [conversation.id]);
   const multiNetwork = useStore((s) => s.whatsapp.status !== 'disabled' && s.signal.status !== 'disabled');
   const panel = useStore((s) => s.panel?.kind ?? null);
   const [chatMenu, setChatMenu, chatMenuRef] = useMenu();
@@ -242,7 +248,9 @@ export function ChatView({ conversation, onOpenMedia }: { conversation: Conversa
         />
       )}
 
-      {conversation.blocked ? (
+      {selecting?.conversationId === conversation.id ? (
+        <SelectionBar conversation={conversation} ids={selecting.ids} />
+      ) : conversation.blocked ? (
         <BlockedBar conversation={conversation} />
       ) : conversation.left ? (
         <div className="blocked-bar">
@@ -625,6 +633,79 @@ function LinkPreviewCard({ p, onLoad }: { p: LinkPreview; onLoad: () => void }) 
  * The space a photo, GIF or video takes before it has loaded: its real shape when we know it (the
  * server fills sizes in, mediasize.ts), else 4:3. So a chat full of pictures doesn't jump while it opens.
  */
+function togglePick(m: Message) {
+  const sel = getState().selecting;
+  if (!sel) return;
+  const ids = sel.ids.includes(m.id) ? sel.ids.filter((x) => x !== m.id) : [...sel.ids, m.id];
+  setState({ selecting: ids.length ? { ...sel, ids } : null }); // the last one unpicked: done selecting
+}
+
+/** A message as plain text, for copying ("Photo" and the like when it has no text). */
+function plainText(m: Message): string {
+  if (m.body) return m.body;
+  if (m.poll) return `📊 ${m.poll.question}`;
+  if (m.sticker || m.kind === 'sticker') return 'Sticker';
+  const a = m.attachments[0];
+  if (a) return a.contentType.startsWith('image/') ? 'Photo' : a.contentType.startsWith('video/') ? 'Video' : a.contentType.startsWith('audio/') ? 'Voice message' : a.filename || 'File';
+  return '';
+}
+
+/**
+ * In place of the message box while selecting: how many, Copy (in chat order; with names when there's
+ * more than one), Forward (to up to 5 chats), Delete for everyone (only when all are yours), Cancel.
+ */
+function SelectionBar({ conversation, ids }: { conversation: Conversation; ids: number[] }) {
+  const all = useStore((s) => s.messages[conversation.id] ?? []);
+  const chosen = all.filter((m) => ids.includes(m.id) && !m.deleted); // in chat order
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const done = () => setState({ selecting: null });
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && done();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const canDelete = chosen.length > 0 && chosen.every((m) => m.outgoing && m.status !== 'pending');
+  async function copy() {
+    const text = chosen.length === 1 ? plainText(chosen[0]) : chosen.map((m) => `${m.outgoing ? 'You' : m.authorName}: ${plainText(m)}`).join('\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setNote(`Copied ${chosen.length} message${chosen.length === 1 ? '' : 's'}`);
+      setTimeout(done, 700);
+    } catch {
+      setNote('Copying isn’t allowed here');
+    }
+  }
+  async function remove() {
+    if (!confirm(`Delete ${chosen.length} message${chosen.length === 1 ? '' : 's'} for everyone?`)) return;
+    setBusy(true);
+    try {
+      for (const m of chosen) upsertMessages(conversation.id, [await api.remove(m.id)]);
+      done();
+    } catch (e) {
+      setNote((e as Error).message);
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="selection-bar" role="toolbar" aria-label="Selected messages">
+      <button className="icon-btn" onClick={done} aria-label="Cancel" title="Cancel (Esc)">
+        <Icon name="close" />
+      </button>
+      <strong className="selection-count">{note ?? `${chosen.length} selected`}</strong>
+      <button className="icon-btn" onClick={() => void copy()} disabled={!chosen.length || busy} aria-label="Copy" title="Copy">
+        <Icon name="copy" />
+      </button>
+      <button className="icon-btn" onClick={() => (setState({ forwarding: chosen }), done())} disabled={!chosen.length || busy || chosen.some((m) => m.kind === 'poll')} aria-label="Forward" title={chosen.some((m) => m.kind === 'poll') ? 'Polls can’t be forwarded' : 'Forward'}>
+        <Icon name="forward" />
+      </button>
+      <button className="icon-btn" onClick={() => void remove()} disabled={!canDelete || busy} aria-label="Delete for everyone" title={canDelete ? 'Delete for everyone' : 'Only your own messages can be deleted'}>
+        <Icon name="trash" />
+      </button>
+    </div>
+  );
+}
+
 /** How long a message's toolbar stays after the pointer leaves it, and whose toolbar that is now. */
 const LINGER_MS = 500;
 let lingeringNow: (() => void) | null = null;
@@ -685,6 +766,9 @@ const MessageItem = memo(function MessageItem({
 }) {
   const [picker, setPicker] = useState(false);
   const quickReactions = useQuickReactions();
+  // Selecting messages: undefined when not selecting in this chat, else whether this one is picked
+  const picked = useStore((s) => (s.selecting?.conversationId === m.conversationId ? s.selecting.ids.includes(m.id) : undefined));
+  const picking = picked !== undefined;
   // The toolbar (and its reaction row) stays a moment after the pointer leaves the message, so it can be
   // reached on a slanted path; pointing at another message ends that at once (see endLinger).
   const [lingering, setLingering] = useState(false);
@@ -729,8 +813,15 @@ const MessageItem = memo(function MessageItem({
 
   return (
     <div
-      className={`msg ${m.outgoing ? 'out' : 'in'}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}${lingering ? ' lingering' : ''}`}
+      className={`msg ${m.outgoing ? 'out' : 'in'}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}${lingering ? ' lingering' : ''}${picking ? ' picking' : ''}${picked ? ' picked' : ''}`}
       data-ts={m.sentAt}
+      onClickCapture={(e) => {
+        if (!picking) return;
+        e.preventDefault(); // while selecting, a click picks the message (not its link, photo or button)
+        e.stopPropagation();
+        togglePick(m);
+      }}
+      aria-selected={picking ? picked : undefined}
       onMouseEnter={() => {
         window.clearTimeout(lingerTimer.current);
         if (lingeringNow && lingeringNow !== stopLinger.current) lingeringNow(); // another message's toolbar goes
@@ -746,6 +837,11 @@ const MessageItem = memo(function MessageItem({
         }, LINGER_MS);
       }}
     >
+      {picking && (
+        <span className="pick-mark" aria-hidden="true">
+          {picked && <Icon name="check" size={16} />}
+        </span>
+      )}
       <div
         className={`bubble${jumbo ? ' jumbo' : ''}${sticker || waSticker ? ' sticker' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}
         onClick={(e) => {
@@ -847,6 +943,8 @@ const MessageItem = memo(function MessageItem({
           </p>
         ) : m.kind === 'poll' && m.poll ? (
           <PollView m={m} canEnd={capsFor({ network }).endPoll} />
+        ) : m.contacts?.length ? (
+          <ContactCards m={m} network={network} />
         ) : (
           m.body && (
             <p className="body">
@@ -934,6 +1032,11 @@ const MessageItem = memo(function MessageItem({
           {m.outgoing && (
             <button className="icon-btn sm" onClick={() => setState({ panel: { kind: 'message', messageId: m.id } })} aria-label="Message info" title="Message info">
               <Icon name="info" size={18} />
+            </button>
+          )}
+          {canAct && (
+            <button className="icon-btn sm" onClick={() => setState({ selecting: { conversationId: m.conversationId, ids: [m.id] } })} aria-label="Select" title="Select messages">
+              <Icon name="check" size={18} />
             </button>
           )}
           {m.outgoing && (
@@ -1442,8 +1545,11 @@ interface Pending {
   problem?: string; // can't be sent (too big): says why
   bigNote?: string; // a big video the server will make smaller
   progress?: number; // 0–1 while it's uploaded in pieces
+  voiceNote?: boolean; // recorded here: sent as a voice message
+  audioUrl?: string; // to listen to it before sending
 }
 let pendingKey = 0;
+const MAX_RECORDING_MS = 15 * 60_000;
 
 // What the server takes (asked once); until it answers, the usual values.
 const MB = 1024 * 1024;
@@ -1585,9 +1691,66 @@ function Composer({
   }, [replyTo?.id, conversation.network]);
   const mentions = useRef<ComposerMention[]>(getState().drafts[conversation.id]?.mentions ?? []); // people picked from the @ suggestions
   const [pollOpen, setPollOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   // Slash commands: the list while the name is typed (commands.ts)
   const [cmdSuggest, setCmdSuggest] = useState<{ items: Command[]; index: number } | null>(null);
   const [gifQuery, setGifQuery] = useState<string | undefined>(undefined);
+  // Recording a voice message: the time so far while it runs (the recording then waits in `files`)
+  const [recording, setRecording] = useState<number | null>(null);
+  const recorder = useRef<{ rec: MediaRecorder; stream: MediaStream; started: number; cancelled: boolean; timer: number } | null>(null);
+
+  async function startRecording() {
+    setError(null);
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      return setError('Recording needs the microphone, which browsers only allow over https.');
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      return setError('The microphone isn’t available (not allowed in the browser, or none connected).');
+    }
+    const mime = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t));
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    const chunks: Blob[] = [];
+    const started = Date.now();
+    const state = { rec, stream, started, cancelled: false, timer: 0 };
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = () => {
+      window.clearInterval(state.timer);
+      for (const t of stream.getTracks()) t.stop();
+      recorder.current = null;
+      setRecording(null);
+      if (state.cancelled || !chunks.length) return;
+      const type = (rec.mimeType || mime || 'audio/webm').split(';')[0];
+      const ext = type.includes('ogg') ? 'ogg' : type.includes('mp4') ? 'm4a' : 'webm';
+      const at = new Date(started);
+      const file = new File(chunks, `Voice message ${at.toLocaleDateString('sv-SE')} ${at.toTimeString().slice(0, 5).replace(':', '.')}.${ext}`, { type });
+      setFiles((prev) => [...prev, { key: ++pendingKey, file, voiceNote: true, audioUrl: URL.createObjectURL(file) }]);
+      setTimeout(() => document.querySelector<HTMLButtonElement>('.composer .send-btn')?.focus(), 0);
+    };
+    rec.start(250);
+    state.timer = window.setInterval(() => {
+      const ms = Date.now() - started;
+      setRecording(ms);
+      if (ms >= MAX_RECORDING_MS) rec.stop();
+    }, 250);
+    recorder.current = state;
+    setRecording(0);
+  }
+  function stopRecording(cancel = false) {
+    const r = recorder.current;
+    if (!r) return;
+    r.cancelled = cancel;
+    if (r.rec.state !== 'inactive') r.rec.stop();
+  }
+  useEffect(() => () => stopRecording(true), []); // leaving the chat: throw it away
+  useEffect(() => {
+    if (recording === null) return;
+    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && stopRecording(true);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [recording === null]);
   useEffect(() => {
     if (panel !== 'gif') setGifQuery(undefined); // only for the GIF panel /gif opened
   }, [panel]);
@@ -1819,6 +1982,7 @@ function Composer({
     openStickers: () => setPanel('sticker'),
     openFiles: () => fileInput.current?.click(),
     openPoll: () => setPollOpen(true),
+    openContact: () => setContactOpen(true),
     createPoll: async (question, options) => upsertMessages(id, [await api.createPoll(id, { question, options, multiple: false })]),
     setFlags: async (f) => upsertConversation(await api.setFlags(id, f)),
     markUnread: async () => {
@@ -1916,7 +2080,7 @@ function Composer({
       for (const p of files) {
         // The original, when asked for: as a plain file, so the network doesn't try to treat it as a photo
         const f = p.useOriginal && p.original ? p.original : p.file;
-        const meta = { name: f.name || 'file', type: p.useOriginal ? 'application/octet-stream' : f.type || 'application/octet-stream' };
+        const meta = { name: f.name || 'file', type: p.useOriginal ? 'application/octet-stream' : f.type || 'application/octet-stream', ...(p.voiceNote ? { voiceNote: true } : {}) };
         if (f.size <= PIECES_OVER) {
           attachments.push({ ...meta, data: await fileToBase64(f) });
           continue;
@@ -2189,12 +2353,29 @@ function Composer({
         </div>
       )}
       {pollOpen && <PollDialog conversationId={id} onClose={() => (setPollOpen(false), area.current?.focus())} />}
+      {contactOpen && <ShareContactDialog conversation={conversation} onClose={() => (setContactOpen(false), area.current?.focus())} />}
       {files.length > 0 && (
         <div className="pending-files">
           {files.map((p, i) => (
-            <div key={p.key} className={`pending-file${p.original || p.shrinking || p.problem || p.bigNote || p.progress !== undefined ? ' noted' : ''}${p.problem ? ' unsendable' : ''}`}>
-              {p.preview ? <img src={p.preview} alt="" /> : <Icon name="file" size={28} />}
-              <span>{p.useOriginal && p.original ? p.original.name : p.file.name}</span>
+            <div key={p.key} className={`pending-file${p.original || p.shrinking || p.problem || p.bigNote || p.progress !== undefined || p.voiceNote ? ' noted' : ''}${p.problem ? ' unsendable' : ''}${p.voiceNote ? ' voice-pending' : ''}`}>
+              {p.preview ? <img src={p.preview} alt="" /> : <Icon name={p.voiceNote ? 'mic' : 'file'} size={28} />}
+              <span>{p.voiceNote ? 'Voice message' : p.useOriginal && p.original ? p.original.name : p.file.name}</span>
+              {p.audioUrl && (
+                <audio
+                  className="voice-preview"
+                  src={p.audioUrl}
+                  controls
+                  preload="metadata"
+                  aria-label="Listen before sending"
+                  onLoadedMetadata={(e) => {
+                    // A fresh browser recording doesn't say how long it is (Chrome): jumping to the end once makes it find out
+                    const el = e.currentTarget;
+                    if (el.duration !== Infinity) return;
+                    el.addEventListener('durationchange', () => el.duration !== Infinity && (el.currentTime = 0), { once: false });
+                    el.currentTime = 1e9;
+                  }}
+                />
+              )}
               {p.shrinking && <small className="shrink-note">Making it smaller…</small>}
               {p.problem && (
                 <small className="shrink-note problem" role="alert">
@@ -2325,6 +2506,9 @@ function Composer({
         <button className="icon-btn" onClick={() => setPollOpen(true)} aria-label="New poll" title="New poll" disabled={disabled || !!editing}>
           <Icon name="poll" />
         </button>
+        <button className="icon-btn" onClick={() => setContactOpen(true)} aria-label="Share a contact" title="Share a contact" disabled={disabled || !!editing}>
+          <Icon name="user" />
+        </button>
         <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled || !!editing}>
           <Icon name="attach" />
         </button>
@@ -2338,9 +2522,19 @@ function Composer({
             e.target.value = '';
           }}
         />
+        {recording !== null && (
+          <div className="recording" role="status" aria-live="polite">
+            <span className="rec-dot" aria-hidden="true" />
+            <span>Recording {Math.floor(recording / 60000)}:{String(Math.floor((recording / 1000) % 60)).padStart(2, '0')}</span>
+            <button className="icon-btn" onClick={() => stopRecording(true)} aria-label="Cancel recording" title="Cancel (Esc)">
+              <Icon name="trash" />
+            </button>
+          </div>
+        )}
         <textarea
           ref={area}
           rows={1}
+          hidden={recording !== null}
           value={text}
           placeholder={disabled ? `Waiting for ${NETWORK_LABEL[conversation.network]}…` : 'Message'}
           title="*bold*  _italic_  ~strike~  `code`  ||spoiler||"
@@ -2361,6 +2555,15 @@ function Composer({
           aria-label={`Message ${conversation.title}`}
           aria-autocomplete="list"
         />
+        {recording !== null ? (
+          <button className="send-btn" onClick={() => stopRecording()} aria-label="Stop recording" title="Stop: listen to it, then send">
+            <Icon name="stop" />
+          </button>
+        ) : !editing && !text.trim() && !files.length ? (
+          <button className="send-btn mic" onClick={() => void startRecording()} disabled={disabled} aria-label="Record a voice message" title="Record a voice message">
+            <Icon name="mic" />
+          </button>
+        ) : (
         <button
           className="send-btn"
           onClick={() => void send()}
@@ -2370,6 +2573,7 @@ function Composer({
         >
           <Icon name={editing ? (text.trim() ? 'check' : 'trash') : 'send'} />
         </button>
+        )}
       </div>
     </footer>
   );

@@ -566,7 +566,7 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/sendVoice' && mockConfig.noVoice) return json(res, 500, { message: 'ffmpeg not available' }); // tests: conversion fails
       if (p === '/api/send/link-custom-preview' && mockConfig.webjs) // like WAHA's WEBJS engine
         return json(res, 501, { statusCode: 501, message: "The method is not implemented by 'WEBJS' engine. Check the docs and try another engine: https://waha.devlike.pro/" });
-      if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll', '/api/sendSticker'].includes(p)) {
+      if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll', '/api/sendSticker', '/api/sendContactVcard'].includes(p)) {
         if (String(b.text ?? b.caption ?? '').includes('fail')) return json(res, 500, { message: 'Mock failure' });
         const text = b.text ?? b.caption ?? '';
         const out = msg({ chat: chatId, fromMe: true, body: p === '/api/sendPoll' ? b.poll.name : text, media: b.file?.mimetype, ack: 1 });

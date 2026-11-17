@@ -159,6 +159,7 @@ export interface MessageRow {
   expires_in: number;
   expires_at: number | null;
   poll: string | null;
+  contacts: string | null;
   ext_id: string | null;
   forwarded: number;
   ext_raw: string | null;
@@ -714,6 +715,18 @@ function conversationAvatarUrl(conv: ConversationRow, peer?: ContactRow): string
   return peer?.has_avatar && id ? `/api/avatars/conversation/${conv.id}.jpg?v=${avatarRev('profile', id)}` : null;
 }
 
+/** A contact card someone shared (Signal "shared contact", WhatsApp vCard). */
+export interface SharedContact {
+  name: string;
+  numbers: string[];
+  organization?: string;
+}
+
+/** The text a contact card message keeps as its body (search, chat list, export). */
+export function contactsText(contacts: SharedContact[]): string {
+  return '👤 ' + contacts.map((c) => c.name).join(', ');
+}
+
 export interface GroupMember {
   key: string;
   name: string;
@@ -980,7 +993,47 @@ export function conversationInfo(conv: ConversationRow) {
     media: media.slice(0, 60),
     files: files.slice(0, 50),
     links: links.slice(0, 50),
+    commonGroups: conv.kind === 'direct' ? groupsInCommon(conv) : [],
   };
+}
+
+/**
+ * The groups you share with the person of a one-to-one chat, on its network, most recently active first.
+ * WhatsApp knows people by number and by privacy id (@lid): either matches.
+ */
+export function groupsInCommon(conv: ConversationRow): { id: number; title: string; avatar: string | null; memberCount: number }[] {
+  if (conv.kind !== 'direct') return [];
+  const groups = db
+    .prepare<[string], ConversationRow>(`SELECT * FROM conversations WHERE network = ? AND kind = 'group' AND group_members IS NOT NULL ORDER BY last_message_at DESC`)
+    .all(conv.network);
+  let isThem: (memberId: string) => boolean;
+  if (conv.network === 'whatsapp') {
+    if (!conv.wa_id) return [];
+    const numberOf = (jid: string) => waContact(jid)?.number ?? waNumberOf(jid);
+    const theirs = numberOf(conv.wa_id);
+    isThem = (key) => {
+      const jid = key.startsWith('wa:') ? key.slice(3) : key;
+      return jid === conv.wa_id || (!!theirs && numberOf(jid) === theirs);
+    };
+  } else {
+    const peer = findContact(conv.peer_uuid, conv.peer_number);
+    const ids = new Set([conv.peer_uuid, conv.peer_number, peer?.uuid, peer?.number].filter(Boolean) as string[]);
+    if (!ids.size) return [];
+    isThem = (id) => ids.has(id);
+  }
+  const out = [];
+  for (const g of groups) {
+    let members: string[];
+    try {
+      members = JSON.parse(g.group_members!);
+    } catch {
+      continue;
+    }
+    if (!members.some(isThem)) continue;
+    const d = conversationDto(g);
+    out.push({ id: g.id, title: d.title, avatar: d.avatar, memberCount: members.length });
+  }
+  return out;
 }
 
 // ---------- receipts ----------
@@ -1130,6 +1183,7 @@ export function insertMessage(m: {
   expiresIn?: number;
   expiresAt?: number | null;
   poll?: Poll | null;
+  contacts?: SharedContact[] | null;
   extId?: string | null;
   forwarded?: number;
 }): MessageRow | undefined {
@@ -1137,8 +1191,8 @@ export function insertMessage(m: {
     .prepare(
       `INSERT OR IGNORE INTO messages
         (conversation_id, sent_ts, author, author_number, outgoing, kind, body, attachments, quote, status, read, received_at, sticker, ts_confirmed,
-         ranges, preview, expires_in, expires_at, poll, ext_id, forwarded, ext_raw)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         ranges, preview, expires_in, expires_at, poll, ext_id, forwarded, ext_raw, contacts)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       m.conversationId,
@@ -1163,6 +1217,7 @@ export function insertMessage(m: {
       m.extId ?? null,
       m.forwarded ?? 0,
       m.extId ? extRawOf(m.extId) : null,
+      m.contacts?.length ? JSON.stringify(m.contacts) : null,
     );
   if (info.changes === 0) return undefined; // duplicate
   touchConversation(m.conversationId, m.sentTs);
@@ -1209,6 +1264,7 @@ export function deleteMessageContent(id: number, keep: false | 'deleted' | 'expi
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, cur.body, cur.ranges, cur.attachments, cur.preview, cur.poll, cur.sticker, keep, Date.now());
   }
+  if (cur.contacts) db.prepare('UPDATE messages SET contacts = NULL WHERE id = ?').run(id);
   return updateMessage(id, { deleted: 1, body: null, ranges: null, attachments: null, reactions: null, preview: null, poll: null, expires_at: null });
 }
 
@@ -1299,6 +1355,7 @@ export function messageDto(m: MessageRow) {
   const poll: Poll | null = m.poll && !m.deleted ? JSON.parse(m.poll) : null;
   return {
     poll: poll ? pollDto(poll) : null,
+    contacts: m.contacts && !m.deleted ? (JSON.parse(m.contacts) as SharedContact[]) : null,
     id: m.id,
     rev: nextRev(),
     sticker: sticker ? { ...sticker, emoji: stickerEmoji(sticker), url: stickerUrl(sticker.packId, sticker.stickerId) } : null,

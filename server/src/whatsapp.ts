@@ -49,6 +49,8 @@ import {
   type LinkPreview,
   type MessageRow,
   type Poll,
+  type SharedContact,
+  contactsText,
   type Reaction,
   conversationDto,
   findMessageByExt,
@@ -1053,6 +1055,23 @@ export async function richFromWa(
   return placeMentions(plain, styles, found);
 }
 
+/** vCards in a WhatsApp message → contact cards (name, numbers, organisation). */
+export function waContactCards(m: Json): SharedContact[] {
+  const cards: string[] = Array.isArray(m?.vCards) && m.vCards.length ? m.vCards : typeof m?.body === 'string' && /^BEGIN:VCARD/i.test(m.body.trim()) ? [m.body] : [];
+  return cards.slice(0, 20).map(parseVcard);
+}
+
+export function parseVcard(v: string): SharedContact {
+  const lines = String(v).replace(/\r\n[ \t]/g, '').split(/\r?\n/); // unfold long lines
+  const field = (name: string) => lines.filter((l) => new RegExp(`^(item\\d+\\.)?${name}[;:]`, 'i').test(l)).map((l) => l.slice(l.indexOf(':') + 1).trim());
+  const unescape = (t: string) => t.replace(/\\([,;\\n])/g, (_m, c) => (c === 'n' ? ' ' : c));
+  const n = field('N')[0]?.split(';');
+  const name = unescape(field('FN')[0] || [n?.[3], n?.[1], n?.[2], n?.[0], n?.[4]].filter(Boolean).join(' ') || '') || 'Contact';
+  const numbers = [...new Set(field('TEL').filter(Boolean))].slice(0, 10);
+  const org = unescape(field('ORG')[0]?.split(';').filter(Boolean).join(', ') ?? '');
+  return { name: name.slice(0, 200), numbers, ...(org ? { organization: org.slice(0, 200) } : {}) };
+}
+
 function describeOther(m: Json): string | null {
   if (m.location) {
     const { latitude, longitude, description, name } = m.location;
@@ -1294,6 +1313,12 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     // A caption is the body; WAHA sometimes puts the file name there for documents.
     if (body && attachments[0]?.filename && body === attachments[0].filename) body = null;
   }
+  // Contact cards (WhatsApp vCards; a single one also comes as the message text itself)
+  const contacts = waContactCards(m);
+  if (contacts.length) {
+    body = contactsText(contacts);
+    ranges = null;
+  }
   if (!body && !attachments.length && !poll) {
     const other = describeOther(m);
     if (!other) return; // protocol messages, reactions (separate event), etc.
@@ -1337,6 +1362,7 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     status: status === 'pending' ? 'sent' : status,
     read: fromMe || !!opts.history || readEarlier,
     poll,
+    contacts,
     extId,
     forwarded,
   });
@@ -2503,6 +2529,26 @@ export async function createPollWa(conv: ConversationRow, question: string, opti
     extId: extIdOf(res),
   });
   return row;
+}
+
+/** Share a contact card in a WhatsApp chat (a real WhatsApp contact message). */
+export async function sendContactWa(conv: ConversationRow, card: SharedContact) {
+  const number = card.numbers[0] ?? '';
+  const res = await waha.sendContactVcard(conv.wa_id!, [
+    { fullName: card.name, phoneNumber: number, whatsappId: number.replace(/\D/g, '') || undefined, ...(card.organization ? { organization: card.organization } : {}) },
+  ]);
+  return insertMessage({
+    conversationId: conv.id,
+    sentTs: Date.now(),
+    author: 'self',
+    outgoing: true,
+    kind: 'message',
+    body: contactsText([card]),
+    status: 'sent',
+    read: true,
+    contacts: [card],
+    extId: extIdOf(res),
+  });
 }
 
 export async function voteWa(conv: ConversationRow, m: MessageRow, poll: Poll, picked: number[]) {

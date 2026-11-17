@@ -32,8 +32,8 @@ import {
   upsertContact,
 } from './store.js';
 import { db } from './db.js';
-import type { LinkPreview, MessageRow, Poll } from './store.js';
-import { setConversationTimer } from './store.js';
+import type { LinkPreview, MessageRow, Poll, SharedContact } from './store.js';
+import { contactsText, setConversationTimer } from './store.js';
 import { type Ranges, cleanRanges } from './richtext.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -310,6 +310,9 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     ranges = null;
     poll = { question: body, options: dm.pollCreate.options.map(String), multiple: !!dm.pollCreate.allowMultiple, votes: {} };
   }
+  // Contact cards someone shared
+  const contacts = signalContacts(dm.contacts);
+  if (contacts.length && !body) body = contactsText(contacts);
   if (!body && !attachments.length && kind === 'message') return; // profile key updates, group updates, typing-only payloads, etc.
 
   let quote: { sentTs: number; author: string; text: string; chat?: number } | null = dm.quote
@@ -340,6 +343,7 @@ function handleDataMessage(dm: Json, author: Address, peer: Address, outgoing: b
     sticker,
     ranges: kind === 'system' ? null : ranges,
     poll,
+    contacts,
     preview,
     expiresIn: kind === 'system' ? 0 : expiresIn,
     // Your own messages start counting down when sent; received ones once you've read them.
@@ -614,4 +618,17 @@ export function handleEnvelope(payload: Json) {
   } catch (err) {
     ingestHooks.log('failed to process envelope', err);
   }
+}
+
+/** Signal's shared contacts (signal-cli: name {given, middle, family, nickname}, phone [{value}]) → cards. */
+export function signalContacts(list: unknown): SharedContact[] {
+  if (!Array.isArray(list)) return [];
+  const out: SharedContact[] = [];
+  for (const c of list as Record<string, any>[]) {
+    const n = c?.name ?? {};
+    const name = [n.prefix, n.given, n.middle, n.family, n.suffix].filter(Boolean).join(' ').trim() || n.nickname || c?.organization || 'Contact';
+    const numbers = (Array.isArray(c?.phone) ? c.phone : []).map((p: { value?: unknown }) => String(p?.value ?? '').trim()).filter(Boolean);
+    out.push({ name: String(name).slice(0, 200), numbers: numbers.slice(0, 10), ...(c?.organization ? { organization: String(c.organization).slice(0, 200) } : {}) });
+  }
+  return out.slice(0, 20);
 }

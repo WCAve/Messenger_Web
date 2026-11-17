@@ -243,6 +243,10 @@ const MIGRATIONS: string[] = [
     deleted_at INTEGER NOT NULL   -- ms
   );
   `,
+  `
+  -- Contact cards in a message: JSON [{name, numbers, organization?}] (the body keeps "👤 name" as text)
+  ALTER TABLE messages ADD COLUMN contacts TEXT;
+  `,
 ];
 
 function migrate() {

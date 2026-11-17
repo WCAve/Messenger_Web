@@ -4,7 +4,8 @@
  * plays (click or drag to jump, arrow keys too), the time, and a speed button (1× / 1.5× / 2×) in place
  * of the picture while it plays. The waveform is worked out from the sound itself, once per file (two
  * at a time); until then (or if the browser can't read the file) it's a calm placeholder.
- * Only one plays at a time.
+ * Only one plays at a time. When a voice message ends, the next voice message in the chat starts (like
+ * Signal Desktop); audio files don't chain.
  */
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { attachmentUrl } from '../api';
@@ -63,6 +64,16 @@ function placeholder(id: string) {
 }
 
 let playingNow: HTMLAudioElement | null = null;
+// Every player on screen, by its box: to start the next voice message when one ends
+const players = new Map<HTMLElement, { play: () => void; voiceNote: boolean }>();
+
+function playNextAfter(box: HTMLElement) {
+  const list = box.closest('.messages') ?? document;
+  const boxes = [...list.querySelectorAll<HTMLElement>('.voice')];
+  const next = boxes[boxes.indexOf(box) + 1];
+  const p = next && players.get(next);
+  if (p?.voiceNote) p.play();
+}
 
 function clock(s: number) {
   if (!Number.isFinite(s) || s < 0) s = 0;
@@ -102,6 +113,14 @@ export function VoicePlayer({ a, m }: { a: Attachment; m: Message }) {
     if (audio.current) audio.current.playbackRate = speed;
   }, [speed]);
 
+  const toggleRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    players.set(el, { play: () => audio.current?.paused && toggleRef.current(), voiceNote: !!a.voiceNote });
+    return () => void players.delete(el);
+  }, [a.voiceNote]);
+
   const toggle = () => {
     const el = audio.current;
     if (!el) return;
@@ -112,6 +131,7 @@ export function VoicePlayer({ a, m }: { a: Attachment; m: Message }) {
       void el.play().catch(() => {});
     } else el.pause();
   };
+  toggleRef.current = toggle;
 
   const total = duration || 0;
   const progress = total ? Math.min(1, time / total) : 0;
@@ -163,6 +183,7 @@ export function VoicePlayer({ a, m }: { a: Attachment; m: Message }) {
           setStarted(false);
           e.currentTarget.currentTime = 0;
           setTime(0);
+          if (a.voiceNote && box.current) playNextAfter(box.current); // the next voice message carries on
         }}
       />
       {started ? (

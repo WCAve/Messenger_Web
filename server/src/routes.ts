@@ -31,6 +31,7 @@ import { addImages, createPack, deletePack, forgetStickers, localStickers, stick
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
+  sendContactWa,
   deleteWa,
   deliverWa,
   editWa,
@@ -90,6 +91,8 @@ import {
   type ConversationRow,
   type LinkPreview,
   type Poll,
+  type SharedContact,
+  contactsText,
   pinnedCount,
   setPinnedOrder,
   setConversationFlags,
@@ -890,7 +893,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const c = conv(ctx);
     const account = accountFor(c);
     const { text, ranges } = richInput(ctx.body);
-    const files: { name?: string; type?: string; data?: string; upload?: string }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
+    const files: { name?: string; type?: string; data?: string; upload?: string; voiceNote?: boolean }[] = Array.isArray(ctx.body?.attachments) ? ctx.body.attachments : [];
     const rawSticker = ctx.body?.sticker;
     const sticker =
       rawSticker && typeof rawSticker.packId === 'string' && isPackId(rawSticker.packId) && Number.isInteger(rawSticker.stickerId)
@@ -910,14 +913,14 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
         // uploaded in pieces beforehand (uploads.ts): moved into place, read when it's sent
         let id = '';
         const u = takeUpload(f.upload, () => localPath((id = newOutgoingId(type, name))));
-        attachments.push({ id, contentType: type, filename: name, size: u.size });
+        attachments.push({ id, contentType: type, filename: name, size: u.size, ...(f.voiceNote && type.startsWith('audio/') ? { voiceNote: true } : {}) });
         base64.push(LAZY);
         continue;
       }
       const buf = Buffer.from(f.data!, 'base64');
       const id = saveOutgoing(buf, type, name);
       const dims = type.startsWith('image/') ? parseImageSize(buf) : null; // known right away, so the bubble doesn't jump
-      attachments.push({ id, contentType: type, filename: name, size: buf.length, ...(dims ?? {}) });
+      attachments.push({ id, contentType: type, filename: name, size: buf.length, ...(dims ?? {}), ...(f.voiceNote && type.startsWith('audio/') ? { voiceNote: true } : {}) });
       base64.push(`data:${type};filename=${name};base64,${f.data}`);
     }
 
@@ -979,6 +982,60 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   });
 
   // ---------- polls ----------
+
+  // Share a contact card. WhatsApp: a real contact message. Signal's API can't send contact cards: the
+  // name and number as text, with a .vcf file to save it from (our own copy shows as a card).
+  r.post('/api/conversations/:id/contact', async (ctx) => {
+    const c = conv(ctx);
+    const name = String(ctx.body?.name ?? '').trim().slice(0, 200);
+    const number = String(ctx.body?.number ?? '').trim();
+    if (!name) throw new HttpError(400, 'Choose a contact');
+    if (!/^\+?[\d ()-]{3,32}$/.test(number)) throw new HttpError(400, 'That contact has no phone number');
+    const card: SharedContact = { name, numbers: [number] };
+    if (isWa(c)) {
+      const row = await wa(() => sendContactWa(c, card));
+      if (!row) throw new HttpError(409, 'Duplicate');
+      const dto = messageDto(row);
+      broadcast({ type: 'message', message: dto });
+      emitConversation(getConversation(c.id)!);
+      return dto;
+    }
+    const account = accountFor(c);
+    const esc = (t: string) => t.replace(/[\\,;]/g, (x) => '\\' + x);
+    const vcf = `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${esc(name)}\r\nTEL;TYPE=CELL:${number}\r\nEND:VCARD\r\n`;
+    const file = (name.replace(/[^\p{L}\p{N} ._-]/gu, '').trim() || 'contact') + '.vcf';
+    const text = `${contactsText([card])}\n${number}`;
+    let res;
+    try {
+      res = await signalApi.send({
+        number: account,
+        recipients: [recipientFor(c)],
+        message: text,
+        base64_attachments: [`data:text/vcard;filename=${file};base64,${Buffer.from(vcf).toString('base64')}`],
+      });
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message.replace(/^.*?failed \(\d+\): /, ''));
+    }
+    const ts = sentTimestamp(res) ?? Date.now();
+    const row = insertMessage({
+      conversationId: c.id,
+      sentTs: ts,
+      author: 'self',
+      authorNumber: account,
+      outgoing: true,
+      body: text,
+      status: 'sent',
+      read: true,
+      contacts: [card],
+      expiresIn: c.expire_timer || 0,
+      expiresAt: c.expire_timer ? ts + c.expire_timer * 1000 : null,
+    });
+    if (!row) throw new HttpError(409, 'Duplicate');
+    const dto = messageDto(row);
+    broadcast({ type: 'message', message: dto });
+    emitConversation(getConversation(c.id)!);
+    return dto;
+  });
 
   r.post('/api/conversations/:id/polls', async (ctx) => {
     const c = conv(ctx);

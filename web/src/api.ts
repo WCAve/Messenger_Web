@@ -82,6 +82,7 @@ export const api = {
   linkPreview: (url: string) =>
     call<{ preview: { url: string; title: string; description: string | null; image: string | null } | null }>('GET', `/api/link-preview?url=${encodeURIComponent(url)}`),
   forward: (id: number, conversationIds: number[]) => call<{ messages: Message[] }>('POST', `/api/messages/${id}/forward`, { conversationIds }),
+  shareContact: (id: number, b: { name: string; number: string }) => call<Message>('POST', `/api/conversations/${id}/contact`, b),
   createPoll: (id: number, b: { question: string; options: string[]; multiple: boolean }) => call<Message>('POST', `/api/conversations/${id}/polls`, b),
   vote: (id: number, options: number[]) => call<Message>('POST', `/api/messages/${id}/vote`, { options }),
   closePoll: (id: number) => call<Message>('DELETE', `/api/messages/${id}/poll`),
@@ -114,7 +115,7 @@ export const api = {
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,
-    b: RichText & { quoteId?: number; previewUrl?: string; attachments?: ({ name: string; type: string; data: string } | { name: string; type: string; upload: string })[]; sticker?: { packId: string; stickerId: number } },
+    b: RichText & { quoteId?: number; previewUrl?: string; attachments?: ({ name: string; type: string; data: string; voiceNote?: boolean } | { name: string; type: string; upload: string; voiceNote?: boolean })[]; sticker?: { packId: string; stickerId: number } },
   ) =>
     call<Message>('POST', `/api/conversations/${id}/messages`, b),
   clientLog: (message: string) => call<{ ok: true }>('POST', '/api/client-log', { message }),

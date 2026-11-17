@@ -145,6 +145,8 @@ export interface ConversationInfo extends Conversation {
   media: MediaItem[];
   files: MediaItem[];
   links: { messageId: number; sentAt: number; authorName: string; url: string }[];
+  /** One-to-one chats: the groups you share with them */
+  commonGroups?: { id: number; title: string; avatar: string | null; memberCount: number }[];
 }
 
 export interface StickerItem {
@@ -215,6 +217,8 @@ export interface Message {
   mentions?: { start: number; length: number; key: string; name: string }[];
   preview: LinkPreview | null;
   poll: Poll | null;
+  /** Contact cards someone shared */
+  contacts?: SharedContact[] | null;
   expiresIn?: number; // seconds
   expiresAt?: number; // ms; unset until the countdown starts (received messages: once read)
 }
@@ -251,6 +255,12 @@ export interface SearchResult {
   authorName: string;
   outgoing: boolean;
   snippet: string;
+}
+
+export interface SharedContact {
+  name: string;
+  numbers: string[];
+  organization?: string;
 }
 
 export interface WaContact {
