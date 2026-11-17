@@ -625,6 +625,10 @@ function LinkPreviewCard({ p, onLoad }: { p: LinkPreview; onLoad: () => void }) 
  * The space a photo, GIF or video takes before it has loaded: its real shape when we know it (the
  * server fills sizes in, mediasize.ts), else 4:3. So a chat full of pictures doesn't jump while it opens.
  */
+/** How long a message's toolbar stays after the pointer leaves it, and whose toolbar that is now. */
+const LINGER_MS = 500;
+let lingeringNow: (() => void) | null = null;
+
 const shapeOf = (a: Attachment) => (a.width && a.height ? `${a.width} / ${a.height}` : '4 / 3');
 
 function GifVideo({ a, onLoad, single }: { a: Attachment; onLoad?: () => void; single: boolean }) {
@@ -680,6 +684,15 @@ const MessageItem = memo(function MessageItem({
   onMediaLoad: () => void;
 }) {
   const [picker, setPicker] = useState(false);
+  // The toolbar (and its reaction row) stays a moment after the pointer leaves the message, so it can be
+  // reached on a slanted path; pointing at another message ends that at once (see endLinger).
+  const [lingering, setLingering] = useState(false);
+  const lingerTimer = useRef<number | undefined>(undefined);
+  const stopLinger = useRef(() => {
+    window.clearTimeout(lingerTimer.current);
+    setLingering(false);
+    setPicker(false);
+  });
   const [error, setError] = useState<string | null>(null);
 
   if (m.kind === 'system') {
@@ -715,9 +728,22 @@ const MessageItem = memo(function MessageItem({
 
   return (
     <div
-      className={`msg ${m.outgoing ? 'out' : 'in'}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}`}
+      className={`msg ${m.outgoing ? 'out' : 'in'}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}${lingering ? ' lingering' : ''}`}
       data-ts={m.sentAt}
-      onMouseLeave={() => setPicker(false)}
+      onMouseEnter={() => {
+        window.clearTimeout(lingerTimer.current);
+        if (lingeringNow && lingeringNow !== stopLinger.current) lingeringNow(); // another message's toolbar goes
+        lingeringNow = null;
+        setLingering(false);
+      }}
+      onMouseLeave={() => {
+        setLingering(true);
+        lingeringNow = stopLinger.current;
+        lingerTimer.current = window.setTimeout(() => {
+          stopLinger.current();
+          if (lingeringNow === stopLinger.current) lingeringNow = null;
+        }, LINGER_MS);
+      }}
     >
       <div
         className={`bubble${jumbo ? ' jumbo' : ''}${sticker || waSticker ? ' sticker' : ''}${m.deleted ? ' deleted' : ''}${visual.length && !m.body && !m.quote ? ' media-only' : ''}`}

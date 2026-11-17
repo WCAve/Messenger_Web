@@ -1190,6 +1190,7 @@ p {
 }
 .msg:hover .actions,
 .msg.selected .actions,
+.msg.lingering .actions,
 .msg:focus-within .actions {
   display: flex;
 }
@@ -1524,7 +1525,8 @@ p {
   .msg.out .actions {
     right: 0;
   }
-  .msg:hover:not(.selected) .actions {
+  .msg:hover:not(.selected) .actions,
+  .msg.lingering:not(.selected) .actions {
     display: none;
   }
   .actions::before {
