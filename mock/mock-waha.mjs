@@ -6,6 +6,7 @@
  *
  *   node mock/mock-waha.mjs            # port 8090, API key "test-waha-key"
  *   MOCK_WA_LINKED=1 …                 # start already linked
+ *   MOCK_WA_ENGINE=GOWS …              # answer like the GOWS engine instead (see toGows below)
  *
  * Test hooks:
  *   POST /mock/incoming {"from":"jan","text":"hi","group":false,"extra":{…}}   incoming message
@@ -20,6 +21,8 @@ import zlib from 'node:zlib';
 const PORT = Number(process.env.MOCK_WAHA_PORT ?? 8090);
 const KEY = process.env.MOCK_WAHA_KEY ?? 'test-waha-key';
 const SESSION = 'default';
+const ENGINE = (process.env.MOCK_WA_ENGINE || 'WEBJS').toUpperCase();
+const GOWS = ENGINE === 'GOWS';
 const ME = { id: '31600000009@c.us', pushName: 'Wouter', lid: '99999999999999@lid' };
 const PEOPLE = {
   jan: { id: '31655500001@c.us', name: 'Jan Bakker', pushname: 'Jan' },
@@ -81,7 +84,9 @@ function wsSend(socket, text) {
 }
 function emit(event, payload) {
   if (mockConfig.silentMessages && event.startsWith('message')) return;
-  const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: 'WEBJS', event, payload, me: status === 'WORKING' ? ME : null });
+  if (GOWS && (event === 'engine.event' || event === 'chat.archive')) return; // GOWS has no such events
+  if (GOWS && (event === 'message.any' || event === 'message')) payload = toGows(payload);
+  const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: ENGINE, event, payload, me: status === 'WORKING' ? ME : null });
   for (const s of sockets) wsSend(s, msg);
 }
 
@@ -110,6 +115,57 @@ function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data
       type: media ? (media.startsWith('image/') ? 'image' : media.startsWith('video/') ? 'video' : media.startsWith('audio/') ? 'ptt' : 'document') : 'chat',
       ...(media ? { mimetype: media, size: 4321 } : {}),
       ...(data ?? {}),
+    },
+  };
+}
+/**
+ * GOWS: the same message as whatsmeow describes it. The top-level fields stay (WAHA fills them the same
+ * for every engine); _data becomes { Info, Message } with WhatsApp's protobuf message in Go field names.
+ */
+const sjid = (j) => (typeof j === 'string' ? j.replace('@c.us', '@s.whatsapp.net') : j);
+const rawOf = (id) => {
+  const p = String(id ?? '').split('_');
+  return (p[0] === 'true' || p[0] === 'false') && p.length >= 3 ? p[2] : String(id ?? '');
+};
+const THUMB = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==';
+function toGows(m) {
+  if (!m || typeof m !== 'object' || !m._data || m._data.Info) return m;
+  const d = m._data;
+  const chat = m.fromMe ? m.to : m.from;
+  const group = String(chat).endsWith('@g.us');
+  const sender = m.fromMe ? ME.id : group ? m.participant : chat;
+  const ctx = {};
+  if (d.mentionedJidList) ctx.mentionedJID = d.mentionedJidList.map(sjid);
+  if (d.isForwarded) Object.assign(ctx, { isForwarded: true, forwardingScore: d.forwardingScore ?? 1 });
+  if (m.replyTo) Object.assign(ctx, { stanzaID: rawOf(m.replyTo.id), participant: sjid(m.replyTo.participant), quotedMessage: { conversation: m.replyTo.body ?? '' } });
+  const contextInfo = Object.keys(ctx).length ? ctx : undefined;
+  const media = { mimetype: d.mimetype, fileLength: d.size, ...(d.width ? { width: d.width, height: d.height } : {}), contextInfo };
+  const caption = m.body || undefined;
+  let Message;
+  switch (d.type) {
+    case 'image': Message = { imageMessage: { ...media, caption, JPEGThumbnail: THUMB, ...(d.isViewOnce ? { viewOnce: true } : {}) } }; break;
+    case 'video': Message = { videoMessage: { ...media, caption, JPEGThumbnail: THUMB, ...(d.isGif ? { gifPlayback: true } : {}), ...(d.isViewOnce ? { viewOnce: true } : {}) } }; break;
+    case 'ptt': Message = { audioMessage: { ...media, PTT: true } }; break;
+    case 'audio': Message = { audioMessage: media }; break;
+    case 'document': Message = { documentMessage: { ...media, caption, fileName: d.filename ?? 'file' } }; break;
+    case 'sticker': Message = { stickerMessage: { ...media, mimetype: 'image/webp' } }; break;
+    case 'poll_creation': Message = { pollCreationMessageV3: { name: d.pollName, options: (d.pollOptions ?? []).map((o) => ({ optionName: o.name })), selectableOptionsCount: d.pollSelectableOptionsCount ?? 0, contextInfo } }; break;
+    case 'pinned_message':
+      Message = {
+        pinInChatMessage: { key: { remoteJID: sjid(chat), fromMe: true, ID: rawOf(d.pinParentKey?._serialized ?? d.pinParentKey) }, type: d.pinMessageType, senderTimestampMS: Date.now() },
+        ...(d.pinExpiryDuration ? { messageContextInfo: { messageAddOnDurationInSecs: d.pinExpiryDuration } } : {}),
+      };
+      break;
+    case 'reaction': Message = { reactionMessage: { key: { ID: rawOf(d.target) }, text: d.emoji ?? '👍' } }; break;
+    default: Message = contextInfo ? { extendedTextMessage: { text: m.body, contextInfo } } : { conversation: m.body };
+  }
+  if (d.associationType) Message.messageContextInfo = { messageAssociation: { associationType: 10, parentMessageKey: { ID: rawOf(d.parentMsgKey?._serialized ?? d.parentMsgKey?.id ?? d.parentMsgKey) } } };
+  const { isViewOnce, ...top } = m; // eslint-disable-line no-unused-vars
+  return {
+    ...top,
+    _data: {
+      Info: { Chat: sjid(chat), Sender: sjid(sender), ...(d.senderAlt ? { SenderAlt: sjid(d.senderAlt) } : {}), IsFromMe: !!m.fromMe, IsGroup: group, ID: rawOf(m.id), Timestamp: new Date(m.timestamp * 1000).toISOString(), PushName: d.notifyName ?? '', Type: m.hasMedia ? 'media' : 'text' },
+      Message,
     },
   };
 }
@@ -301,9 +357,14 @@ const server = http.createServer(async (req, res) => {
     }
     if (!authed(req, url)) return json(res, 401, { message: 'Unauthorized' });
 
-    if (p === '/api/server/version') return json(res, 200, { version: '2026.10.1-mock', engine: 'WEBJS', tier: 'CORE' });
+    if (p === '/api/server/version') return json(res, 200, { version: '2026.10.1-mock', engine: ENGINE, tier: 'CORE' });
     if (p === `/api/sessions/${SESSION}` && m === 'GET') {
-      return json(res, 200, { name: SESSION, status, me: status === 'WORKING' ? ME : null, engine: { engine: 'WEBJS' } });
+      return json(res, 200, { name: SESSION, status, me: status === 'WORKING' ? ME : null, engine: { engine: ENGINE } });
+    }
+    // What GOWS can't do (WAHA answers 501 "not implemented by 'GOWS' engine")
+    if (GOWS && (/\/messages\/[^/]+\/(pin|unpin)$/.test(p) || /\/chats\/[^/]+\/(archive|unarchive)$/.test(p) || p === '/api/contacts/about' || p === '/api/contacts/block' || p === '/api/contacts/unblock')) {
+      sent.push({ path: p, method: m, notImplemented: true });
+      return json(res, 501, { statusCode: 501, message: "The method is not implemented by 'GOWS' engine. Check the docs and try another engine: https://waha.devlike.pro/" });
     }
     if (p === '/api/sessions' && m === 'POST') return json(res, 201, { name: SESSION, status });
     if (p === `/api/sessions/${SESSION}/start`) return json(res, 201, { name: SESSION, status });
@@ -353,7 +414,9 @@ const server = http.createServer(async (req, res) => {
           pinned: pinnedOnPhone.has(id),
           archived: archivedOnPhone.has(id),
         }));
-      return json(res, 200, list.slice(0, Number(url.searchParams.get('limit') ?? 100)));
+      // GOWS: only id, name and the time of the last message
+      const out = GOWS ? list.map((c) => ({ id: c.id._serialized, name: c.name, conversationTimestamp: c.timestamp })) : list;
+      return json(res, 200, out.slice(0, Number(url.searchParams.get('limit') ?? 100)));
     }
     const unread = p.match(new RegExp(`^/api/${SESSION}/chats/([^/]+)/unread$`));
     if (unread && m === 'POST') {
@@ -387,7 +450,7 @@ const server = http.createServer(async (req, res) => {
         // WhatsApp Web finds a message by its id alone, whichever chat the URL names
         const want = decodeURIComponent(msgs[2]);
         const x = [...history.values()].flat().find((y) => y.id === want) ?? null;
-        return json(res, 200, x?._data?.gone ? { ...x, media: null } : x);
+        return json(res, 200, toGows(x?._data?.gone ? { ...x, media: null } : x));
       }
       const limit = Number(url.searchParams.get('limit') ?? 10);
       // downloadMedia=false: like WAHA, no file url (fetch the single message to get it)
@@ -396,7 +459,7 @@ const server = http.createServer(async (req, res) => {
       if (status !== 'WORKING') return json(res, 422, { message: 'Session status is not as expected' });
       const offset = Number(url.searchParams.get('offset') ?? 0);
       stats.pages.push({ chat, limit, offset });
-      return json(res, 200, [...list].reverse().slice(offset, offset + limit).map((x) => (noMedia && x.media ? { ...x, media: null } : x)));
+      return json(res, 200, [...list].reverse().slice(offset, offset + limit).map((x) => toGows(noMedia && x.media ? { ...x, media: null } : x)));
     }
     if (msgs && m === 'PUT') {
       const b = await body(req);
@@ -426,7 +489,10 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, { ok: true });
     }
     // ---------- groups (stateful: management calls change them) ----------
-    const groupChat = (g) => ({ id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name, desc: DESC[g.id] ?? undefined, announce: g.msgAdmins, restrict: g.infoAdmins, size: g.parts.length } });
+    const groupChat = (g) =>
+      GOWS
+        ? { JID: g.id, Name: g.name, Topic: DESC[g.id] ?? '', IsAnnounce: g.msgAdmins, IsLocked: g.infoAdmins, Participants: g.parts.map((q) => ({ JID: sjid(q.id), IsAdmin: q.role !== 'participant', IsSuperAdmin: q.role === 'superadmin' })) }
+        : { id: { server: 'g.us', user: g.id.split('@')[0], _serialized: g.id }, name: g.name, isGroup: true, groupMetadata: { subject: g.name, desc: DESC[g.id] ?? undefined, announce: g.msgAdmins, restrict: g.infoAdmins, size: g.parts.length } };
     const gm = p.match(new RegExp(`^/api/${SESSION}/groups/([^/?]+)(/.*)?$`));
     const gid = gm && gm[1] !== 'join-info' && gm[1] !== 'join' && gm[1] !== 'count' && gm[1] !== 'refresh' ? decodeURIComponent(gm[1]) : null;
     const g = gid ? groupState(gid) : null;
@@ -465,7 +531,20 @@ const server = http.createServer(async (req, res) => {
         sent.push({ path: p, method: m, ...b, file: b.file ? { mimetype: b.file.mimetype } : undefined });
         const adminOnly = ['/subject', '/description', '/picture'].includes(rest) ? g.infoAdmins : !['/leave', '/participants/v2/tags/my', '/participants/add'].includes(rest);
         if (adminOnly && !amAdmin(g) && !(rest === '/participants/add' && g.addAll)) return json(res, 403, { message: 'not admin' });
-        const changed = (type, participants) => setTimeout(() => emit(type ? 'group.v2.participants' : 'group.v2.update', { group: { id: g.id, subject: g.name, desc: DESC[g.id] }, type, participants: (participants ?? []).map((id) => ({ id })) }), 50);
+        const changed = (type, participants) =>
+          setTimeout(() => {
+            if (!GOWS) return emit(type ? 'group.v2.participants' : 'group.v2.update', { group: { id: g.id, subject: g.name, desc: DESC[g.id] }, type, participants: (participants ?? []).map((id) => ({ id })) });
+            // GOWS: from whatsmeow's GroupInfo, which says who did it and what changed
+            const gi = { JID: g.id, Sender: sjid(ME.id), Timestamp: new Date().toISOString() };
+            if (type) {
+              const t = { add: 'join', remove: 'leave', promote: 'promote', demote: 'demote' }[type];
+              const key = { join: 'Join', leave: 'Leave', promote: 'Promote', demote: 'Demote' }[t];
+              emit('group.v2.participants', { group: { id: g.id }, type: t, timestamp: Date.now(), participants: participants.map((id) => ({ id, role: 'participant' })), _data: { ...gi, [key]: participants.map(sjid) } });
+            } else {
+              const part = rest === '/subject' ? { Name: { Name: g.name } } : rest === '/description' ? { Topic: { Topic: DESC[g.id] } } : rest.endsWith('messages-admin-only') ? { Announce: { IsAnnounce: g.msgAdmins } } : rest.endsWith('info-admin-only') ? { Locked: { IsLocked: g.infoAdmins } } : null;
+              if (part) emit('group.v2.update', { group: { id: g.id, subject: g.name }, timestamp: Date.now(), _data: { ...gi, ...part } });
+            }
+          }, 50);
         switch (rest) {
           case '/subject': g.name = b.subject; changed(); break;
           case '/description': DESC[g.id] = b.description; changed(); break;

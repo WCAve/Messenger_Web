@@ -32,6 +32,7 @@ How it all fits together: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 | `expiry.ts` | Disappearing messages |
 | **WhatsApp** | |
 | `waha-api.ts` | Thin client for WAHA (every endpoint we use) |
+| `wamsg.ts` | What a WhatsApp message says, whichever WAHA engine sent it (WEBJS or GOWS `_data`): `waFacts` |
 | `whatsapp.ts` | Everything else WhatsApp: connection, events, history import, sending, presence, avatars… (section map in its header) |
 | `groups.ts` | Group management for both networks (create, members, admins, settings, link, requests, labels) |
 | `wabackup.ts` | Android backup import (crypt15 decrypt, msgstore → messages, media folder, stickers, member labels) |

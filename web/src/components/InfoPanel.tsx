@@ -8,7 +8,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api, attachmentUrl, thumbUrl, tinyBehind } from '../api';
 import { setState, upsertConversation, useStore } from '../store';
 import { jumpToMessage } from '../jump';
-import { NETWORK_LABEL, capsFor } from '../networks';
+import { NETWORK_LABEL, capsFor, useWaFeature } from '../networks';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
 import { durationLabel, formatDay, formatListTime, formatSize, formatTime, safeHref, squareAvatar, TIMER_OPTIONS } from '../util';
 import { Avatar, Icon, StatusMark } from './ui';
@@ -59,6 +59,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
   }, [id]);
 
   const group = conversation.kind === 'group';
+  const waBlock = useWaFeature('block');
   const g = useGroup(conversation);
   const canEdit = group && !!g.details?.canEditInfo;
   const labels = g.details?.labels ?? {};
@@ -315,7 +316,7 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
           </button>
         </section>
 
-        {!group && conversation.network === 'whatsapp' && <BlockSection conversation={conversation} />}
+        {!group && conversation.network === 'whatsapp' && waBlock && <BlockSection conversation={conversation} />}
       </div>
     </aside>
   );

@@ -83,6 +83,23 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 | `wa_stickers`, `local_sticker_packs` | WhatsApp sticker library; packs from the sticker manager |
 | `*_v1`, `*_v2` (e.g. `wa_dupes_v1`, `wa_hd_pairs_v2`, `wa_mention_lids_v1`) | one-off clean-ups done; bump the version to run one again |
 
+## WAHA engines (WEBJS and GOWS)
+
+The app works with either; it asks WAHA which one runs (`state.engine`, from the session) and adapts:
+
+- **Messages**: the top-level fields are the same; `_data` differs (WEBJS: whatsapp-web.js's message;
+  GOWS: whatsmeow's `{Info, Message}` with the protobuf message in Go field names). `wamsg.ts` reads both
+  into one shape (`waFacts`): type, media details, mentions, forwarded, view-once, pin notices, HD copies,
+  and (GOWS) the number behind a privacy id. Read message details through it, not `_data`.
+- **Events**: GOWS has no `engine.event` worth listening to (every raw event) and no `chat.archive`, so
+  they're only subscribed on WEBJS. GOWS has no group notice messages (`gp2`): its `group.v2.*` events carry
+  whatsmeow's GroupInfo in `_data` (who did it, Join/Leave/Promote/Demote, Name, Topic …), which
+  `gowsGroupNotice` turns into lines. A call that ends unanswered is `call.rejected` with a `Reason`: missed.
+- **What GOWS can't do** (`featuresFor`, sent to the web app as `features`): pin messages, archive on the
+  phone (archiving stays local), contacts' "about", block. Its chat list has no unread counts, mutes, pins or
+  archive flags, so nothing of that is copied from the phone.
+- Switching engines needs linking again (a QR code); the stored messages stay (same WhatsApp ids).
+
 ## Things that bit us (keep in mind)
 
 - **WEBJS is WhatsApp Web in a browser.** Heavy calls (getChats, looking up many messages) make it
@@ -116,7 +133,8 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
   from the Android backup (`group_participant_user.label`).
 - **Mentions** may name someone by privacy id, of any length (14 digits is common).
 - **Custom link previews** (`/api/send/link-custom-preview`) aren't implemented on WEBJS: on that error the
-  message goes as text with WhatsApp's own preview, and kv `wa_no_custom_preview` skips the attempt from then on.
+  message goes as text with WhatsApp's own preview, and kv `wa_no_custom_preview:<engine>` skips the attempt from then on (GOWS can). Same for native
+  forwards (`wa_no_forward:<engine>`).
 - **Sending video** needs WAHA's Chrome image (`devlikeapro/waha:chrome`); Chromium lacks the codecs.
 - **A live connection can die silently** (sleep, network change, a proxy): the browser keeps waiting and
   shows nothing new. The server sends `{type:'ping'}` every 25 s; the page reconnects (and resyncs) after

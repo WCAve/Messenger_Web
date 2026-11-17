@@ -23,6 +23,11 @@ export function capsFor(c: Pick<Conversation, 'network'> | undefined | null): Ca
   return CAPS[c?.network ?? 'signal'];
 }
 
+/** Whether the WhatsApp engine (WAHA) can do this; true while it isn't known yet. */
+export function useWaFeature(name: 'pinMessages' | 'archive' | 'about' | 'block'): boolean {
+  return useStore((s) => s.whatsapp.features?.[name] !== false);
+}
+
 /** Whether you can send in this network right now. */
 export function useNetworkReady(network: Network): boolean {
   return useStore((s) => (network === 'whatsapp' ? s.whatsapp.status === 'connected' : s.signal.status === 'connected'));

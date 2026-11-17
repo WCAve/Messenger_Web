@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-17-7',
+    date: '17 November 2026',
+    items: [
+      'WhatsApp works with WAHA’s GOWS engine as well as WEBJS. GOWS runs without a browser, so it can’t freeze the way WhatsApp Web does. With GOWS, a few things only work on your phone: pinning messages, archiving (here it archives in Messenger Web only), contacts’ “about” text and blocking. Settings → WhatsApp shows which engine runs.',
+      'Fixed: the page could go blank when a pinned message appeared in a chat that had none.',
+    ],
+  },
+  {
     id: '2026-11-17-6',
     date: '17 November 2026',
     items: [

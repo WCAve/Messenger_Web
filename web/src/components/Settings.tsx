@@ -614,6 +614,13 @@ function WhatsAppSection({ part }: { part: 'connection' | 'history' }) {
           <dd>{[wa.version, wa.engine].filter(Boolean).join(', ') || '…'}</dd>
         </dl>
       )}
+      {wa.status === 'connected' && wa.features && Object.values(wa.features).some((v) => !v) && (
+        <p className="muted">
+          With this engine, these only work on your phone:{' '}
+          {[!wa.features.pinMessages && 'pinning messages', !wa.features.archive && 'archiving (here it only archives in Messenger Web)', !wa.features.about && 'contacts’ “about” text', !wa.features.block && 'blocking'].filter(Boolean).join(', ')}
+          .
+        </p>
+      )}
       {wa.status === 'scan_qr' && (
         <div className="wa-link">
           <ol>

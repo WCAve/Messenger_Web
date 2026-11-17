@@ -62,6 +62,7 @@ import {
   waAbout,
   reactWa,
   pinWa,
+  waCanForward,
   refreshDirectory as refreshWaDirectory,
   restartWhatsApp,
   subscribePresenceWa,
@@ -958,7 +959,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const attachments: Attachment[] = m.attachments ? JSON.parse(m.attachments) : [];
     const source = getConversation(m.conversation_id)!;
     // WhatsApp → WhatsApp goes as a real forward (setting); anything else is sent as a copy.
-    const native = isWa(source) && !!m.ext_id && !m.ext_id.startsWith('call:') && getSettings().waNativeForward;
+    const native = isWa(source) && !!m.ext_id && !m.ext_id.startsWith('call:') && getSettings().waNativeForward && waCanForward();
     let base64: string[] = [];
     if (!native || targets.some((t) => !isWa(t!))) {
       try {

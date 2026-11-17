@@ -25,6 +25,8 @@ export interface WaState {
   me?: string;
   name?: string;
   engine?: string;
+  /** What this WAHA engine can do (GOWS: no pinning messages, archiving on the phone, "about" or blocking) */
+  features?: { pinMessages: boolean; archive: boolean; about: boolean; block: boolean };
   version?: string;
   error?: string;
   importing?: boolean;

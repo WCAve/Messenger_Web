@@ -89,6 +89,7 @@ import {
 } from './store.js';
 import { recordLabelEvent, refreshWaLabels } from './groups.js';
 import { applyPin, applyUnpin } from './pins.js';
+import { type WaFacts, editMentions, protoPoll, waFacts } from './wamsg.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
 export type WaStatus = 'disabled' | 'unreachable' | 'starting' | 'scan_qr' | 'connected' | 'failed' | 'stopped';
@@ -97,6 +98,8 @@ export interface WaState {
   me?: string; // your number
   name?: string;
   engine?: string;
+  /** What this WAHA engine can do (the browser-free GOWS can't pin messages, archive, show "about" or block) */
+  features?: WaFeatures;
   version?: string;
   error?: string;
   importing?: boolean;
@@ -106,6 +109,23 @@ export interface WaState {
   catchUp?: { running: boolean; at?: number; chats?: number; messages?: number; error?: string };
   backup?: BackupState;
 }
+
+export interface WaFeatures {
+  pinMessages: boolean;
+  archive: boolean; // archiving reaches the phone
+  about: boolean;
+  block: boolean;
+}
+/** WAHA's engines differ (waha.devlike.pro/docs/how-to/engines). Unknown engine: assume WEBJS. */
+export function featuresFor(engine?: string): WaFeatures {
+  const e = (engine || 'WEBJS').toUpperCase();
+  const browser = e === 'WEBJS' || e === 'WPP';
+  return { pinMessages: e === 'WEBJS' || e === 'NOWEB', archive: browser || e === 'NOWEB', about: browser, block: browser };
+}
+export function waFeatures(): WaFeatures {
+  return featuresFor(state.engine);
+}
+const isGows = () => (state.engine ?? '').toUpperCase() === 'GOWS';
 
 /** Importing an Android backup (msgstore.db.crypt15) and its media folder; see wabackup.ts. */
 export interface BackupState {
@@ -238,8 +258,14 @@ async function check() {
       } else throw e;
     }
     const engine = s.engine?.engine;
+    // Switched engines in WAHA (e.g. WEBJS → GOWS): listen for the events this one has.
+    if (engine && state.engine && engine !== state.engine) {
+      log.info(`whatsapp: WAHA now uses the ${engine} engine (was ${state.engine})`);
+      state = { ...state, engine };
+      if (ws) reconnectWs();
+    }
     // The regular status check rebuilds the state; keep what the import is showing.
-    const base = { engine, version: state.version, importing: state.importing, importProgress: state.importProgress, lastImport: state.lastImport };
+    const base = { engine, features: featuresFor(engine), version: state.version, importing: state.importing, importProgress: state.importProgress, lastImport: state.lastImport };
     if (!state.version) waha.version().then((v) => setState({ ...state, version: v.version, engine: state.engine ?? v.engine })).catch(() => {});
     if (s.status !== 'WORKING' && state.status === 'connected') eventsInterrupted();
     switch (s.status) {
@@ -305,7 +331,7 @@ export function recheckWa(delay = 300) {
 
 function connectWs() {
   if (ws || stopped) return;
-  const sock = new WebSocket(waha.wsUrl());
+  const sock = new WebSocket(waha.wsUrl(state.engine));
   ws = sock;
   sock.onopen = () => {
     wsDelay = 1000;
@@ -758,8 +784,7 @@ export async function refreshGroup(conv: ConversationRow) {
 const STATUS_FOR_ACK: Record<number, string> = { [-1]: 'failed', 0: 'pending', 1: 'sent', 2: 'delivered', 3: 'read', 4: 'read' };
 
 function pushNameOf(m: Json): string | null {
-  const d = m._data ?? {};
-  return d.notifyName ?? d.pushName ?? d.Info?.PushName ?? null;
+  return waFacts(m).pushName;
 }
 
 function pollOf(m: Json): Poll | null {
@@ -769,17 +794,12 @@ function pollOf(m: Json): Poll | null {
     if (!options.length) return null;
     return { question: String(d.pollName ?? m.body ?? ''), options, multiple: (d.pollSelectableOptionsCount ?? 1) !== 1, votes: {} };
   }
-  const msg = d.Message ?? d.message ?? {};
-  const pc = msg.pollCreationMessage ?? msg.pollCreationMessageV2 ?? msg.pollCreationMessageV3 ?? msg.pollCreationMessageV5;
-  if (!pc) return null;
-  const options = (pc.options ?? []).map((o: Json) => String(o.optionName ?? ''));
-  if (!options.length) return null;
-  return { question: String(pc.name ?? m.body ?? ''), options, multiple: Number(pc.selectableOptionsCount ?? 0) !== 1, votes: {} };
+  const pp = protoPoll(m);
+  return pp ? { ...pp, votes: {} } : null;
 }
 
 function isVoiceNote(m: Json, mimetype: string) {
-  const d = m._data ?? {};
-  return d.type === 'ptt' || !!d.Message?.audioMessage?.PTT || !!d.message?.audioMessage?.ptt || /ogg.*opus/i.test(mimetype);
+  return waFacts(m).type === 'ptt' || /ogg.*opus/i.test(mimetype);
 }
 
 async function downloadMedia(m: Json, extId: string): Promise<Attachment | null> {
@@ -809,7 +829,7 @@ async function downloadMedia(m: Json, extId: string): Promise<Attachment | null>
   if (mimetype.startsWith('audio/') && isVoiceNote(m, String(media.mimetype ?? ''))) att.voiceNote = true;
   if (mimetype.startsWith('video/')) {
     const silent = isSilentVideo(id);
-    if (silent !== null) att.gif = silent || !!m._data?.isGif || !!m._data?.Message?.videoMessage?.gifPlayback;
+    if (silent !== null) att.gif = silent || waFacts(m).gif;
   }
   return att;
 }
@@ -818,22 +838,22 @@ const TYPE_MIME: Record<string, string> = { image: 'image/jpeg', video: 'video/m
 
 /** An attachment for a file that isn't downloaded yet, from what the message itself says about it. */
 function pendingMedia(m: Json, extId: string): Attachment {
-  const d = m._data ?? {};
-  const mimetype = String(d.mimetype ?? m.media?.mimetype ?? TYPE_MIME[d.type] ?? 'application/octet-stream').split(';')[0].trim() || 'application/octet-stream';
-  const filename: string | null = d.filename ?? m.media?.filename ?? null;
+  const f = waFacts(m);
+  const mimetype = String(f.mimetype ?? m.media?.mimetype ?? TYPE_MIME[f.type] ?? 'application/octet-stream').split(';')[0].trim() || 'application/octet-stream';
+  const filename: string | null = f.filename ?? m.media?.filename ?? null;
   const ext = path.extname(filename ?? '').replace(/[^A-Za-z0-9.]/g, '').slice(0, 10) || EXT[mimetype] || '';
   const att: Attachment = {
     id: 'wa-' + crypto.createHash('sha1').update(extId).digest('hex').slice(0, 24) + ext,
     contentType: mimetype,
     filename,
-    size: Number(d.size) || null,
-    ...(Number(d.width) && Number(d.height) ? { width: Number(d.width), height: Number(d.height) } : {}),
+    size: f.size || null,
+    ...(f.width && f.height ? { width: f.width, height: f.height } : {}),
   };
-  if (mimetype.startsWith('audio/') && (d.type === 'ptt' || /ogg.*opus/i.test(String(d.mimetype ?? '')))) att.voiceNote = true;
-  if (mimetype.startsWith('video/') && d.isGif) att.gif = true;
-  if (d.type === 'sticker') att.sticker = true;
+  if (mimetype.startsWith('audio/') && (f.type === 'ptt' || /ogg.*opus/i.test(String(f.mimetype ?? '')))) att.voiceNote = true;
+  if (mimetype.startsWith('video/') && f.gif) att.gif = true;
+  if (f.type === 'sticker') att.sticker = true;
   // WhatsApp sends a small preview with photos and videos: shown blurred until the file is here
-  if ((mimetype.startsWith('image/') || mimetype.startsWith('video/')) && !att.sticker && typeof d.body === 'string' && d.body.length < 40_000 && /^\/9j\//.test(d.body)) att.tiny = `data:image/jpeg;base64,${d.body}`;
+  if ((mimetype.startsWith('image/') || mimetype.startsWith('video/')) && !att.sticker && f.thumbnail) att.tiny = `data:image/jpeg;base64,${f.thumbnail}`;
   return att;
 }
 
@@ -1089,10 +1109,7 @@ function describeOther(m: Json): string | null {
 /** One WhatsApp message (event or history). Returns the stored row, or undefined when skipped. */
 /** The original's raw id, when this message is WhatsApp's HD copy of a photo or video. */
 function hdParentOf(m: Json): string | null {
-  const d = m?._data;
-  if (!/DUAL_UPLOAD/.test(String(d?.associationType ?? ''))) return null;
-  const k = d?.parentMsgKey;
-  const id = typeof k === 'string' ? k : idString(k?.id) ?? idString(k?._serialized) ?? idString(k);
+  const id = waFacts(m).hdParent;
   return id ? extRawOf(id) : null;
 }
 
@@ -1100,7 +1117,7 @@ function hdParentOf(m: Json): string | null {
 async function mergeHdCopy(parent: MessageRow, m: Json, extId: string, history: boolean): Promise<MessageRow> {
   kvSet(`waalias:${extRawOf(extId)}`, String(parent.id));
   const atts: Attachment[] = parent.attachments ? JSON.parse(parent.attachments) : [];
-  const size = Number(m?._data?.size ?? m?.media?.size ?? 0);
+  const size = Number(waFacts(m).size ?? m?.media?.size ?? 0);
   const current = atts[0];
   const better = !!m.hasMedia && (!current || !!current.missing || (size > 0 && size > Number(current.size ?? 0)));
   if (!better || history) return parent;
@@ -1206,21 +1223,17 @@ function ingestMessage(m: Json, opts: { history?: boolean } = {}): Promise<Messa
  * the pinned one (pinParentKey) and says pin (pinMessageType 1) or unpin (2), and for how long. Not
  * documented by WAHA: the raw notice is logged (without text) so the shape can be checked.
  */
-function pinNotice(m: Json, conv: ConversationRow, author: string, extId: string) {
-  const d = m._data ?? {};
+function pinNotice(m: Json, conv: ConversationRow, author: string, extId: string, pin: NonNullable<WaFacts['pin']>) {
   const seen = `wapin:${extRawOf(extId)}`;
   if (kvGet(seen)) return;
   kvSet(seen, '1');
-  const k = d.pinParentKey ?? d.parentMsgKey ?? {};
-  const parentId = typeof k === 'string' ? k : k._serialized ?? (typeof k.id === 'string' ? k.id : k.id?._serialized ?? k.id?.id);
-  const pinType = Number(d.pinMessageType);
-  const seconds = Number(d.pinExpiryDuration ?? d.pinDuration) || null;
-  console.log(`[whatsapp] pin notice: type=${pinType} parent=${parentId ? extRawOf(String(parentId)) : '?'} seconds=${seconds} keys=${Object.keys(d).filter((x) => /pin|parent/i.test(x)).join(',')}`);
-  const target = parentId ? findMessageByExt(String(parentId)) : undefined;
+  const d = m._data ?? {};
+  log.info(`whatsapp: pin notice: ${pin.unpin ? 'unpin' : 'pin'} parent=${pin.parent ? extRawOf(pin.parent) : '?'} seconds=${pin.seconds} keys=${Object.keys(d).filter((x) => /pin|parent/i.test(x)).join(',')}`);
+  const target = pin.parent ? findMessageByExt(pin.parent) : undefined;
   if (!target || target.conversation_id !== conv.id) return;
   const at = Number(d.senderTimestampMs) || Number(m.timestamp) * 1000 || Date.now();
-  if (pinType === 2) applyUnpin(target, author, at);
-  else applyPin(target, author, seconds ?? 7 * 86400, at); // WhatsApp's own default is 7 days
+  if (pin.unpin) applyUnpin(target, author, at);
+  else applyPin(target, author, pin.seconds ?? 7 * 86400, at); // WhatsApp's own default is 7 days
 }
 
 async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
@@ -1228,6 +1241,8 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   const fromMe = !!m.fromMe;
   const chatRaw = fromMe ? m.to : m.from;
   if (!chatRaw || skipChat(chatRaw)) return;
+  const facts = waFacts(m);
+  if (facts.lidPair) seedLids([facts.lidPair]); // GOWS says which number a privacy id belongs to
   const chatId = await resolve(chatRaw);
   if (!chatId) return;
   const extId = String(m.id);
@@ -1268,7 +1283,9 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   }
   if (!isGroup && !fromMe && !waContact(chatId)) upsertWaContact({ jid: chatId });
 
-  if (m._data?.type === 'pinned_message' || m._data?.pinMessageType != null) return void pinNotice(m, conv, author, extId);
+  if (facts.pin) return void pinNotice(m, conv, author, extId, facts.pin);
+  // Reactions, edits, deletions, votes: they come as events of their own (GOWS also sends them as messages)
+  if (facts.type === 'ignore' && !m.hasMedia && !m.body && !waContactCards(m).length && !m.location) return;
 
   // Our own messages sent through the API come back as events too: link them to the row we stored.
   if (fromMe && !opts.history) {
@@ -1296,25 +1313,25 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     if (m.source === 'api') return;
   }
 
-  if (m._data?.type === 'call_log') return callLogMessage(m, conv, chatId, fromMe, !!opts.history);
-  if (m._data?.type === 'gp2') {
+  if (facts.type === 'call_log') return callLogMessage(m, conv, chatId, fromMe, !!opts.history);
+  if (facts.type === 'gp2') {
     if (!isGroup) return;
     const d = m._data;
     return groupNotice({ id: extId, chat: chatId, type: String(d.subtype ?? ''), author: d.author ?? m.author ?? null, recipients: d.recipients ?? [], body: m.body ?? d.body ?? '', ts: Number(m.timestamp) * 1000 }, !!opts.history);
   }
 
   // View-once media can't be opened on a linked device (WhatsApp Web can't either).
-  const viewOnce = !!(m._data?.isViewOnce ?? m.isViewOnce);
-  const forwarded = m._data?.isForwarded || m.isForwarded ? (Number(m._data?.forwardingScore ?? m.forwardingScore ?? 0) >= 5 ? 2 : 1) : 0;
+  const viewOnce = facts.viewOnce;
+  const forwarded = facts.forwarded ? (facts.forwardingScore >= 5 ? 2 : 1) : 0;
 
   const poll = pollOf(m);
   let { body, ranges } = poll
     ? { body: poll.question, ranges: null }
-    : await richFromWa(isPreviewData(m.body) ? '' : m.body, conv, m._data?.mentionedJidList ?? m.mentionedIds);
+    : await richFromWa(isPreviewData(m.body) ? '' : m.body, conv, facts.mentions);
   const attachments: Attachment[] = [];
   const pending: { id: string; chat: string; msg: string }[] = [];
   if (viewOnce) {
-    const t = String(m._data?.type ?? '');
+    const t = facts.type;
     body = `${t === 'video' ? '🎥 View-once video' : t === 'ptt' || t === 'audio' ? '🎤 View-once voice message' : '📷 View-once photo'}: open it on your phone`;
     ranges = null;
   } else if (m.hasMedia && opts.history && !m.media?.url) {
@@ -1327,7 +1344,7 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
     try {
       const a = await downloadMedia(m, extId);
       if (a) {
-        if (m._data?.type === 'sticker') {
+        if (facts.type === 'sticker') {
           a.sticker = true;
           addSticker(a.id);
         }
@@ -1600,10 +1617,13 @@ async function refreshGroupName(conv: ConversationRow) {
   if (desc !== undefined && desc !== conv.group_description) setGroupDescription(conv.id, desc);
   if (name) getOrCreateWaChat(conv.wa_id!, name);
   const md = g?.groupMetadata ?? g;
-  if (typeof md?.announce === 'boolean' || typeof md?.restrict === 'boolean') {
+  // WEBJS announce/restrict; GOWS IsAnnounce/IsLocked
+  const announce = typeof md?.announce === 'boolean' ? md.announce : typeof md?.IsAnnounce === 'boolean' ? md.IsAnnounce : undefined;
+  const restrict = typeof md?.restrict === 'boolean' ? md.restrict : typeof md?.IsLocked === 'boolean' ? md.IsLocked : undefined;
+  if (announce !== undefined || restrict !== undefined) {
     mergeGroupSettings(conv.id, {
-      sendMessages: typeof md.announce === 'boolean' ? (md.announce ? 'admins' : 'all') : undefined,
-      editInfo: typeof md.restrict === 'boolean' ? (md.restrict ? 'admins' : 'all') : undefined,
+      sendMessages: announce !== undefined ? (announce ? 'admins' : 'all') : undefined,
+      editInfo: restrict !== undefined ? (restrict ? 'admins' : 'all') : undefined,
     });
   }
   if (name || desc !== undefined) emitConversation(conv.id);
@@ -1706,7 +1726,7 @@ async function handleEvent(e: Json) {
       const target = findMessageByExt(p?.editedMessageId);
       if (!target) return;
       const conv = getConversation(target.conversation_id)!;
-      const rich = await richFromWa(p.body, conv, p._data?.mentionedJidList ?? p.mentionedIds);
+      const rich = await richFromWa(p.body, conv, editMentions(p));
       emitMessage(updateMessage(target.id, { body: rich.body, ranges: rich.ranges ? JSON.stringify(rich.ranges) : null, edited: 1 }));
       emitConversation(conv.id);
       return;
@@ -1779,7 +1799,14 @@ async function handleEvent(e: Json) {
     case 'call.rejected': {
       // WEBJS only tells us a call came in (not whether you picked up on your phone); other engines say more.
       if (!p?.id || !p?.from) return;
-      const outcome = e.event === 'call.accepted' ? 'answered' : e.event === 'call.rejected' ? 'declined' : 'incoming';
+      let outcome: CallOutcome = e.event === 'call.accepted' ? 'answered' : e.event === 'call.rejected' ? 'declined' : 'incoming';
+      // GOWS: "rejected" also covers a call that ended (CallTerminate, with a reason): unanswered, that's
+      // a missed call; after picking up, it stays answered.
+      if (e.event === 'call.rejected' && p._data && 'Reason' in p._data) {
+        const line = findMessageByExt('call:' + String(p.id));
+        if (line && !/^\S+ Incoming/.test(line.body ?? '')) return;
+        outcome = 'missed';
+      }
       await recordCall(p.from, String(p.id), !!p.isVideo, outcome, Number(p.timestamp) * 1000 || Date.now());
       return;
     }
@@ -1800,6 +1827,7 @@ async function handleEvent(e: Json) {
           const who = p?.participant;
           recordLabelEvent(conv.id, [idString(who?.id ?? who), idString(who?.pn)], typeof p?.tag === 'string' ? p.tag : null);
         }
+        if (p?._data?.JID && (e.event === 'group.v2.participants' || e.event === 'group.v2.update')) await gowsGroupNotice(e.event, p);
         const removed = e.event === 'group.v2.leave' || (p?.type === 'leave' || p?.type === 'remove') && (p?.participants ?? []).some((x: Json) => self.isWa(bare(x?.id ?? x)));
         if (removed) dropSelfFromGroup(conv);
         else refreshGroupSoon(id);
@@ -2071,7 +2099,13 @@ export async function deliverWa(
   const chatId = conv.wa_id!;
   if (p.forwardOf) {
     // WhatsApp's own forward: no new upload, and the other side sees "Forwarded". The echo links our row.
-    await waha.forward(chatId, p.forwardOf);
+    try {
+      await waha.forward(chatId, p.forwardOf);
+    } catch (e) {
+      // An engine (version) without forwarding: from now on forwards go as copies. This one: try again.
+      if (/not implemented/i.test((e as Error).message)) kvSet(`wa_no_forward:${state.engine ?? ''}`, '1');
+      throw e;
+    }
     const current = getMessage(messageId);
     emitMessage(updateMessage(messageId, { status: current && statusRank(current.status) > statusRank('sent') ? current.status! : 'sent', error: null, ts_confirmed: 1 }));
     return;
@@ -2116,7 +2150,7 @@ export async function deliverWa(
       } else res = await waha.sendMedia(kind, chatId, file, opts);
       if (i === 0) first = res;
     }
-  } else if (p.preview && wa.text.includes(p.preview.url) && kvGet('wa_no_custom_preview') !== '1') {
+  } else if (p.preview && wa.text.includes(p.preview.url) && kvGet(`wa_no_custom_preview:${state.engine ?? ''}`) !== '1') {
     let image: { mimetype: string; data: string } | undefined;
     if (p.preview.image && isSafeId(p.preview.image.id)) {
       try {
@@ -2131,7 +2165,7 @@ export async function deliverWa(
       // WEBJS can't send our own preview ("not implemented by 'WEBJS' engine"): send it as text and let
       // WhatsApp make the preview itself, and don't try our own again.
       if (!/not implemented/i.test((e as Error).message)) throw e;
-      kvSet('wa_no_custom_preview', '1');
+      kvSet(`wa_no_custom_preview:${state.engine ?? ''}`, '1');
       log.info('whatsapp: this engine cannot send custom link previews; WhatsApp makes them from now on');
       first = await waha.sendText(chatId, wa.text, { reply_to, mentions: wa.mentions.length ? wa.mentions : undefined, linkPreview: true });
     }
@@ -2155,6 +2189,7 @@ export async function reactWa(m: MessageRow, emoji: string) {
 }
 
 export async function pinWa(conv: ConversationRow, m: MessageRow, seconds: number | null) {
+  if (!waFeatures().pinMessages) throw Object.assign(new Error(`WhatsApp can't pin messages from here with WAHA's ${state.engine} engine`), { httpStatus: 400 });
   if (seconds) await waha.pin(conv.wa_id!, ext(m), seconds);
   else await waha.unpin(conv.wa_id!, ext(m));
 }
@@ -2185,7 +2220,7 @@ export async function waAbout(jid: string): Promise<string | null> {
   const cached = waAboutCached(jid);
   // An empty answer is asked again sooner: it may have been a hiccup rather than their privacy setting.
   if (cached && Date.now() - cached.at < (cached.about ? 3600_000 : 5 * 60_000)) return cached.about;
-  if (state.status !== 'connected') return cached?.about ?? null;
+  if (state.status !== 'connected' || !waFeatures().about) return cached?.about ?? null;
   try {
     const r = await waha.about(jid);
     const about = typeof r === 'string' ? r : r?.about ?? null;
@@ -2280,7 +2315,13 @@ export async function updateWaProfile(patch: { name?: string; about?: string; pi
 
 export async function archiveWa(conv: ConversationRow, on: boolean) {
   kvSet(`wa_arch:${conv.wa_id}`, String(on));
-  if (state.status === 'connected') await waha.archive(conv.wa_id!, on);
+  // GOWS can't archive: then it's archived here only.
+  if (state.status === 'connected' && waFeatures().archive) await waha.archive(conv.wa_id!, on);
+}
+
+/** Native WhatsApp forwards, unless this engine turned out not to have them. */
+export function waCanForward() {
+  return kvGet(`wa_no_forward:${state.engine ?? ''}`) !== '1';
 }
 
 // ---------- stickers ----------
@@ -2398,7 +2439,10 @@ async function groupNotice(
   const recipientIds = (n.recipients ?? []).map((r) => (typeof r === 'string' ? r : (r as { _serialized?: string })?._serialized)).filter((r): r is string => !!r);
   const A = authorId ? await nameOfJid(authorId) : 'Someone';
   const R = listNames(await Promise.all(recipientIds.map(nameOfJid)));
-  const byOther = !!authorId && !recipientIds.includes(authorId);
+  // (ids can be spelled differently: "…@s.whatsapp.net" / "…@c.us" / a privacy id)
+  const authorJid = authorId ? await resolve(authorId) : null;
+  const recipientJids = await Promise.all(recipientIds.map((r) => resolve(r)));
+  const byOther = !!authorJid && !recipientJids.includes(authorJid);
   const many = recipientIds.length > 1;
   const quote = (s: string) => `“${s}”`;
   const text: string | null = (() => {
@@ -2451,6 +2495,29 @@ async function groupNotice(
     refreshGroupSoon(chatJid);
   }
   return row;
+}
+
+/**
+ * GOWS has no notice messages for group changes; its group events carry what happened (whatsmeow's
+ * GroupInfo: who did it, who joined/left/was promoted, the new name …). One change can come as several
+ * events (one per kind), each with the same details: each makes its own line, once.
+ */
+async function gowsGroupNotice(event: string, p: Json) {
+  const d = p._data;
+  const chat = String(d.JID);
+  const ts = Date.parse(String(d.Timestamp ?? '')) || Date.now();
+  const id = (part: string) => `gows-gi:${chat}:${ts}:${part}`;
+  const author = d.Sender || null;
+  if (event === 'group.v2.participants') {
+    const list: string[] = (p.participants ?? []).map((x: Json) => idString(x?.id ?? x)).filter(Boolean);
+    const type = p.type === 'join' ? (d.JoinReason === 'invite' ? 'invite' : 'add') : p.type === 'leave' ? 'remove' : p.type;
+    if (list.length && ['add', 'invite', 'remove', 'promote', 'demote'].includes(type)) await groupNotice({ id: id(type), chat, type, author, recipients: list, body: '', ts }, false);
+    return;
+  }
+  if (d.Name?.Name) await groupNotice({ id: id('subject'), chat, type: 'subject', author, recipients: [], body: String(d.Name.Name), ts }, false);
+  if (d.Topic && 'Topic' in d.Topic) await groupNotice({ id: id('description'), chat, type: 'description', author, recipients: [], body: '', ts }, false);
+  if (d.Announce && typeof d.Announce.IsAnnounce === 'boolean') await groupNotice({ id: id('announce'), chat, type: 'announce', author, recipients: [], body: d.Announce.IsAnnounce ? 'on' : 'off', ts }, false);
+  if (d.Locked && typeof d.Locked.IsLocked === 'boolean') await groupNotice({ id: id('restrict'), chat, type: 'restrict', author, recipients: [], body: d.Locked.IsLocked ? 'on' : 'off', ts }, false);
 }
 
 // ---------- calls ----------
@@ -2685,6 +2752,7 @@ export async function waChatForNumber(number: string): Promise<ConversationRow> 
 }
 
 export async function blockWa(conv: ConversationRow, block: boolean) {
+  if (!waFeatures().block) throw Object.assign(new Error(`WhatsApp can't block from here with WAHA's ${state.engine} engine; block on your phone`), { httpStatus: 400 });
   await (block ? waha.block(conv.wa_id!) : waha.unblock(conv.wa_id!));
   setWaBlocked(conv.wa_id!, block);
 }

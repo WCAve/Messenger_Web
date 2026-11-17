@@ -27,7 +27,7 @@ import { mightShrink, shrinkPhoto } from '../shrink';
 import { getPrefs, usePrefs } from '../prefs';
 import { abandonLoading, finishLoading, getState, setDraft, setHasNewer, setState, startLoading, upsertConversation, upsertMessages, useStore } from '../store';
 import type { Attachment, Conversation, LinkPreview, MediaItem, Message, Network } from '../types';
-import { NETWORK_LABEL, capsFor, useNetworkReady } from '../networks';
+import { NETWORK_LABEL, capsFor, useNetworkReady, useWaFeature } from '../networks';
 import { durationLabel, fileToBase64, formatDay, formatSize, formatTime, hueFor, isJumbomoji, safeHref, sameDay, untilLabel } from '../util';
 import { type PickedGif, type PickedSticker, Picker, type PickerTab } from './Picker';
 import { Dialog, PollDialog, PollView } from './Extras';
@@ -768,6 +768,7 @@ const MessageItem = memo(function MessageItem({
 }) {
   const [picker, setPicker] = useState(false);
   const [pinMenu, setPinMenu] = useState(false);
+  const waPin = useWaFeature('pinMessages');
   const pinned = useStore((s) => !!s.pins[m.conversationId]?.some((p) => p.messageId === m.id && (!p.expiresAt || p.expiresAt > Date.now())));
   const quickReactions = useQuickReactions();
   // Selecting messages: undefined when not selecting in this chat, else whether this one is picked
@@ -1039,7 +1040,7 @@ const MessageItem = memo(function MessageItem({
               <Icon name="info" size={18} />
             </button>
           )}
-          {canAct && pinned && (
+          {canAct && pinned && canPinIn(network, group, waPin) && (
             <button className="icon-btn sm" onClick={() => act(() => api.unpin(m.id))} aria-label="Unpin" title="Unpin message">
               <Icon name="pin" size={17} />
             </button>
@@ -1047,10 +1048,10 @@ const MessageItem = memo(function MessageItem({
           {canAct && !pinned && (
             <button
               className="icon-btn sm"
-              onClick={() => canPinIn(network, group) && (setPicker(false), setPinMenu((v) => !v))}
+              onClick={() => canPinIn(network, group, waPin) && (setPicker(false), setPinMenu((v) => !v))}
               aria-label="Pin"
-              aria-disabled={!canPinIn(network, group)}
-              title={canPinIn(network, group) ? 'Pin message' : 'Signal can only pin messages in groups from here'}
+              aria-disabled={!canPinIn(network, group, waPin)}
+              title={canPinIn(network, group, waPin) ? 'Pin message' : pinBlocked(network)}
             >
               <Icon name="pin" size={17} />
             </button>
@@ -2611,8 +2612,10 @@ function Composer({
 
 // ---------------------------------------------------------------------------
 
-/** Signal's API can only pin in groups; WhatsApp can pin anywhere. */
-export const canPinIn = (network: Network, group: boolean) => network === 'whatsapp' || group;
+/** Signal's API can only pin in groups; WhatsApp can pin anywhere, unless WAHA's engine can't (GOWS). */
+export const canPinIn = (network: Network, group: boolean, waPin = true) => (network === 'whatsapp' ? waPin : group);
+const pinBlocked = (network: Network) =>
+  network === 'whatsapp' ? 'WhatsApp can’t pin messages from here with this WAHA engine (GOWS); pin on your phone' : 'Signal can only pin messages in groups from here';
 const PIN_CHOICES: [string, number][] = [
   ['24 hours', 86400],
   ['7 days', 7 * 86400],
@@ -2627,6 +2630,7 @@ const PIN_CHOICES: [string, number][] = [
 function PinnedBar({ conversation }: { conversation: Conversation }) {
   const id = conversation.id;
   const all = useStore((s) => s.pins[id]);
+  const waPin = useWaFeature('pinMessages');
   const [now, setNow] = useState(Date.now());
   const [index, setIndex] = useState(0);
   useEffect(() => {
@@ -2647,7 +2651,7 @@ function PinnedBar({ conversation }: { conversation: Conversation }) {
   if (!pins.length) return null;
   const i = index % pins.length;
   const p = pins[i];
-  const canUnpin = canPinIn(conversation.network, conversation.kind === 'group');
+  const canUnpin = canPinIn(conversation.network, conversation.kind === 'group', waPin);
   return (
     <div className="pinned-bar">
       <button

@@ -2,7 +2,8 @@
 
 Signal and WhatsApp in one self-hosted web app. Runs on the owner's Unraid box as the `signal-web`
 container (image `ghcr.io/wcave/messenger_web`, built by CI on every push), next to
-signal-cli-rest-api (port 8739) and WAHA (port 6523, **WEBJS** engine, Chrome image).
+signal-cli-rest-api (port 8739) and WAHA (port 6523; **WEBJS** engine with the Chrome image, or the browser-free **GOWS** engine: both
+are supported, see "WAHA engines" in docs/ARCHITECTURE.md).
 
 **Read first:** [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (how it works, ids, kv keys, pitfalls),
 then [server/README.md](server/README.md) / [web/README.md](web/README.md) (which file does what).
@@ -45,7 +46,9 @@ Run the server by hand like `tests/e2e/run.sh` does (mocks on 8080/8090, `DATA_D
   the real data is needed, ask for the output of a read-only `docker exec signal-web node -e …` query
   (see "Debugging on the server" in docs/ARCHITECTURE.md), never for the database itself.
 - **WAHA**: check its docs (waha.devlike.pro) and source (github.com/devlikeapro/waha and its
-  whatsapp-web.js fork) for exact endpoint shapes; WEBJS behaves differently from the other engines.
+  whatsapp-web.js fork) for exact endpoint shapes; WEBJS behaves differently from the other engines. For GOWS, WAHA's source
+  (src/core/engines/gows) shows the shapes; `tests/e2e/run.sh` with `MOCK_WA_ENGINE=GOWS` runs every suite
+  against a GOWS-shaped mock (suites for WEBJS-only features fail there by design).
   Be gentle with it: no floods of requests.
 - **signal-cli-rest-api**: its swagger (github.com/bbernhard/signal-cli-rest-api, src/docs) is the
   reference; several things Signal can do aren't in the REST API.
