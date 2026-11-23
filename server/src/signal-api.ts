@@ -82,7 +82,14 @@ export type SignalLinkState = 'disabled' | 'enabled' | 'enabled-with-approval';
 
 export const signalApi = {
   about: () => call<About>('GET', '/v1/about', undefined, 10_000),
-  accounts: () => call<string[]>('GET', '/v1/accounts', undefined, 10_000),
+  /**
+   * The linked accounts. Up to 0.101 a list of numbers; from 0.102 a list of { number, aci } (number empty
+   * for an account without one: then the aci is what the other endpoints take). Always numbers here.
+   */
+  accounts: async () => {
+    const list = await call<(string | { number?: string; aci?: string | null })[]>('GET', '/v1/accounts', undefined, 10_000);
+    return (list ?? []).map((a) => (typeof a === 'string' ? a : a?.number || a?.aci || '')).filter(Boolean);
+  },
 
   /** allRecipients also returns people who aren't in your address book (e.g. group members), with their profile names. */
   contacts: (number: string, allRecipients = false) =>

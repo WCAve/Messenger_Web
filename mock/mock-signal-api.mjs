@@ -317,7 +317,8 @@ const server = http.createServer(async (req, res) => {
   const m = req.method;
   try {
     if (p === '/v1/about') return json(res, 200, { versions: ['v1', 'v2'], build: 2, mode: 'json-rpc', version: '0.0.0-mock', capabilities: {} });
-    if (p === '/v1/accounts') return json(res, 200, linked ? [SELF.number] : []);
+    // 0.102 and later: [{ number, aci }]; MOCK_SIGNAL_OLD_ACCOUNTS=1 answers like 0.101 (a list of numbers)
+    if (p === '/v1/accounts') return json(res, 200, !linked ? [] : process.env.MOCK_SIGNAL_OLD_ACCOUNTS ? [SELF.number] : [{ number: SELF.number, aci: SELF.uuid ?? null }]);
     if (p === '/v1/qrcodelink') {
       setTimeout(() => (linked = true), 4000);
       res.writeHead(200, { 'content-type': 'image/png' });

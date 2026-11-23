@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-23',
+    date: '23 November 2026',
+    items: ['Fixed: Signal stopped connecting (“Can’t reach Signal”) after the Signal container updated itself to version 0.102, which lists the linked account in a new way.'],
+  },
+  {
     id: '2026-11-17-7',
     date: '17 November 2026',
     items: [
