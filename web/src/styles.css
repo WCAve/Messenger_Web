@@ -4363,3 +4363,30 @@ video.deleted-media {
   left: 0;
   right: auto;
 }
+
+/* ---- Formatting menu in the message box (bold, italic …) */
+.format-wrap {
+  position: relative;
+  display: flex;
+}
+.composer .format-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: auto;
+  min-width: 220px;
+}
+.format-menu button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.fmt-hint {
+  color: var(--ink-3, var(--ink-2));
+  font-size: 12px;
+}
+.fmt-bold { font-weight: 700; }
+.fmt-italic { font-style: italic; }
+.fmt-strikethrough { text-decoration: line-through; }
+.fmt-monospace { font-family: ui-monospace, Menlo, Consolas, monospace; }
+.fmt-spoiler { background: var(--haze); border-radius: 4px; padding: 0 4px; letter-spacing: 0.5px; }

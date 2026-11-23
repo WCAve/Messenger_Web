@@ -20,7 +20,7 @@ import { emojiForCode, replaceShortcodes, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
 import { refreshUsageSoon, rememberAlias } from '../emoji/usage';
 import { refreshQuickReactions, useQuickReactions } from '../quickReactions';
-import { type ComposerMention, composerToRich, messageToComposer, pieces } from '../format';
+import { type ComposerMention, FORMATS, composerToRich, messageToComposer, pieces, toggleFormat } from '../format';
 import { jumpToMessage, loadLatest } from '../jump';
 import { VoicePlayer } from './VoicePlayer';
 import { mightShrink, shrinkPhoto } from '../shrink';
@@ -1615,18 +1615,6 @@ function mentionAtCaret(text: string, caret: number): { start: number; term: str
 }
 
 /** Wrap the selection in a formatting marker (Ctrl+B and friends). */
-function wrapSelection(el: HTMLTextAreaElement, text: string, mark: string): { value: string; caret: number; end: number } {
-  const start = el.selectionStart ?? text.length;
-  const end = el.selectionEnd ?? start;
-  const sel = text.slice(start, end);
-  if (sel.startsWith(mark) && sel.endsWith(mark) && sel.length >= mark.length * 2) {
-    const inner = sel.slice(mark.length, sel.length - mark.length); // toggle off
-    return { value: text.slice(0, start) + inner + text.slice(end), caret: start, end: start + inner.length };
-  }
-  const value = text.slice(0, start) + mark + sel + mark + text.slice(end);
-  return sel ? { value, caret: start, end: end + mark.length * 2 } : { value, caret: start + mark.length, end: start + mark.length };
-}
-
 const SHORTCUTS: Record<string, string> = { b: '*', i: '_', x: '~', m: '`' }; // x and m with Shift
 
 /** The ":shortcode" being typed right before the caret, if any. */
@@ -1794,6 +1782,7 @@ function Composer({
   const editOriginal = useRef('');
   const area = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const [formatOpen, setFormatOpen, formatRef] = useMenu();
   const typingSent = useRef(0);
   const typingStop = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pendingCaret = useRef<number | null>(null);
@@ -2214,6 +2203,15 @@ function Composer({
     }
   }
 
+  /** Bold, italic …: put the markers around the selection (or take them off). */
+  function applyFormat(mark: string) {
+    const el = area.current;
+    if (!el) return;
+    const r = toggleFormat(text, el.selectionStart ?? text.length, el.selectionEnd ?? text.length, mark);
+    pendingSelection.current = r.end;
+    setTextAndCaret(r.text, r.start);
+  }
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (cmdSuggest) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -2255,9 +2253,7 @@ function Composer({
     const key = e.key.toLowerCase();
     if (mod && !e.altKey && SHORTCUTS[key] && (key === 'b' || key === 'i' ? !e.shiftKey : e.shiftKey)) {
       e.preventDefault();
-      const r = wrapSelection(e.currentTarget, text, SHORTCUTS[key]);
-      pendingSelection.current = r.end;
-      setTextAndCaret(r.value, r.caret);
+      applyFormat(SHORTCUTS[key]);
       return;
     }
     if (suggest) {
@@ -2543,6 +2539,29 @@ function Composer({
         <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled || !!editing}>
           <Icon name="attach" />
         </button>
+        <div className="format-wrap" ref={formatRef}>
+          <button
+            className={`icon-btn${formatOpen ? ' on' : ''}`}
+            onMouseDown={(e) => e.preventDefault()} // keep the selection in the message box
+            onClick={() => setFormatOpen((o) => !o)}
+            aria-label="Formatting"
+            title="Formatting"
+            aria-expanded={formatOpen}
+            disabled={disabled}
+          >
+            <Icon name="format" />
+          </button>
+          {formatOpen && (
+            <div className="menu format-menu" role="menu">
+              {FORMATS.filter((f) => !f.signalOnly || conversation.network === 'signal').map((f) => (
+                <button key={f.mark} role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => (applyFormat(f.mark), setFormatOpen(false))}>
+                  <span className={`fmt-sample fmt-${f.label.toLowerCase()}`}>{f.label}</span>
+                  <span className="fmt-hint">{f.keys ?? `${f.mark}text${f.mark}`}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <input
           ref={fileInput}
           type="file"
@@ -2568,7 +2587,6 @@ function Composer({
           hidden={recording !== null}
           value={text}
           placeholder={disabled ? `Waiting for ${NETWORK_LABEL[conversation.network]}…` : 'Message'}
-          title="*bold*  _italic_  ~strike~  `code`  ||spoiler||"
           spellCheck
           onChange={(e) => onChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyDown={onKeyDown}

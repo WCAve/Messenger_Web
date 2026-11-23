@@ -41,6 +41,40 @@ function closerFrom(s: string, from: number, end: number, m: { mark: string; sty
   return -1;
 }
 
+/** The formatting menu in the message box (and its shortcuts): what each one puts around the text. */
+export const FORMATS: { mark: string; label: string; keys?: string; signalOnly?: boolean }[] = [
+  { mark: '*', label: 'Bold', keys: 'Ctrl+B' },
+  { mark: '_', label: 'Italic', keys: 'Ctrl+I' },
+  { mark: '~', label: 'Strikethrough', keys: 'Ctrl+Shift+X' },
+  { mark: '`', label: 'Monospace', keys: 'Ctrl+Shift+M' },
+  { mark: '||', label: 'Spoiler', signalOnly: true },
+];
+
+/**
+ * Put `mark` around the selection (start–end) in `text`, or take it off when it's there already. Spaces
+ * at the edges of the selection stay outside (markers must touch the text). Nothing selected: an empty
+ * pair with the cursor in between. Returns the new text and the new selection.
+ */
+export function toggleFormat(text: string, start: number, end: number, mark: string): { text: string; start: number; end: number } {
+  let a = start;
+  let b = end;
+  while (a < b && /\s/.test(text[a])) a++;
+  while (b > a && /\s/.test(text[b - 1])) b--;
+  const n = mark.length;
+  if (a === b) {
+    if (text.slice(a - n, a) === mark && text.slice(a, a + n) === mark) return { text: text.slice(0, a - n) + text.slice(a + n), start: a - n, end: a - n }; // empty pair: take it off
+    return { text: text.slice(0, a) + mark + mark + text.slice(a), start: a + n, end: a + n };
+  }
+  if (text.slice(a - n, a) === mark && text.slice(b, b + n) === mark) {
+    return { text: text.slice(0, a - n) + text.slice(a, b) + text.slice(b + n), start: a - n, end: b - n };
+  }
+  const inner = text.slice(a, b);
+  if (inner.length > 2 * n && inner.startsWith(mark) && inner.endsWith(mark)) {
+    return { text: text.slice(0, a) + inner.slice(n, -n) + text.slice(b), start: a, end: b - 2 * n };
+  }
+  return { text: text.slice(0, a) + mark + inner + mark + text.slice(b), start: a + n, end: b + n };
+}
+
 /** Strip the markers and return the plain text with style ranges. */
 export function parseMarkup(input: string): { text: string; styles: StyleRange[] } {
   let out = '';

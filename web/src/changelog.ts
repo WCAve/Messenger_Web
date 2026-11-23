@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-23-4',
+    date: '23 November 2026',
+    items: ['The formatting tip that popped up over the message box is gone. Instead there’s a formatting button (A) next to it: select text and pick Bold, Italic, Strikethrough, Monospace or Spoiler (Signal only); pick it again to take it off. The shortcuts still work (Ctrl+B, Ctrl+I, Ctrl+Shift+X, Ctrl+Shift+M).'],
+  },
+  {
     id: '2026-11-23-3',
     date: '23 November 2026',
     items: ['Fixed: a Signal reply sometimes showed “Attachment” in its quote when the quoted message was plain text. It now shows the quoted message’s text.'],

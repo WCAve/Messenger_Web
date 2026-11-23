@@ -98,6 +98,7 @@ const PATHS: Record<string, ReactNode> = {
   'reply-private': <path d="M10 9V5l-7 7 7 7v-4.1c2.6 0 4.6.5 6.2 1.6M17 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zm0 1.5c-2 0-4.5 1-4.5 2.6V13h9v-.9c0-1.6-2.5-2.6-4.5-2.6z" />,
   mic: <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1a7 7 0 0 0 6-6.9z" />,
   stop: <path d="M7 7h10v10H7z" />,
+  format: <path d="M5 17v2h14v-2zm4.5-4.2h5l.9 2.2h2.1L12.75 4h-1.5L6.5 15h2.1zM12 5.98 13.87 11h-3.74z" />,
   user: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-3.3 0-8 1.7-8 4.5V21h16v-2.5c0-2.8-4.7-4.5-8-4.5z" />,
   chat: <path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2zm3 6v2h10v-2zm0-3v2h10V7zm0 6v2h6v-2z" transform="translate(-1 0)" />,
   palette: (
