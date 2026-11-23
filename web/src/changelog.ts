@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-23-3',
+    date: '23 November 2026',
+    items: ['Fixed: a Signal reply sometimes showed “Attachment” in its quote when the quoted message was plain text. It now shows the quoted message’s text.'],
+  },
+  {
     id: '2026-11-23-2',
     date: '23 November 2026',
     items: [

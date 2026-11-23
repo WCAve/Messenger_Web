@@ -1318,12 +1318,12 @@ export function attachmentDto(a: Attachment) {
  * same time and author), so stickers and photos show as a thumbnail and other files by kind. Works
  * for replies stored before this existed too.
  */
-type QuotedRow = Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind'>;
+type QuotedRow = Pick<MessageRow, 'sticker' | 'attachments' | 'deleted' | 'kind' | 'body' | 'ranges'>;
 // Prepared once: this runs for every reply in every page of messages.
 const quotedByAuthor = db.prepare<[number, number, string], QuotedRow>(
-  'SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ? LIMIT 1',
+  'SELECT sticker, attachments, deleted, kind, body, ranges FROM messages WHERE conversation_id = ? AND sent_ts = ? AND author = ? LIMIT 1',
 );
-const quotedByTime = db.prepare<[number, number], QuotedRow>('SELECT sticker, attachments, deleted, kind FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1');
+const quotedByTime = db.prepare<[number, number], QuotedRow>('SELECT sticker, attachments, deleted, kind, body, ranges FROM messages WHERE conversation_id = ? AND sent_ts = ? LIMIT 1');
 export function quotedMedia(conversationId: number, q: Quote): { kind: string; label: string; thumb: string | null } | null {
   // WhatsApp may spell the author differently (number or privacy id): then the time alone is close enough.
   const row = quotedByAuthor.get(conversationId, q.sentTs, q.author) ?? quotedByTime.get(conversationId, q.sentTs);
@@ -1413,6 +1413,12 @@ function quoteDto(conversationId: number, quote: Quote) {
   const media = quotedMedia(from?.id ?? conversationId, quote);
   let text = renderMentions(quote.text) ?? '';
   if (media && (!text || text === 'Attachment' || text === 'Photo')) text = ''; // the media label says it better
+  // A quote that came without its text (and isn't of a photo or file): show what the quoted message says.
+  if (!media && (!text || text === 'Attachment')) {
+    const at = from?.id ?? conversationId;
+    const row = quotedByAuthor.get(at, quote.sentTs, quote.author) ?? quotedByTime.get(at, quote.sentTs);
+    if (row && !row.deleted) text = renderBody(row.body, row.ranges)?.text?.slice(0, 500) ?? text;
+  }
   return {
     sentAt: quote.sentTs,
     author: quote.author,
