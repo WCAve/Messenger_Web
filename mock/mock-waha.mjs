@@ -653,6 +653,11 @@ const server = http.createServer(async (req, res) => {
       sent.push(record);
       if (p === '/api/sendSeen') markedUnread.delete(chatId);
       if (p === '/api/sendVoice' && mockConfig.noVoice) return json(res, 500, { message: 'ffmpeg not available' }); // tests: conversion fails
+      // Like WAHA's GOWS engine (2026.10): a preview without a picture crashes it
+      if (p === '/api/send/link-custom-preview' && ((GOWS && !b?.preview?.image) || mockConfig.previewCrash)) {
+        sent.push({ path: p, ...b, crashed: true });
+        return json(res, 500, { statusCode: 500, exception: { message: "Cannot use 'in' operator to search for 'url' in undefined", name: 'TypeError' } });
+      }
       if (p === '/api/send/link-custom-preview' && mockConfig.webjs) // like WAHA's WEBJS engine
         return json(res, 501, { statusCode: 501, message: "The method is not implemented by 'WEBJS' engine. Check the docs and try another engine: https://waha.devlike.pro/" });
       if (['/api/sendText', '/api/sendImage', '/api/sendFile', '/api/sendVideo', '/api/sendVoice', '/api/send/link-custom-preview', '/api/sendPoll', '/api/sendSticker', '/api/sendContactVcard'].includes(p)) {

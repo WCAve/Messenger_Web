@@ -12,9 +12,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-23-2',
+    date: '23 November 2026',
+    items: [
+      'Fixed: on WhatsApp with the GOWS engine, a message with a link whose preview has no picture failed with “Not sent”. Such links now go with WhatsApp’s own preview, and if our preview fails for any other reason the message still goes.',
+    ],
+  },
+  {
     id: '2026-11-23',
     date: '23 November 2026',
-    items: ['Fixed: Signal stopped connecting (“Can’t reach Signal”) after the Signal container updated itself to version 0.102, which lists the linked account in a new way.'],
+    items: [
+      'Fixed: Signal stopped connecting (“Can’t reach Signal”) after the Signal container updated itself to version 0.102, which lists the linked account in a new way.',
+    ],
   },
   {
     id: '2026-11-17-7',

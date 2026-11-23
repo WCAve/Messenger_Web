@@ -2150,23 +2150,21 @@ export async function deliverWa(
       } else res = await waha.sendMedia(kind, chatId, file, opts);
       if (i === 0) first = res;
     }
-  } else if (p.preview && wa.text.includes(p.preview.url) && kvGet(`wa_no_custom_preview:${state.engine ?? ''}`) !== '1') {
-    let image: { mimetype: string; data: string } | undefined;
-    if (p.preview.image && isSafeId(p.preview.image.id)) {
-      try {
-        image = { mimetype: p.preview.image.contentType, data: fs.readFileSync(localPath(p.preview.image.id)).toString('base64') };
-      } catch {
-        /* without a picture */
-      }
-    }
+  } else if (p.preview && wa.text.includes(p.preview.url) && kvGet(`wa_no_custom_preview:${state.engine ?? ''}`) !== '1' && previewImage(p.preview) && !wa.mentions.length) {
+    // Our own preview only when it has a picture (without one, WhatsApp's own is just as good, and GOWS
+    // crashes on a preview without a picture) and no mentions (the preview call can't carry them).
     try {
-      first = await waha.linkPreview(chatId, wa.text, { url: p.preview.url, title: p.preview.title ?? p.preview.url, description: p.preview.description ?? '', ...(image ? { image } : {}) }, reply_to);
+      first = await waha.linkPreview(chatId, wa.text, { url: p.preview.url, title: p.preview.title ?? p.preview.url, description: p.preview.description ?? '', image: previewImage(p.preview)! }, reply_to);
     } catch (e) {
-      // WEBJS can't send our own preview ("not implemented by 'WEBJS' engine"): send it as text and let
-      // WhatsApp make the preview itself, and don't try our own again.
-      if (!/not implemented/i.test((e as Error).message)) throw e;
-      kvSet(`wa_no_custom_preview:${state.engine ?? ''}`, '1');
-      log.info('whatsapp: this engine cannot send custom link previews; WhatsApp makes them from now on');
+      const msg = (e as Error).message;
+      // No answer in time: it may have gone out, so don't send it twice (it shows "Not sent" with Try again).
+      if (/abort|timeout|timed out/i.test(msg)) throw e;
+      // WEBJS can't send our own preview ("not implemented by 'WEBJS' engine"): don't try our own again.
+      if (/not implemented/i.test(msg)) {
+        kvSet(`wa_no_custom_preview:${state.engine ?? ''}`, '1');
+        log.info('whatsapp: this engine cannot send custom link previews; WhatsApp makes them from now on');
+      } else log.warn(`whatsapp: sending our own link preview failed (${msg.slice(0, 200)}); sending it as text`);
+      // Either way: as text, and WhatsApp makes the preview itself.
       first = await waha.sendText(chatId, wa.text, { reply_to, mentions: wa.mentions.length ? wa.mentions : undefined, linkPreview: true });
     }
   } else if (p.preview && wa.text.includes(p.preview.url)) {
@@ -2310,6 +2308,16 @@ export async function updateWaProfile(patch: { name?: string; about?: string; pi
   if (patch.picture !== undefined && self.waIds[0]) {
     // our own picture is cached like everyone else's
     for (const f of [waAvatarCached(self.waIds[0])].filter(Boolean)) fs.rmSync(f!, { force: true });
+  }
+}
+
+/** The preview's picture as WAHA takes it, or undefined when there's none (or it's gone). */
+function previewImage(pv: { image?: { id: string; contentType: string } | null }): { mimetype: string; data: string } | undefined {
+  if (!pv.image || !isSafeId(pv.image.id)) return undefined;
+  try {
+    return { mimetype: pv.image.contentType, data: fs.readFileSync(localPath(pv.image.id)).toString('base64') };
+  } catch {
+    return undefined;
   }
 }
 
