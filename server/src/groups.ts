@@ -231,13 +231,18 @@ export async function applyWaLabels(c: ConversationRow, tags: unknown, mine: unk
     const pn = bare(t?.pn ?? t?.participant?.pn ?? '');
     for (const id of [raw, pn, await resolve(raw)]) if (id) byId.set(id, tag);
   }
-  // Changes WAHA told us about live win: WhatsApp Web's list can miss labels it never synced.
-  for (const [id, tag] of Object.entries(labelEvents(c.id))) {
+  // Changes WAHA told us about live win: WhatsApp Web's list can miss labels it never synced. GOWS has
+  // no such events and its list is WhatsApp's own: there, old events (from WEBJS days) would only hide
+  // newer tags, so they're ignored (and dropped once the list is in).
+  const gows = (getWaState().engine ?? '').toUpperCase() === 'GOWS';
+  if (gows && Array.isArray(tags) && kvGet(`glabels_ev:${c.id}`)) kvSet(`glabels_ev:${c.id}`, '{}');
+  const events = gows ? {} : labelEvents(c.id);
+  for (const [id, tag] of Object.entries(events)) {
     if (tag) byId.set(id, tag);
     else byId.delete(id);
   }
   let myTag = typeof mine === 'string' ? mine : typeof (mine as Json)?.tag === 'string' ? (mine as Json).tag : null;
-  const myEvent = self.waIds.map((id) => labelEvents(c.id)[id]).find((v) => v !== undefined);
+  const myEvent = self.waIds.map((id) => (events as Record<string, string | null>)[id]).find((v) => v !== undefined);
   if (myEvent !== undefined) myTag = myEvent;
   else if (!myTag && backup.self && !self.waIds.some((id) => list.some((t: Json) => bare(t?.id ?? '') === id))) myTag = backup.self;
   const labels: Record<string, string> = {};

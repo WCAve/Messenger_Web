@@ -726,6 +726,18 @@ async function refreshImportedGroups() {
   }
 }
 
+const labelsLooked = new Map<number, number>();
+const LABELS_EVERY_MS = Number(process.env.WA_LABELS_EVERY_MS) || 10 * 60_000;
+function labelsNowAndThen(conv: ConversationRow) {
+  const last = labelsLooked.get(conv.id) ?? 0;
+  if (Date.now() - last < LABELS_EVERY_MS) return;
+  labelsLooked.set(conv.id, Date.now());
+  setTimeout(() => {
+    const c = getConversation(conv.id);
+    if (c) refreshWaLabels(c).then(() => groupChanged(c.id), () => {});
+  }, 1500);
+}
+
 const groupRefreshPending = new Map<string, ReturnType<typeof setTimeout>>();
 function refreshGroupSoon(jid: string) {
   clearTimeout(groupRefreshPending.get(jid));
@@ -1268,6 +1280,8 @@ async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Prom
   const conv = getOrCreateWaChat(chatId);
   // During an import, member lists of new groups are fetched afterwards (one WhatsApp Web call each).
   if (isGroup && !conv.group_name && !opts.history) refreshGroupName(conv).catch(() => {});
+  // GOWS doesn't say when someone changes their member tag: look again now and then, while the group talks.
+  if (isGroup && !opts.history && isGows()) labelsNowAndThen(conv);
   if (isGroup && !conv.group_members) {
     if (opts.history) groupsAfterImport.add(chatId);
     else refreshGroupSoon(chatId);

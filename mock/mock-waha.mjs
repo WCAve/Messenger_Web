@@ -84,7 +84,7 @@ function wsSend(socket, text) {
 }
 function emit(event, payload) {
   if (mockConfig.silentMessages && event.startsWith('message')) return;
-  if (GOWS && (event === 'engine.event' || event === 'chat.archive')) return; // GOWS has no such events
+  if (GOWS && (event === 'engine.event' || event === 'chat.archive' || event === 'group.v2.participants.tag')) return; // GOWS has no such events
   if (GOWS && (event === 'message.any' || event === 'message')) payload = toGows(payload);
   const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: ENGINE, event, payload, me: status === 'WORKING' ? ME : null });
   for (const s of sockets) wsSend(s, msg);
@@ -294,6 +294,15 @@ const server = http.createServer(async (req, res) => {
       if (p === '/mock/contact') {
         const b = await body(req);
         PEOPLE[b.key] = { id: b.id, name: b.name ?? null, pushname: b.pushname ?? null };
+        return json(res, 200, { ok: true });
+      }
+      // Someone else sets their member tag (null: takes it off): { group?, id (their lid), pn?, tag }
+      if (p === '/mock/tag' && m === 'POST') {
+        const b = await body(req);
+        const g = groupState(b.group ?? GROUP.id);
+        if (b.tag) g.tags[b.id] = b.tag;
+        else delete g.tags[b.id];
+        emit('group.v2.participants.tag', { group: { id: g.id }, participant: { id: b.id, pn: b.pn ?? null }, tag: b.tag ?? null, timestamp: Math.floor(Date.now() / 1000) });
         return json(res, 200, { ok: true });
       }
       if (p === '/mock/incoming') {

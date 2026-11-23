@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-23-5',
+    date: '23 November 2026',
+    items: ['Fixed: WhatsApp member tags didn’t update with the GOWS engine (it doesn’t say when someone changes their tag). The app now looks again every 10 minutes or so while a group is active, and also when you open group info.'],
+  },
+  {
     id: '2026-11-23-4',
     date: '23 November 2026',
     items: ['The formatting tip that popped up over the message box is gone. Instead there’s a formatting button (A) next to it: select text and pick Bold, Italic, Strikethrough, Monospace or Spoiler (Signal only); pick it again to take it off. The shortcuts still work (Ctrl+B, Ctrl+I, Ctrl+Shift+X, Ctrl+Shift+M).'],
