@@ -60,6 +60,18 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=sha,format=short
+      # The image itself, before it's published: starts, runs as PUID:PGID, has working ffmpeg/HEIC/drivers
+      - name: Build the amd64 image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: messenger-web:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Test the image
+        run: sh tests/docker-smoke.sh messenger-web:smoke
       - uses: docker/build-push-action@v6
         with:
           context: .
