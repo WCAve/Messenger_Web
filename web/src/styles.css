@@ -4390,3 +4390,36 @@ video.deleted-media {
 .fmt-strikethrough { text-decoration: line-through; }
 .fmt-monospace { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .fmt-spoiler { background: var(--haze); border-radius: 4px; padding: 0 4px; letter-spacing: 0.5px; }
+
+/* ---- Sticker favourites: a star on each sticker (on hover; always when it's a favourite) */
+.sticker-cell-wrap {
+  position: relative;
+}
+.sticker-cell-wrap .sticker-cell {
+  width: 100%;
+}
+.sticker-fav {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel, var(--paper));
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 22px;
+  padding: 0;
+  opacity: 0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+.sticker-cell-wrap:hover .sticker-fav,
+.sticker-fav:focus-visible {
+  opacity: 0.9;
+}
+.sticker-fav.on {
+  opacity: 1;
+  color: #f5b400;
+}

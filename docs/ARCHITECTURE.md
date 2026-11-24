@@ -80,7 +80,7 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 | `gset:<convId>` | group settings as last seen (who may send/edit/add, approval) |
 | `glabels:<convId>`, `glabels_bk:<convId>`, `glabels_ev:<convId>` | member labels: shown / from the backup / from live changes |
 | `sgedit:`, `sglink:`, `sglink_want:<convId>` | Signal group settings the API doesn't report correctly |
-| `wa_stickers`, `local_sticker_packs` | WhatsApp sticker library; packs from the sticker manager |
+| `local_sticker_packs` | packs from the sticker manager (the sticker library itself is the `sticker_lib` table; `wa_stickers` was its old 500-sticker list, read once by `migrateStickerLib`, flag `sticker_lib_v1`) |
 | `*_v1`, `*_v2` (e.g. `wa_dupes_v1`, `wa_hd_pairs_v2`, `wa_mention_lids_v1`) | one-off clean-ups done; bump the version to run one again |
 
 ## WAHA engines (WEBJS and GOWS)

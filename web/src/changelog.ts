@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-3',
+    date: '24 November 2026',
+    items: [
+      'Stickers: the WhatsApp sticker collection no longer stops at 500 (older ones fell off before; those are back). The same sticker received several times now shows once.',
+      'Stickers: a ⭐ tab in the sticker picker with your favourites and the stickers you send most (already filled from what you sent before). Hover over any sticker and click the star to make it a favourite. Kept on the server, so the same on every device.',
+    ],
+  },
+  {
     id: '2026-11-24-2',
     date: '24 November 2026',
     items: ['Under the hood: the app now runs on Debian instead of Alpine Linux (a step towards searchable stickers), with a newer ffmpeg for video conversion. Nothing should look different; if videos, iPhone photos or Quick Sync act up, say so.'],

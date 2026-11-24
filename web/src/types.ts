@@ -168,8 +168,21 @@ export interface StickerPack {
 
 /** Packs made in Messenger Web's sticker manager, and WhatsApp stickers not in one yet. */
 export interface LocalStickers {
-  packs: { id: string; title: string; stickers: { id: string; url: string }[]; cover: { id: string; url: string } | null }[];
-  unsorted: { id: string; url: string }[];
+  packs: { id: string; title: string; stickers: { id: string; url: string; key?: string | null }[]; cover: { id: string; url: string } | null }[];
+  unsorted: { id: string; url: string; key?: string | null }[];
+}
+
+/** Favourites and most used stickers (the picker's ⭐ tab). key: "sig:<pack>:<id>" or "loc:<hash>". */
+export interface TopSticker {
+  key: string;
+  url: string;
+  pick: { packId: string; stickerId: number } | { localId: string };
+  uses: number;
+  favorite: boolean;
+}
+export interface TopStickers {
+  favorites: TopSticker[];
+  used: TopSticker[];
 }
 
 export interface Recipient {

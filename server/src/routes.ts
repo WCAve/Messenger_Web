@@ -28,6 +28,7 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
+import { libKey, recordStickerUse, setFavorite, signalKey, topStickers } from './stickerlib.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
@@ -718,6 +719,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const packs = account && getState().status === 'connected' ? await listPacks(account, (m) => log('warn', m)).catch(() => []) : [];
     return { packs, local: localStickers() };
   });
+  // Favourites and most used (the picker's ⭐ tab)
+  r.get('/api/stickers/top', () => topStickers());
+  r.post('/api/stickers/favorite', (ctx) => {
+    try {
+      setFavorite(String(ctx.body?.key ?? ''), !!ctx.body?.on);
+    } catch {
+      throw new HttpError(400, 'Unknown sticker');
+    }
+    return topStickers();
+  });
   r.post('/api/stickers/local', (ctx) => createPack(ctx.body?.title, ctx.body?.ids));
   r.post('/api/stickers/local/:id', (ctx) => updatePack(ctx.params.id, ctx.body ?? {}));
   r.delete('/api/stickers/local/:id', (ctx) => deletePack(ctx.params.id));
@@ -731,6 +742,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (!isSafeId(id) || !fs.existsSync(localPath(id))) throw new HttpError(404, 'Sticker not found');
     const quote = quoteFor(c, ctx.body?.quoteId ? getMessage(Number(ctx.body.quoteId)) : undefined);
     if (isWa(c)) return messageDto(await wa(() => sendStickerWa(c, { id }, quote)));
+    recordStickerUse(libKey(id));
     const account = accountFor(c);
     const att: Attachment = { id, contentType: stickerMime(id), size: fs.statSync(localPath(id)).size };
     return queueOutgoing(account, c, { text: '', ranges: null, attachments: [att], base64: [readBase64(att)], quote, sticker: null, preview: null }, (m) => log('warn', m));
@@ -905,6 +917,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     if (rawSticker && !sticker) throw new HttpError(400, 'Invalid sticker');
     if (sticker && (text || files.length)) throw new HttpError(400, 'A sticker is sent on its own');
     if (!text && !files.length && !sticker) throw new HttpError(400, 'Empty message');
+    if (sticker) recordStickerUse(signalKey(sticker.packId, sticker.stickerId));
 
     const attachments: Attachment[] = [];
     const base64: string[] = [];

@@ -37,6 +37,7 @@ How it all fits together: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 | `groups.ts` | Group management for both networks (create, members, admins, settings, link, requests, labels) |
 | `wabackup.ts` | Android backup import (crypt15 decrypt, msgstore → messages, media folder, stickers, member labels) |
 | **Both** | |
+| `stickerlib.ts` | The sticker library (`sticker_lib`: each file, copies share a hash) and sticker use (`sticker_use`: times sent, favourites) for the picker's ⭐ tab |
 | `stickerpacks.ts` | Your own sticker packs (sticker manager) |
 | `linkpreview.ts` | Link previews for messages you send (public addresses only) |
 | `emojiusage.ts` | Emoji usage counts for "frequently used" |

@@ -10,7 +10,7 @@ import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from
 import { Emojified } from '../emoji/render';
 import { frequentEmoji, loadUsage } from '../emoji/usage';
 import { setState } from '../store';
-import type { LocalStickers, StickerItem, StickerPack } from '../types';
+import type { LocalStickers, StickerItem, StickerPack, TopSticker, TopStickers } from '../types';
 import { Icon } from './ui';
 
 export interface PickedGif {
@@ -100,27 +100,25 @@ export function Picker({
 
 // ---------------------------------------------------------------------------
 
-const RECENT_STICKERS = 'sw-recent-stickers';
-type Recent = PickedSticker & { url: string };
-function recentStickers(): Recent[] {
-  try {
-    return (JSON.parse(localStorage.getItem(RECENT_STICKERS) ?? '[]') as Recent[]).filter((s) => s && s.url);
-  } catch {
-    return [];
-  }
-}
-function rememberSticker(s: Recent) {
-  try {
-    const same = (x: Recent) => ('localId' in x && 'localId' in s ? x.localId === s.localId : 'packId' in x && 'packId' in s && x.packId === s.packId && x.stickerId === s.stickerId);
-    const list = [s, ...recentStickers().filter((x) => !same(x))].slice(0, 24);
-    localStorage.setItem(RECENT_STICKERS, JSON.stringify(list));
-  } catch {
-    /* private mode */
-  }
-}
-
 let packsCache: StickerPack[] | null = null;
 let localCache: LocalStickers | null = null;
+let topCache: TopStickers | null = null;
+
+/** A sticker in a grid, with a star to make it a favourite (shown on hover, or always when it is one). */
+function StickerCell({ url, title, fav, onPick, onFav }: { url: string; title: string; fav: boolean; onPick: () => void; onFav?: () => void }) {
+  return (
+    <div className="sticker-cell-wrap">
+      <button className="sticker-cell" onClick={onPick} title={title}>
+        <img src={url} alt={title} loading="lazy" />
+      </button>
+      {onFav && (
+        <button className={`sticker-fav${fav ? ' on' : ''}`} onClick={onFav} aria-label={fav ? 'Remove from favourites' : 'Add to favourites'} title={fav ? 'Remove from favourites' : 'Add to favourites'}>
+          {fav ? '★' : '☆'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /**
  * One sticker picker for every chat: Signal's packs, your own packs from the sticker manager, and
@@ -137,25 +135,38 @@ function StickerGrid({
 }) {
   const [packs, setPacks] = useState<StickerPack[] | null>(packsCache);
   const [local, setLocal] = useState<LocalStickers | null>(localCache);
-  const [active, setActive] = useState<string>('recent');
+  const [top, setTop] = useState<TopStickers | null>(topCache);
+  const [active, setActive] = useState<string>('top');
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState('');
   const [adding, setAdding] = useState(false);
-  const recent = useMemo(() => recentStickers(), []);
   const imageInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    api
-      .stickers()
-      .then((r) => {
+    Promise.all([api.stickers(), api.stickersTop()])
+      .then(([r, t]) => {
         packsCache = r.packs;
         localCache = r.local;
+        topCache = t;
         setPacks(r.packs);
         setLocal(r.local);
-        setActive((a) => (a === 'recent' && !recent.length ? (r.packs[0]?.packId ?? (r.local.packs[0] ? r.local.packs[0].id : r.local.unsorted.length ? 'unsorted' : 'add')) : a));
+        setTop(t);
+        const hasTop = t.favorites.length + t.used.length > 0;
+        setActive((a) => (a === 'top' && !hasTop ? (r.packs[0]?.packId ?? (r.local.packs[0] ? r.local.packs[0].id : r.local.unsorted.length ? 'unsorted' : 'add')) : a));
       })
       .catch((e) => setError(e.message));
-  }, [recent.length]);
+  }, []);
+
+  const favs = useMemo(() => new Set(top?.favorites.map((t) => t.key) ?? []), [top]);
+  const toggleFav = (key: string | null | undefined) =>
+    key
+      ? () =>
+          void api
+            .stickerFavorite(key, !favs.has(key))
+            .then((t) => ((topCache = t), setTop(t)))
+            .catch((e) => setError(e.message))
+      : undefined;
+  const hasTop = !!top && top.favorites.length + top.used.length > 0;
 
   async function addPack() {
     setAdding(true);
@@ -174,14 +185,10 @@ function StickerGrid({
     }
   }
 
-  const pickSignal = (packId: string, s: StickerItem) => {
-    rememberSticker({ packId, stickerId: s.id, url: s.url });
-    onPick({ packId, stickerId: s.id });
-  };
-  const pickLocal = (s: { id: string; url: string }) => {
-    rememberSticker({ localId: s.id, url: s.url });
-    onPick({ localId: s.id });
-  };
+  // Sending changes "most used": look again next time the picker opens
+  const pickSignal = (packId: string, s: StickerItem) => ((topCache = null), onPick({ packId, stickerId: s.id }));
+  const pickLocal = (s: { id: string; url: string }) => ((topCache = null), onPick({ localId: s.id }));
+  const pickTop = (t: TopSticker) => ((topCache = null), onPick(t.pick));
 
   const signalPack = packs?.find((p) => p.packId === active);
   const localPack = local?.packs.find((p) => p.id === active);
@@ -192,9 +199,9 @@ function StickerGrid({
   return (
     <>
       <nav className="sticker-packs" aria-label="Sticker packs">
-        {recent.length > 0 && (
-          <button className={active === 'recent' ? 'on' : undefined} onClick={() => setActive('recent')} title="Recent">
-            🕘
+        {hasTop && (
+          <button className={active === 'top' ? 'on' : undefined} onClick={() => setActive('top')} title="Favourites and most used" aria-label="Favourites and most used">
+            ⭐
           </button>
         )}
         {packs?.map((p) => (
@@ -230,14 +237,29 @@ function StickerGrid({
       <div className="picker-body">
         {error && <p className="form-error picker-empty">{error}</p>}
         {!loaded && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
-        {active === 'recent' && recent.length > 0 && (
-          <div className="sticker-grid">
-            {recent.map((s) => (
-              <button key={'localId' in s ? s.localId : `${s.packId}:${s.stickerId}`} className="sticker-cell" onClick={() => ('localId' in s ? pickLocal({ id: s.localId, url: s.url }) : onPick(s))}>
-                <img src={s.url} alt="Sticker" loading="lazy" />
-              </button>
-            ))}
-          </div>
+        {active === 'top' && hasTop && (
+          <>
+            {top!.favorites.length > 0 && (
+              <>
+                <h4>Favourites</h4>
+                <div className="sticker-grid">
+                  {top!.favorites.map((t) => (
+                    <StickerCell key={t.key} url={t.url} title="Sticker" fav onPick={() => pickTop(t)} onFav={toggleFav(t.key)} />
+                  ))}
+                </div>
+              </>
+            )}
+            {top!.used.length > 0 && (
+              <>
+                <h4>Most used</h4>
+                <div className="sticker-grid">
+                  {top!.used.map((t) => (
+                    <StickerCell key={t.key} url={t.url} title={`Sent ${t.uses}×`} fav={false} onPick={() => pickTop(t)} onFav={toggleFav(t.key)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </>
         )}
         {signalPack && (
           <>
@@ -246,11 +268,10 @@ function StickerGrid({
               {signalPack.author && <span className="muted"> · {signalPack.author}</span>}
             </h4>
             <div className="sticker-grid">
-              {signalPack.stickers.map((s) => (
-                <button key={s.id} className="sticker-cell" onClick={() => pickSignal(signalPack.packId, s)} title={s.emoji ?? 'Sticker'}>
-                  <img src={s.url} alt={s.emoji ?? 'Sticker'} loading="lazy" />
-                </button>
-              ))}
+              {signalPack.stickers.map((s) => {
+                const key = `sig:${signalPack.packId}:${s.id}`;
+                return <StickerCell key={s.id} url={s.url} title={s.emoji ?? 'Sticker'} fav={favs.has(key)} onPick={() => pickSignal(signalPack.packId, s)} onFav={toggleFav(key)} />;
+              })}
             </div>
           </>
         )}
@@ -262,14 +283,12 @@ function StickerGrid({
             </h4>
             <div className="sticker-grid">
               {(localPack ? localPack.stickers : local.unsorted).map((s) => (
-                <button key={s.id} className="sticker-cell" onClick={() => pickLocal(s)} title="Sticker">
-                  <img src={s.url} alt="Sticker" loading="lazy" />
-                </button>
+                <StickerCell key={s.id} url={s.url} title="Sticker" fav={!!s.key && favs.has(s.key)} onPick={() => pickLocal(s)} onFav={toggleFav(s.key)} />
               ))}
             </div>
           </>
         )}
-        {loaded && (active === 'add' || (!packs!.length && !local!.packs.length && !local!.unsorted.length && !recent.length)) && (
+        {loaded && (active === 'add' || (!packs!.length && !local!.packs.length && !local!.unsorted.length && !hasTop)) && (
           <form
             className="sticker-add"
             onSubmit={(e) => {

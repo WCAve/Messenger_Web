@@ -4,7 +4,7 @@
  * through uploadBackup (XMLHttpRequest, for progress); big files to send through uploadInPieces. Server routes: server/src/routes.ts and
  * groups.ts.
  */
-import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, WaContact, WaState } from './types';
+import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, TopStickers, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Pin, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -106,6 +106,8 @@ export const api = {
     call<ServerSettings>('POST', '/api/settings', patch),
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[]; local: LocalStickers }>('GET', '/api/stickers'),
+  stickersTop: () => call<TopStickers>('GET', '/api/stickers/top'),
+  stickerFavorite: (key: string, on: boolean) => call<TopStickers>('POST', '/api/stickers/favorite', { key, on }),
   createStickerPack: (title: string, ids: string[]) => call<LocalStickers>('POST', '/api/stickers/local', { title, ids }),
   updateStickerPack: (id: string, patch: { title?: string; add?: string[]; remove?: string[]; order?: string[] }) => call<LocalStickers>('POST', `/api/stickers/local/${encodeURIComponent(id)}`, patch),
   deleteStickerPack: (id: string) => call<LocalStickers>('DELETE', `/api/stickers/local/${encodeURIComponent(id)}`),

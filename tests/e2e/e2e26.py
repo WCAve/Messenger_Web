@@ -1,4 +1,4 @@
-"""Sticker manager and the one sticker picker: own packs, sending across networks, recent stickers."""
+"""Sticker manager and the one sticker picker: own packs, sending across networks, most used stickers."""
 import sys, time, json, urllib.request
 from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
@@ -91,10 +91,11 @@ with sync_playwright() as p:
     open_stickers(); page.click('nav.sticker-packs button[title="Blob faces"]'); page.locator('.picker-body .sticker-cell').first.click()
     until(lambda: len(sig_sends()) == n + 2 and sig_sends()[-1].get('sticker'), 8, 'signal sticker not sent as a sticker')
     print('signal sends ok')
-    # recent shows both kinds
-    open_stickers(); page.click('nav.sticker-packs button[title="Recent"]')
+    # "Most used" (⭐ tab) shows both kinds
+    open_stickers(); page.click('nav.sticker-packs button[title="Favourites and most used"]')
+    page.wait_for_selector('.picker-body h4:text("Most used")')
     assert page.locator('.picker-body .sticker-cell').count() >= 2
-    print('recent ok')
+    print('most used ok')
     # picker gear opens the manager
     page.click('nav.sticker-packs button[aria-label="Sticker manager"]'); page.wait_for_selector('.sticker-manager')
     page.screenshot(path=S + '/e2e26.png')

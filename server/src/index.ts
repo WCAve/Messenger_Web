@@ -20,6 +20,7 @@ import { startExpiry, stopExpiry } from './expiry.js';
 import { seedWaReadMarks, startWhatsApp, stopWhatsApp } from './whatsapp.js';
 import { refreshBackupInfo, setBackupLogger } from './wabackup.js';
 import { clearUploads } from './uploads.js';
+import { migrateStickerLib } from './stickerlib.js';
 import { videoChip } from './convert.js';
 import { backfillSizes, backfillThumbs, fillMessageSizes } from './mediasize.js';
 
@@ -37,6 +38,7 @@ if (!config.password || config.password.length < 8) {
 }
 
 const router = buildRouter(log);
+migrateStickerLib((m) => log('info', m)); // once: the sticker library from the old 500-sticker list
 clearUploads(); // half-finished uploads from before a restart can't be finished
 void videoChip((m) => log('info', m)); // checked once at start, so the log says which is used
 storeHooks.mediaAdded = (id) => void fillMessageSizes(id).catch(() => {});

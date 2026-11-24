@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import { isSafeId, localPath } from './attachments.js';
 import { kvGet, kvSet } from './db.js';
 import { HttpError } from './http.js';
+import { libKey } from './stickerlib.js';
 import { addSticker, listStickersWa, removeStickerWa } from './whatsapp.js';
 
 interface LocalPack {
@@ -35,12 +36,14 @@ const exists = (id: string) => isSafeId(id) && fs.existsSync(localPath(id));
 export function localStickers() {
   const packs = load();
   const inPacks = new Set(packs.flatMap((p) => p.stickers));
+  const packKeys = new Set(packs.flatMap((p) => p.stickers.map((id) => libKey(id))));
   return {
     packs: packs.map((p) => {
-      const stickers = p.stickers.filter(exists).map((id) => ({ id, url: url(id) }));
+      const stickers = p.stickers.filter(exists).map((id) => ({ id, url: url(id), key: libKey(id) }));
       return { id: p.id, title: p.title, stickers, cover: stickers[0] ?? null };
     }),
-    unsorted: listStickersWa().filter((s) => !inPacks.has(s.id)),
+    // Copies of a sticker that's in a pack don't show up again under "not in a pack"
+    unsorted: listStickersWa().filter((s) => !inPacks.has(s.id) && !packKeys.has(s.key)),
   };
 }
 

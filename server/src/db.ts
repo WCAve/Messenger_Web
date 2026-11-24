@@ -258,6 +258,22 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX message_pins_conv ON message_pins (conversation_id);
   `,
+  `
+  -- The sticker library and sticker use (stickerlib.ts)
+  CREATE TABLE sticker_lib (
+    id TEXT PRIMARY KEY,               -- attachment id of the file
+    hash TEXT,                         -- of its bytes: copies of one sticker share it
+    added_at INTEGER NOT NULL,         -- ms; newest first in the picker
+    forgotten INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX sticker_lib_hash ON sticker_lib (hash);
+  CREATE TABLE sticker_use (
+    key TEXT PRIMARY KEY,              -- "sig:<packId>:<stickerId>" or "loc:<hash>"
+    uses INTEGER NOT NULL DEFAULT 0,   -- times you sent it
+    last_at INTEGER,
+    favorite INTEGER NOT NULL DEFAULT 0
+  );
+  `,
 ];
 
 function migrate() {

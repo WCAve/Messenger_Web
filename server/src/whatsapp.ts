@@ -90,6 +90,7 @@ import {
 } from './store.js';
 import { recordLabelEvent, refreshWaLabels } from './groups.js';
 import { applyPin, applyUnpin } from './pins.js';
+import { addToLibrary, forgetFromLibrary, libKey, listLibrary, recordStickerUse } from './stickerlib.js';
 import { type WaFacts, editMentions, protoPoll, waFacts } from './wamsg.js';
 import { type Json, type WaFile, waha } from './waha-api.js';
 
@@ -2403,26 +2404,15 @@ export function waCanForward() {
 
 // ---------- stickers ----------
 
-/** Stickers you can send again: the ones you've received or sent, and imported ones. Newest first. */
-export function addSticker(id: string) {
-  const list = stickerLibrary().filter((s) => s.id !== id);
-  list.unshift({ id, at: Date.now() });
-  kvSet('wa_stickers', JSON.stringify(list.slice(0, 500)));
-}
-function stickerLibrary(): { id: string; at: number }[] {
-  try {
-    return JSON.parse(kvGet('wa_stickers') ?? '[]');
-  } catch {
-    return [];
-  }
+/** Stickers you can send again: the ones you've received or sent, and imported ones (stickerlib.ts). */
+export function addSticker(id: string, at?: number) {
+  addToLibrary(id, at);
 }
 export function listStickersWa() {
-  return stickerLibrary()
-    .filter((s) => isSafeId(s.id) && fs.existsSync(localPath(s.id)))
-    .map((s) => ({ id: s.id, url: `/api/attachments/${encodeURIComponent(s.id)}` }));
+  return listLibrary();
 }
 export function removeStickerWa(id: string) {
-  kvSet('wa_stickers', JSON.stringify(stickerLibrary().filter((s) => s.id !== id)));
+  forgetFromLibrary([id]);
 }
 
 /**
@@ -2481,7 +2471,7 @@ export async function sendStickerWa(
     const res = await waha.sendSticker(conv.wa_id!, file, reply_to);
     const ext = extIdOf(res);
     emitMessage(updateMessage(row.id, { status: 'sent', ts_confirmed: 1, ...(ext && !findMessageByExt(ext) ? { ext_id: ext } : {}) }));
-    if (src.id) addSticker(src.id);
+    if (src.id) (addSticker(src.id), recordStickerUse(libKey(src.id)));
   } catch (e) {
     emitMessage(updateMessage(row.id, { status: 'failed', error: (e as Error).message.replace(/^WhatsApp API .*? failed \(\d+\): /, '') }));
   }

@@ -620,7 +620,9 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/api/files/')) {
       if (mockConfig.fileDelayMs) await new Promise((r) => setTimeout(r, mockConfig.fileDelayMs));
       res.writeHead(200, { 'content-type': 'image/png' });
-      return res.end(PHOTO);
+      // Each file its own bytes (a tail after the image doesn't matter to readers), so copies of "the same"
+      // sticker can be told apart from different ones; mockConfig.identicalFiles: all the same bytes.
+      return res.end(mockConfig.identicalFiles ? PHOTO : Buffer.concat([PHOTO, Buffer.from(p)]));
     }
 
     // Jan was last seen an hour ago; Sanne hides it
