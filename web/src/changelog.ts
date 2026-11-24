@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-13',
+    date: '24 November 2026',
+    items: ['Messenger Web can be installed as an app on your phone or computer (Chrome: ⋮ → “Install app” / “Add to Home screen”), with a proper app icon. It also works with a proxy password in front of it.'],
+  },
+  {
     id: '2026-11-24-12',
     date: '24 November 2026',
     items: [

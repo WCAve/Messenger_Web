@@ -7,7 +7,10 @@
     <meta name="referrer" content="no-referrer" />
     <title>Messenger Web</title>
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- use-credentials: a proxy password in front of the app (HTTP basic auth) is sent along; without it the
+         manifest is fetched without and the app can't be installed -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script src="/theme.js"></script>
     <!--CSS-->
   </head>
