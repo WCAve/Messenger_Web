@@ -93,7 +93,7 @@ function emit(event, payload) {
 
 // ---------- messages ----------
 const rid = () => crypto.randomBytes(10).toString('hex').toUpperCase();
-function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data, ack = fromMe ? 3 : 0 }) {
+function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data, source, ack = fromMe ? 3 : 0 }) {
   const raw = rid();
   const id = `${fromMe}_${chat}_${raw}${chat.endsWith('@g.us') && !fromMe && author ? '_' + author : ''}`;
   const group = chat.endsWith('@g.us');
@@ -102,6 +102,7 @@ function msg({ chat, fromMe = false, author, body = '', ts, media, replyTo, data
     timestamp: Math.floor((ts ?? Date.now()) / 1000),
     from: fromMe ? ME.id : chat,
     fromMe,
+    ...(source ? { source } : {}),
     to: fromMe ? chat : ME.id,
     participant: group && !fromMe ? author : undefined,
     body,
@@ -162,8 +163,15 @@ function toGows(m) {
   }
   if (d.associationType) Message.messageContextInfo = { messageAssociation: { associationType: 10, parentMessageKey: { ID: rawOf(d.parentMsgKey?._serialized ?? d.parentMsgKey?.id ?? d.parentMsgKey) } } };
   const { isViewOnce, ...top } = m; // eslint-disable-line no-unused-vars
+  // WAHA's GOWS: "from" is always the chat; "to" and "participant" the sender in groups (you, for your
+  // own), nothing in one-to-one chats; a group message's id ends with the sender, also your own
+  const gid = group && m.fromMe && !String(m.id).endsWith('_' + ME.id) ? `${m.id}_${ME.id}` : m.id;
   return {
     ...top,
+    id: gid,
+    from: chat,
+    to: group ? sender : null,
+    participant: group ? sender : null,
     _data: {
       Info: { Chat: sjid(chat), Sender: sjid(sender), ...(d.senderAlt ? { SenderAlt: sjid(d.senderAlt) } : {}), IsFromMe: !!m.fromMe, IsGroup: group, ID: rawOf(m.id), Timestamp: new Date(m.timestamp * 1000).toISOString(), PushName: d.notifyName ?? '', Type: m.hasMedia ? 'media' : 'text' },
       Message,
@@ -677,7 +685,7 @@ const server = http.createServer(async (req, res) => {
         const text = b.text ?? b.caption ?? '';
         const out = msg({ chat: chatId, fromMe: true, body: p === '/api/sendPoll' ? b.poll.name : text, media: b.file?.mimetype, ack: 1 });
         afterSend(chatId, out, text);
-        return json(res, 201, out);
+        return json(res, 201, GOWS ? toGows(out) : out);
       }
       return json(res, 201, { ok: true });
     }

@@ -12,6 +12,13 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-7',
+    date: '24 November 2026',
+    items: [
+      'Fixed: with WhatsApp’s browser-free engine (GOWS), messages you sent from your phone could end up in “Message yourself” instead of the chat they belong in (mostly group messages). They’re moved back to their own chats, and the last two weeks are fetched again once so nothing is missing.',
+    ],
+  },
+  {
     id: '2026-11-24-6',
     date: '24 November 2026',
     items: [

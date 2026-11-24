@@ -54,6 +54,7 @@ import {
   type Reaction,
   conversationDto,
   findMessageByExt,
+  touchConversation,
   markConversationRead,
   quotedMedia,
   findWaChat,
@@ -406,6 +407,12 @@ async function afterConnectSteps() {
   if (kvGet(HISTORY_KEY) === 'done') {
     // Messages that came in while this app or WAHA was down never arrived as events: fetch them.
     await catchUpMissed('after connecting');
+    // Once, on GOWS: your own messages sent from the phone that were put in "Message yourself" or lost
+    if (isGows() && !kvGet('wa_gows_own_refetch_v1')) {
+      repairGowsSelfChat();
+      const r = await catchUpWa('your own messages sent from the phone', Date.now() - 14 * 24 * 3600_000).catch(() => null);
+      if (r) kvSet('wa_gows_own_refetch_v1', '1');
+    }
     return;
   }
   missedSince = undefined; // the history import that follows fetches everything
@@ -812,6 +819,63 @@ function pollOf(m: Json): Poll | null {
   return pp ? { ...pp, votes: {} } : null;
 }
 
+/**
+ * Which chat a message is in. WEBJS: your own messages have the chat in "to", others' in "from". GOWS
+ * always has the chat in "from"; its "to" is the sender in groups (you, for your own messages) and empty
+ * in one-to-one chats. Reading "to" there put your own group messages in "Message yourself" and lost
+ * your own one-to-one messages sent from the phone (fixed 24 Nov 2026, see repairGowsSelfChat).
+ */
+export function chatOf(m: Json): string {
+  if (m?._data?.Info?.Chat) return m.from || String(m._data.Info.Chat).replace('@s.whatsapp.net', '@c.us');
+  return m?.fromMe ? m.to : m.from;
+}
+
+/**
+ * Once, after that fix: your messages that landed in "Message yourself" go back to their chat (the chat
+ * is in their WhatsApp id: true_<chat>_<id>[_<you>]), or are dropped when that chat has them already.
+ */
+export function repairGowsSelfChat(): { moved: number; dropped: number } {
+  if (kvGet('wa_gows_self_fix_v1')) return { moved: 0, dropped: 0 };
+  const mine = new Set(self.waIds.map(bare));
+  let moved = 0;
+  let dropped = 0;
+  const touched = new Set<number>();
+  db.transaction(() => {
+    const selfConvs = db.prepare<[], ConversationRow>("SELECT * FROM conversations WHERE network = 'whatsapp' AND wa_id IS NOT NULL").all().filter((c) => mine.has(bare(c.wa_id!)));
+    for (const sc of selfConvs) {
+      const rows = db.prepare<[number], MessageRow>("SELECT * FROM messages WHERE conversation_id = ? AND outgoing = 1 AND ext_id LIKE 'true\\_%' ESCAPE '\\'").all(sc.id);
+      for (const r of rows) {
+        const parts = String(r.ext_id).split('_');
+        const chat = parts[1] ?? '';
+        if (!chat.includes('@') || mine.has(bare(chat))) continue;
+        const target = findWaChat(bare(chat)) ?? (chat.endsWith('@g.us') ? getOrCreateWaChat(chat) : undefined);
+        if (!target) continue;
+        const already = db.prepare<[number, string], { id: number }>('SELECT id FROM messages WHERE conversation_id = ? AND ext_raw = ? LIMIT 1').get(target.id, parts[2] ?? '');
+        if (already) {
+          db.prepare('DELETE FROM messages WHERE id = ?').run(r.id);
+          dropped++;
+        } else {
+          db.prepare('UPDATE messages SET conversation_id = ? WHERE id = ?').run(target.id, r.id);
+          touchConversation(target.id, r.sent_ts);
+          moved++;
+        }
+        touched.add(target.id);
+        touched.add(sc.id);
+      }
+    }
+    for (const id of touched) {
+      const last = db.prepare<[number], { t: number | null }>('SELECT max(sent_ts) AS t FROM messages WHERE conversation_id = ?').get(id)?.t ?? null;
+      db.prepare('UPDATE conversations SET last_message_at = ? WHERE id = ?').run(last, id);
+    }
+  })();
+  kvSet('wa_gows_self_fix_v1', '1');
+  if (moved || dropped) {
+    log.info(`whatsapp: ${moved} of your messages moved out of "Message yourself" back to their chats (${dropped} doubles dropped)`);
+    for (const id of touched) emitConversation(id);
+  }
+  return { moved, dropped };
+}
+
 function isVoiceNote(m: Json, mimetype: string) {
   return waFacts(m).type === 'ptt' || /ogg.*opus/i.test(mimetype);
 }
@@ -820,8 +884,7 @@ async function downloadMedia(m: Json, extId: string): Promise<Attachment | null>
   let media = m.media;
   if (!media?.url && m.hasMedia) {
     try {
-      const chatId = m.fromMe ? m.to : m.from;
-      media = (await waha.message(chatId, m.id))?.media;
+      media = (await waha.message(chatOf(m), m.id))?.media;
     } catch {
       /* not available */
     }
@@ -1253,7 +1316,7 @@ function pinNotice(m: Json, conv: ConversationRow, author: string, extId: string
 async function ingestMessageNow(m: Json, opts: { history?: boolean } = {}): Promise<MessageRow | undefined> {
   if (!m?.id) return;
   const fromMe = !!m.fromMe;
-  const chatRaw = fromMe ? m.to : m.from;
+  const chatRaw = chatOf(m);
   if (!chatRaw || skipChat(chatRaw)) return;
   const facts = waFacts(m);
   if (facts.lidPair) seedLids([facts.lidPair]); // GOWS says which number a privacy id belongs to

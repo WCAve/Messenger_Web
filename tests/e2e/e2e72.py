@@ -104,6 +104,15 @@ with sync_playwright() as p:
     assert not [c for c in lst if '7777777' in json.dumps(c)], 'chat kept under the privacy id'
     print('lid ok')
 
+    # Your own messages sent from the phone: in their chat, not in "Message yourself" (GOWS has the chat
+    # in "from", and in groups you in "to")
+    wa('/mock/incoming', {'from': 'jan', 'group': True, 'text': 'Van mijn telefoon in de groep', 'extra': {'fromMe': True, 'source': 'app'}})
+    wa('/mock/incoming', {'from': 'jan', 'text': 'Van mijn telefoon aan Jan', 'extra': {'fromMe': True, 'source': 'app'}})
+    page.click(row('Familie')); page.wait_for_selector('.msg.out:has-text("Van mijn telefoon in de groep")')
+    page.click(row('Jan Bakker')); page.wait_for_selector('.msg.out:has-text("Van mijn telefoon aan Jan")')
+    assert not [c for c in page.evaluate("fetch('/api/conversations').then(r => r.json())") if 'Van mijn telefoon' in json.dumps(c) and c.get('title') not in ('Familie', 'Jan Bakker')]
+    print('own messages from the phone ok')
+
     # Archive: here only (WAHA isn't asked: GOWS can't)
     jan = [c for c in lst if c.get('title') == 'Jan Bakker'][0]
     r = page.evaluate("id => fetch('/api/conversations/' + id + '/flags', {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({archived: true})}).then(r => r.status)", jan['id'])

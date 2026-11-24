@@ -91,6 +91,12 @@ The app works with either; it asks WAHA which one runs (`state.engine`, from the
   GOWS: whatsmeow's `{Info, Message}` with the protobuf message in Go field names). `wamsg.ts` reads both
   into one shape (`waFacts`): type, media details, mentions, forwarded, view-once, pin notices, HD copies,
   and (GOWS) the number behind a privacy id. Read message details through it, not `_data`.
+- **Which chat**: WEBJS puts the chat in `to` for your own messages and in `from` otherwise; GOWS always puts
+  the chat in `from`, and in groups puts the sender in `to`/`participant` (you, for your own; null in
+  one-to-one chats). Use `chatOf(m)` (whatsapp.ts), never `fromMe ? to : from`. GOWS group message ids end
+  with the sender, also your own. Before this was known, own messages sent from the phone landed in
+  "Message yourself": `repairGowsSelfChat` moves them back once (kv `wa_gows_self_fix_v1`, real chat from
+  the id), then 14 days are fetched again once (kv `wa_gows_own_refetch_v1`).
 - **Events**: GOWS has no `engine.event` worth listening to (every raw event) and no `chat.archive`, so
   they're only subscribed on WEBJS. GOWS has no group notice messages (`gp2`): its `group.v2.*` events carry
   whatsmeow's GroupInfo in `_data` (who did it, Join/Leave/Promote/Demote, Name, Topic …), which
