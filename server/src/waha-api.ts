@@ -166,9 +166,10 @@ export const waha = {
 
   wsUrl(engine?: string): string {
     const events = ['session.status', 'message.any', 'message.reaction', 'message.ack', 'message.ack.group', 'message.revoked', 'message.edited', 'presence.update', 'poll.vote', 'group.v2.update', 'group.v2.participants', 'group.v2.join', 'group.v2.leave', 'group.v2.participants.tag', 'group.join-request', 'call.received', 'call.accepted', 'call.rejected'];
-    // WEBJS: whatsapp-web.js's own events (unread counts, group notices) and archiving on the phone. GOWS's
-    // engine.event is every raw event (each message twice over), and it has no chat.archive.
-    if ((engine ?? 'WEBJS').toUpperCase() !== 'GOWS') events.push('engine.event', 'chat.archive');
+    // engine.event: WEBJS's own events (unread counts, group notices); GOWS's raw whatsmeow events, the only
+    // place it says you read a chat on your phone. chat.archive: WEBJS only.
+    events.push('engine.event');
+    if ((engine ?? 'WEBJS').toUpperCase() !== 'GOWS') events.push('chat.archive');
     const q = new URLSearchParams({ session: S(), events: events.join(',') });
     if (config.wahaApiKey) q.set('x-api-key', config.wahaApiKey);
     return config.wahaUrl.replace(/^http/, 'ws') + '/ws?' + q.toString();

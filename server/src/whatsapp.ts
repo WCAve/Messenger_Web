@@ -54,6 +54,7 @@ import {
   type Reaction,
   conversationDto,
   findMessageByExt,
+  markConversationRead,
   quotedMedia,
   findWaChat,
   newestSentTs,
@@ -1578,14 +1579,66 @@ async function syncMutes(list?: Json[]) {
  * changes are copied (so a mark you cleared here isn't put back); a live event always is.
  */
 function phoneUnread(conv: ConversationRow, unreadCount: number, live = false) {
-  // Nothing unread on the phone: read up to now, as far as later copies of old messages go.
-  if (unreadCount === 0 && (live || Number(kvGet(`wa_read_at:${conv.id}`) ?? 0) < (conv.last_message_at ?? 0))) noteWaRead(conv.id);
+  // Nothing unread on the phone: read up to now, as far as later copies of old messages go. Said live
+  // (you just read it there): read here too.
+  if (unreadCount === 0 && live) return phoneRead(conv);
+  if (unreadCount === 0 && Number(kvGet(`wa_read_at:${conv.id}`) ?? 0) < (conv.last_message_at ?? 0)) noteWaRead(conv.id);
   const marked = unreadCount < 0 ? '1' : '0';
   if (!live && kvGet(`wa_unread:${conv.wa_id}`) === marked) return;
   kvSet(`wa_unread:${conv.wa_id}`, marked);
   if (!!conv.marked_unread === (marked === '1')) return;
   setConversationFlags(conv.id, { markedUnread: marked === '1' });
   if (conv.last_message_at) emitConversation(conv.id);
+}
+
+/** You read this chat on your phone (up to a moment, or all of it): read here too, mark cleared. */
+function phoneRead(conv: ConversationRow, upToTs?: number) {
+  const n = markConversationRead(conv.id, upToTs);
+  noteWaRead(conv.id, upToTs && upToTs < Date.now() ? upToTs : Date.now());
+  const marked = !!conv.marked_unread && !upToTs;
+  if (marked) {
+    kvSet(`wa_unread:${conv.wa_id}`, '0');
+    setConversationFlags(conv.id, { markedUnread: false });
+  }
+  if (n || marked) emitConversation(conv.id);
+}
+
+/**
+ * GOWS: reading on your phone comes as whatsmeow events (WAHA passes them on only as engine.event):
+ *  - Receipt of type "read-self": these messages were read on one of your devices;
+ *  - MarkChatAsRead: the whole chat marked read, or "marked as unread" (Action.read false).
+ */
+async function gowsRead(event: string, d: Json) {
+  if (!d || d.FromFullSync) return;
+  if (event === 'events.Receipt') {
+    if (d.Type !== 'read-self') return;
+    const jid = await resolve(String(d.Chat ?? ''));
+    const conv = jid ? findWaChat(jid) : undefined;
+    if (!conv) return;
+    const ids: string[] = Array.isArray(d.MessageIDs) ? d.MessageIDs.map(String) : [];
+    let upTo = 0;
+    for (const id of ids) {
+      const m = findMessageByExt(id);
+      if (m && m.conversation_id === conv.id) upTo = Math.max(upTo, m.sent_ts);
+    }
+    if (!upTo) upTo = Date.parse(String(d.Timestamp ?? '')) || 0; // messages we don't have: up to when it was read
+    if (upTo) phoneRead(conv, upTo);
+    return;
+  }
+  const jid = await resolve(String(d.JID ?? ''));
+  const conv = jid ? findWaChat(jid) : undefined;
+  if (!conv) return;
+  const read = d.Action?.read ?? d.Action?.Read;
+  if (read === false) return phoneUnread(conv, -1, true); // "Mark as unread" on the phone
+  phoneRead(conv);
+}
+
+/** Which other raw GOWS events show up (once each in the log): tells what more could be synced. */
+const rawSeen = new Set<string>();
+function noteRawEvent(name: string) {
+  if (rawSeen.has(name) || rawSeen.size > 60) return;
+  rawSeen.add(name);
+  if (!['events.Message', 'events.Presence', 'events.ChatPresence'].includes(name)) log.info(`whatsapp: raw event seen: ${name}`);
 }
 
 /** Name from a group object, whatever the engine: GOWS {JID, Name}, NOWEB {id, subject}, WEBJS {name | groupMetadata.subject}. */
@@ -1787,6 +1840,8 @@ async function handleEvent(e: Json) {
         await groupNotice({ id, chat, type: String(n.type ?? ''), author: n.author ?? null, recipients: n.recipientIds ?? [], body: n.body ?? '', ts: Number(n.timestamp) * 1000 }, false);
         return;
       }
+      if (p?.event === 'events.Receipt' || p?.event === 'events.MarkChatAsRead') return gowsRead(p.event, p.data);
+      if (typeof p?.event === 'string' && p.event.startsWith('events.')) return noteRawEvent(p.event);
       if (p?.event !== 'unread_count') return;
       const id = typeof p.data?.id === 'string' ? p.data.id : p.data?.id?._serialized;
       if (!id || skipChat(id) || typeof p.data?.unreadCount !== 'number') return;

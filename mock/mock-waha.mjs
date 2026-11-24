@@ -84,7 +84,8 @@ function wsSend(socket, text) {
 }
 function emit(event, payload) {
   if (mockConfig.silentMessages && event.startsWith('message')) return;
-  if (GOWS && (event === 'engine.event' || event === 'chat.archive' || event === 'group.v2.participants.tag')) return; // GOWS has no such events
+  // GOWS has no such events; its engine.event carries whatsmeow's raw events ("events.Receipt" …), not WEBJS's
+  if (GOWS && (event === 'chat.archive' || event === 'group.v2.participants.tag' || (event === 'engine.event' && !String(payload?.event ?? '').startsWith('events.')))) return;
   if (GOWS && (event === 'message.any' || event === 'message')) payload = toGows(payload);
   const msg = JSON.stringify({ id: crypto.randomUUID(), timestamp: Date.now(), session: SESSION, engine: ENGINE, event, payload, me: status === 'WORKING' ? ME : null });
   for (const s of sockets) wsSend(s, msg);

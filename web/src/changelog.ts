@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24',
+    date: '24 November 2026',
+    items: ['Fixed: WhatsApp chats you read on your phone stayed unread here with the GOWS engine. Reading on your phone (and “Mark as unread” there) now comes through again. Chats that are still unread from before: open them once, or use “Mark all as read”.'],
+  },
+  {
     id: '2026-11-23-5',
     date: '23 November 2026',
     items: ['Fixed: WhatsApp member tags didn’t update with the GOWS engine (it doesn’t say when someone changes their tag). The app now looks again every 10 minutes or so while a group is active, and also when you open group info.'],
