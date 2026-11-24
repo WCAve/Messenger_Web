@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-2',
+    date: '24 November 2026',
+    items: ['Under the hood: the app now runs on Debian instead of Alpine Linux (a step towards searchable stickers), with a newer ffmpeg for video conversion. Nothing should look different; if videos, iPhone photos or Quick Sync act up, say so.'],
+  },
+  {
     id: '2026-11-24',
     date: '24 November 2026',
     items: ['Fixed: WhatsApp chats you read on your phone stayed unread here with the GOWS engine. Reading on your phone (and “Mark as unread” there) now comes through again. Chats that are still unread from before: open them once, or use “Mark all as read”.'],
