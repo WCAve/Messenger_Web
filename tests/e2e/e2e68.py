@@ -46,7 +46,7 @@ with sync_playwright() as p:
 
     # Share a contact in Signal: name and number as text (+ a .vcf), shown as a card here
     page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.msg')
-    page.click('button[aria-label="Share a contact"]'); page.wait_for_selector('.share-contact')
+    page.click('button[aria-label=Attach]'); page.click('.attach-menu button:has-text("Contact")'); page.wait_for_selector('.share-contact')
     page.fill('input[aria-label="Find a contact"]', 'Carol'); page.click('.share-contact .member:has-text("Carol")')
     page.wait_for_selector('.msg.out .contact-card:has-text("Carol")', timeout=5000)
     sent = [x for x in get(8080, '/mock/sent') if (x.get('message') or '').startswith('👤')][-1]

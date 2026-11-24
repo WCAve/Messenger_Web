@@ -57,7 +57,7 @@ with sync_playwright() as p:
 
     # The picker: "Looks like"
     page.click(row('Jan Bakker')); page.wait_for_selector('.msg')
-    page.click('.composer button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+    page.click('.composer button[aria-label=Stickers]')
     box = page.locator('input[aria-label="Search stickers"]')
     box.fill('kat'); page.wait_for_selector('.picker-body h4:has-text("Looks like")')
     n = page.locator('.picker-body .sticker-cell').count(); print('kat:', n); assert n == 1, n

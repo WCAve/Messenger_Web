@@ -32,7 +32,7 @@ with sync_playwright() as p:
     assert [x.get('text') for x in r['results']] == ['Nee joh!']
 
     page.click(row('Jan Bakker')); page.wait_for_selector('.msg')
-    page.click('.composer button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+    page.click('.composer button[aria-label=Stickers]')
     box = page.locator('input[aria-label="Search stickers"]')
     box.fill('nee joh'); page.wait_for_selector('.picker-body .sticker-cell[title="Nee joh!"]')
     assert page.locator('.picker-body .sticker-cell').count() == 1
@@ -46,7 +46,7 @@ with sync_playwright() as p:
     print('send from search ok')
 
     # 350+ stickers not in a pack: 300 shown, then the rest
-    page.click('.composer button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+    page.click('.composer button[aria-label=Stickers]')
     page.click('nav.sticker-packs button[title="WhatsApp stickers not in a pack"]')
     page.wait_for_selector('.picker-body button.show-more')
     n = page.locator('.picker-body .sticker-cell').count(); print('shown:', n, page.locator('.picker-body button.show-more').inner_text())

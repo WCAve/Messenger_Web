@@ -4,7 +4,7 @@
  * on WhatsApp "send an image as a sticker". How a sticker is sent depends on the chat (server). GIFs
  * come from Giphy when GIPHY_API_KEY is set.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api';
 import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from '../emoji';
 import { Emojified } from '../emoji/render';
@@ -37,6 +37,7 @@ export function Picker({
   stickerNetwork = 'signal',
   onStickerImage,
   gifQuery,
+  noTabs = false,
 }: {
   tab: PickerTab;
   onTab: (t: PickerTab) => void;
@@ -52,6 +53,8 @@ export function Picker({
   onStickerImage?: (file: File) => void;
   /** Start the GIF search with this (/gif cats) */
   gifQuery?: string;
+  /** Opened from its own button in the composer (😊, GIF, sticker): no tab row; it can be made bigger. */
+  noTabs?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -59,26 +62,37 @@ export function Picker({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const size = usePickerSize(noTabs);
   return (
-    <div className="picker-panel" role="dialog" aria-label={title ?? 'Emoji and GIFs'}>
+    <div className={`picker-panel${noTabs ? ' sizable' : ''}${size.expanded ? ' expanded' : ''}`} role="dialog" aria-label={title ?? (tab === 'gif' ? 'GIFs' : tab === 'sticker' ? 'Stickers' : 'Emoji')} ref={size.ref} style={size.style}>
+      {noTabs && (
+        <div className="picker-grip" onPointerDown={size.startDrag} onDoubleClick={size.toggle} title="Drag to make it bigger or smaller" aria-hidden="true">
+          <span />
+        </div>
+      )}
       <div className="picker-tabs">
         {title && <span className="picker-title">{title}</span>}
-        {allowGif && (
+        {allowGif && !noTabs && (
           <button className={tab === 'emoji' ? 'on' : undefined} onClick={() => onTab('emoji')}>
             Emoji
           </button>
         )}
-        {allowGif && (
+        {allowGif && !noTabs && (
           <button className={tab === 'gif' ? 'on' : undefined} onClick={() => onTab('gif')}>
             GIF
           </button>
         )}
-        {allowGif && allowStickers && (
+        {allowGif && allowStickers && !noTabs && (
           <button className={tab === 'sticker' ? 'on' : undefined} onClick={() => onTab('sticker')}>
             Stickers
           </button>
         )}
-        <button className="icon-btn sm picker-close" onClick={onClose} aria-label="Close">
+        {noTabs && (
+          <button className="icon-btn sm picker-expand" onClick={size.toggle} aria-label={size.expanded ? 'Make smaller' : 'Make bigger'} title={size.expanded ? 'Make smaller' : 'Make bigger'}>
+            <Icon name={size.expanded ? 'collapse' : 'expand'} size={18} />
+          </button>
+        )}
+        <button className={`icon-btn sm picker-close${noTabs ? ' after-expand' : ''}`} onClick={onClose} aria-label="Close">
           <Icon name="close" size={18} />
         </button>
       </div>
@@ -96,6 +110,75 @@ export function Picker({
       )}
     </div>
   );
+}
+
+const SIZE_KEY = 'picker-size';
+const MIN_H = 220;
+/**
+ * The picker's height: dragged with the bar on top, or "bigger" (most of the chat) with the button or a
+ * double click. Remembered in this browser. On a phone it always takes most of the screen (CSS).
+ */
+function usePickerSize(on: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const saved = (() => {
+    try {
+      return JSON.parse(localStorage.getItem(SIZE_KEY) ?? 'null') as { h?: number; expanded?: boolean } | null;
+    } catch {
+      return null;
+    }
+  })();
+  const [h, setH] = useState<number | null>(saved?.h ?? null);
+  const [expanded, setExpanded] = useState(!!saved?.expanded);
+  // The most it can take depends on the window: measure again once shown and when it changes
+  const [, remeasure] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    remeasure((n) => n + 1);
+    const r = () => remeasure((n) => n + 1);
+    window.addEventListener('resize', r);
+    return () => window.removeEventListener('resize', r);
+  }, [on]);
+  const save = (v: { h: number | null; expanded: boolean }) => {
+    try {
+      localStorage.setItem(SIZE_KEY, JSON.stringify(v));
+    } catch {
+      /* private window: not remembered */
+    }
+  };
+  /** The most it can take: the chat's height, minus room for the message box and the header. */
+  const maxH = () => {
+    const chat = ref.current?.closest('.chat, main') as HTMLElement | null;
+    return Math.max(MIN_H, (chat?.clientHeight ?? window.innerHeight) - 170);
+  };
+  const toggle = () => {
+    const next = !expanded;
+    setExpanded(next);
+    save({ h, expanded: next });
+  };
+  const startDrag = (e: ReactPointerEvent) => {
+    if (!ref.current) return;
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = ref.current.getBoundingClientRect().height;
+    const max = maxH();
+    let last = startH;
+    const move = (ev: PointerEvent) => {
+      last = Math.round(Math.min(max, Math.max(MIN_H, startH + (startY - ev.clientY))));
+      setExpanded(false);
+      setH(last);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      document.body.classList.remove('resizing-picker');
+      save({ h: last, expanded: false });
+    };
+    document.body.classList.add('resizing-picker');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  const style: CSSProperties | undefined = !on ? undefined : expanded ? { height: maxH() } : h ? { height: Math.min(h, maxH()) } : undefined;
+  return { ref, style, expanded: on && expanded, toggle, startDrag };
 }
 
 // ---------------------------------------------------------------------------

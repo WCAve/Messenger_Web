@@ -66,7 +66,7 @@ with sync_playwright() as p:
 
     # sticker tab hidden, picker still works
     # WhatsApp chats get the same picker as Signal (Signal packs included)
-    page.click('button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")'); page.wait_for_selector('nav.sticker-packs button[title="Blob faces"]'); assert page.locator('nav.sticker-packs button[aria-label="Send an image as a sticker"]').count() == 1; page.click('button[aria-label=Emoji]')
+    page.click('.composer button[aria-label=Stickers]'); page.wait_for_selector('nav.sticker-packs button[title="Blob faces"]'); assert page.locator('nav.sticker-packs button[aria-label="Send an image as a sticker"]').count() == 1; page.click('.composer button[aria-label=Stickers]')
 
     # reaction both ways
     m = page.locator('.msg:has-text("Hoi! Kom je")').first; m.hover(); m.locator('button[aria-label=React]').click(); page.click('.quick-react button:has-text("👍")')
@@ -96,7 +96,7 @@ with sync_playwright() as p:
     print('edit/delete ok')
 
     # attachment
-    page.set_input_files('input[type=file][multiple]', f'{FIX}/photo.png'); page.click('textarea'); page.keyboard.type('foto noreply'); page.keyboard.press('Enter')
+    page.set_input_files('input.attach-photos', f'{FIX}/photo.png'); page.click('textarea'); page.keyboard.type('foto noreply'); page.keyboard.press('Enter')
     a = wait(lambda: wsent(lambda x: x['path'] == '/api/sendImage'))[-1]
     assert a['caption'] == 'foto noreply' and a['file']['mimetype'] == 'image/png', a
     print('attachment ok')

@@ -16,7 +16,7 @@ with sync_playwright() as p:
     page.wait_for_selector('.chat-row:has-text("Alice")', timeout=20000); time.sleep(2)
     page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.msg')
     for f, text in [('Staand.png', 'staand'), ('Liggend.png', 'liggend'), ('Kort.mp4', 'filmpje')]:
-        page.set_input_files('input[type=file][multiple]', os.path.join(S, f)); time.sleep(0.4)
+        page.set_input_files('input.attach-photos', os.path.join(S, f)); time.sleep(0.4)
         page.click('textarea'); page.keyboard.type(text); page.keyboard.press('Enter')
         page.wait_for_selector(f'.msg.out:has-text("{text}")')
     # the server knows every size (the video's is filled in after sending)

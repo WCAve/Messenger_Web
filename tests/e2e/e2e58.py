@@ -34,7 +34,7 @@ with sync_playwright() as p:
         raise AssertionError('not sent')
 
     # 1. Huge BMP: made smaller in the browser
-    page.set_input_files('input[type=file][multiple]', bmp)
+    page.set_input_files('input.attach-photos', bmp)
     page.wait_for_selector('.shrink-note:has-text("Made smaller")', timeout=20000)
     note = page.locator('.shrink-note').inner_text(); print('note:', note.replace('\n', ' | '))
     page.locator('.pending-files').screenshot(path=S + '/e2e58-note.png')
@@ -42,7 +42,7 @@ with sync_playwright() as p:
     a = signal_sent(1)['base64_attachments'][0]; print('sent:', a[:70])
     assert a.startswith('data:image/jpeg;filename=Groot.jpg;base64,')
     # 2. The same, but the original as a file
-    page.set_input_files('input[type=file][multiple]', bmp)
+    page.set_input_files('input.attach-photos', bmp)
     page.wait_for_selector('.shrink-note button:has-text("Send the original as a file")', timeout=20000)
     page.click('.shrink-note button:has-text("Send the original as a file")')
     assert 'Original, as a file' in page.locator('.shrink-note').inner_text()
@@ -53,7 +53,7 @@ with sync_playwright() as p:
 
     # 3. TIFF and AVI to WhatsApp: converted on the server
     page.click(row_('Jan Bakker')); page.wait_for_selector('.msg')
-    page.set_input_files('input[type=file][multiple]', [tiff, avi]); time.sleep(0.5)
+    page.set_input_files('input.attach-photos', [tiff, avi]); time.sleep(0.5)
     page.click('textarea'); page.keyboard.type('Scan en filmpje'); page.keyboard.press('Enter')
     for _ in range(80):
         sent = [x for x in get(8090, '/mock/sent') if x['path'] in ('/api/sendImage', '/api/sendVideo', '/api/sendFile')]

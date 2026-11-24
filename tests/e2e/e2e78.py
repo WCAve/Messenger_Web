@@ -40,13 +40,13 @@ with sync_playwright() as p:
     print('copies once ok')
 
     # Send one (it becomes "most used"), star another
-    page.click('.composer button[aria-label=Emoji]'); page.click(".picker-tabs button:has-text(\"Stickers\")")
+    page.click('.composer button[aria-label=Stickers]')
     page.click('nav.sticker-packs button[title="WhatsApp stickers not in a pack"]')
     page.wait_for_selector('.picker-body .sticker-cell-wrap')
     first = page.locator('.picker-body .sticker-cell-wrap').nth(0)
     first.locator('.sticker-cell').click()
     until(lambda: [x for x in json.loads(urllib.request.urlopen('http://127.0.0.1:8090/mock/sent').read()) if x['path'] == '/api/sendSticker'], 'sticker sent')
-    page.click('.composer button[aria-label=Emoji]'); page.click(".picker-tabs button:has-text(\"Stickers\")")
+    page.click('.composer button[aria-label=Stickers]')
     page.click('nav.sticker-packs button[title="WhatsApp stickers not in a pack"]')
     third = page.locator('.picker-body .sticker-cell-wrap').nth(2); third.hover(); third.locator('.sticker-fav').click()
     until(lambda: page.locator('.picker-body .sticker-fav.on').count() == 1, 'star on')
@@ -60,7 +60,7 @@ with sync_playwright() as p:
     until(lambda: len([x for x in json.loads(urllib.request.urlopen('http://127.0.0.1:8090/mock/sent').read()) if x['path'] == '/api/sendSticker']) == 2, 'sent from favourites')
     # Kept after a reload (on the server, not in this browser)
     page.reload(); page.wait_for_selector(row('Jan Bakker'), timeout=20000); page.click(row('Jan Bakker'))
-    page.click('.composer button[aria-label=Emoji]'); page.click(".picker-tabs button:has-text(\"Stickers\")")
+    page.click('.composer button[aria-label=Stickers]')
     page.wait_for_selector('.picker-body h4:text("Favourites")')
     print('favourites and most used ok')
     assert not errors, errors

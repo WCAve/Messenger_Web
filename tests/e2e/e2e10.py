@@ -100,7 +100,7 @@ with sync_playwright() as p:
     print('vote:', v); assert v['selected_answers'] == [1] and v['poll_author'] == '+31622222222', v
     wait(lambda: poll.locator('.poll-option.mine:has-text("Market")').count() == 1)
     shot(page, '03-poll-voted')
-    page.click('button[aria-label="New poll"]'); page.wait_for_selector('.dialog')
+    page.click('button[aria-label=Attach]'); page.click('.attach-menu button:has-text("Poll")'); page.wait_for_selector('.dialog')
     page.fill('.dialog input[placeholder="Ask a question"]', 'Pizza or pasta?')
     page.fill('.dialog input[aria-label="Option 1"]', 'Pizza'); page.fill('.dialog input[aria-label="Option 2"]', 'Pasta'); page.fill('.dialog input[aria-label="Option 3"]', 'Both')
     page.click('.dialog .switch'); shot(page, '04-poll-dialog')

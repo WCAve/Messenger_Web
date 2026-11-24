@@ -1782,7 +1782,9 @@ function Composer({
   const editOriginal = useRef('');
   const area = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const docInput = useRef<HTMLInputElement>(null); // Attach → Document: sent as a file, as it is
   const [formatOpen, setFormatOpen, formatRef] = useMenu();
+  const [attachOpen, setAttachOpen, attachRef] = useMenu();
   const typingSent = useRef(0);
   const typingStop = useRef<ReturnType<typeof setTimeout>>(undefined);
   const pendingCaret = useRef<number | null>(null);
@@ -1866,7 +1868,9 @@ function Composer({
     el.style.height = Math.min(el.scrollHeight, 180) + 'px';
   }, [text]);
 
-  function addFiles(list: File[]) {
+  function addFiles(list: File[], opts: { asDocument?: boolean } = {}) {
+    // As a document: photos and videos go as a plain file (not made smaller, not shown as a photo)
+    if (opts.asDocument) list = list.map((f) => (/^(image|video)\//.test(f.type) ? new File([f], f.name, { type: 'application/octet-stream', lastModified: f.lastModified }) : f));
     const added = list.map((file) => ({ key: ++pendingKey, file, preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, shrinking: mightShrink(file), ...sizeCheck(file, limits, conversation.network) }));
     setFiles((prev) => [...prev, ...added]);
     // Check again with what this server takes (asked once)
@@ -2319,6 +2323,7 @@ function Composer({
           tab={reactTo ? 'emoji' : panel}
           onTab={setPanel}
           allowGif={!reactTo}
+          noTabs={!reactTo}
           stickerNetwork={conversation.network}
           gifQuery={gifQuery}
           onStickerImage={conversation.network === 'whatsapp' ? (f) => void sendWaSticker({ file: f }) : undefined}
@@ -2530,45 +2535,36 @@ function Composer({
         >
           <Icon name="gif" size={26} />
         </button>
-        <button className="icon-btn" onClick={() => setPollOpen(true)} aria-label="New poll" title="New poll" disabled={disabled || !!editing}>
-          <Icon name="poll" />
+        <button
+          className={`icon-btn${panel === 'sticker' ? ' on' : ''}`}
+          onClick={() => (panel === 'sticker' ? closePanel() : (clearReact(), setPanel('sticker')))}
+          aria-label="Stickers"
+          title="Stickers"
+          aria-expanded={panel === 'sticker'}
+          disabled={disabled || !!editing}
+        >
+          <Icon name="sticker" />
         </button>
-        <button className="icon-btn" onClick={() => setContactOpen(true)} aria-label="Share a contact" title="Share a contact" disabled={disabled || !!editing}>
-          <Icon name="user" />
-        </button>
-        <button className="icon-btn" onClick={() => fileInput.current?.click()} aria-label="Attach files" title="Attach files" disabled={disabled || !!editing}>
-          <Icon name="attach" />
-        </button>
-        <div className="format-wrap" ref={formatRef}>
-          <button
-            className={`icon-btn${formatOpen ? ' on' : ''}`}
-            onMouseDown={(e) => e.preventDefault()} // keep the selection in the message box
-            onClick={() => setFormatOpen((o) => !o)}
-            aria-label="Formatting"
-            title="Formatting"
-            aria-expanded={formatOpen}
-            disabled={disabled}
-          >
-            <Icon name="format" />
-          </button>
-          {formatOpen && (
-            <div className="menu format-menu" role="menu">
-              {FORMATS.filter((f) => !f.signalOnly || conversation.network === 'signal').map((f) => (
-                <button key={f.mark} role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => (applyFormat(f.mark), setFormatOpen(false))}>
-                  <span className={`fmt-sample fmt-${f.label.toLowerCase()}`}>{f.label}</span>
-                  <span className="fmt-hint">{f.keys ?? `${f.mark}text${f.mark}`}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
         <input
           ref={fileInput}
+          className="attach-photos"
           type="file"
+          accept="image/*,video/*"
           multiple
           hidden
           onChange={(e) => {
             addFiles(Array.from(e.target.files ?? []));
+            e.target.value = '';
+          }}
+        />
+        <input
+          ref={docInput}
+          className="attach-docs"
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(Array.from(e.target.files ?? []), { asDocument: true });
             e.target.value = '';
           }}
         />
@@ -2604,6 +2600,58 @@ function Composer({
           aria-label={`Message ${conversation.title}`}
           aria-autocomplete="list"
         />
+        <div className="format-wrap" ref={formatRef}>
+          <button
+            className={`icon-btn${formatOpen ? ' on' : ''}`}
+            onMouseDown={(e) => e.preventDefault()} // keep the selection in the message box
+            onClick={() => setFormatOpen((o) => !o)}
+            aria-label="Formatting"
+            title="Formatting"
+            aria-expanded={formatOpen}
+            disabled={disabled}
+          >
+            <Icon name="format" />
+          </button>
+          {formatOpen && (
+            <div className="menu format-menu" role="menu">
+              {FORMATS.filter((f) => !f.signalOnly || conversation.network === 'signal').map((f) => (
+                <button key={f.mark} role="menuitem" onMouseDown={(e) => e.preventDefault()} onClick={() => (applyFormat(f.mark), setFormatOpen(false))}>
+                  <span className={`fmt-sample fmt-${f.label.toLowerCase()}`}>{f.label}</span>
+                  <span className="fmt-hint">{f.keys ?? `${f.mark}text${f.mark}`}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="format-wrap attach-wrap" ref={attachRef}>
+          <button
+            className={`icon-btn${attachOpen ? ' on' : ''}`}
+            onClick={() => setAttachOpen((o) => !o)}
+            aria-label="Attach"
+            title="Attach"
+            aria-haspopup="menu"
+            aria-expanded={attachOpen}
+            disabled={disabled || !!editing}
+          >
+            <Icon name="attach" />
+          </button>
+          {attachOpen && (
+            <div className="menu attach-menu" role="menu">
+              <button role="menuitem" onClick={() => (setAttachOpen(false), fileInput.current?.click())}>
+                <Icon name="image" size={20} /> Photos &amp; videos
+              </button>
+              <button role="menuitem" onClick={() => (setAttachOpen(false), docInput.current?.click())}>
+                <Icon name="file" size={20} /> Document
+              </button>
+              <button role="menuitem" onClick={() => (setAttachOpen(false), setContactOpen(true))}>
+                <Icon name="user" size={20} /> Contact
+              </button>
+              <button role="menuitem" onClick={() => (setAttachOpen(false), setPollOpen(true))}>
+                <Icon name="poll" size={20} /> Poll
+              </button>
+            </div>
+          )}
+        </div>
         {recording !== null ? (
           <button className="send-btn" onClick={() => stopRecording()} aria-label="Stop recording" title="Stop: listen to it, then send">
             <Icon name="stop" />

@@ -1695,6 +1695,65 @@ p {
 .picker-close {
   margin-left: auto;
 }
+.picker-expand {
+  margin-left: auto;
+}
+.picker-close.after-expand {
+  margin-left: 0;
+}
+/* Opened from the composer's own buttons: a bar on top to drag it bigger or smaller */
+.picker-panel.sizable {
+  position: relative;
+  max-height: calc(100dvh - 170px);
+}
+.picker-panel.sizable .picker-tabs {
+  position: relative;
+  z-index: 1;
+  padding-top: 4px;
+  margin-bottom: -6px;
+  pointer-events: none; /* the bar behind it can be dragged anywhere but on the buttons */
+}
+.picker-panel.sizable .picker-tabs > * {
+  pointer-events: auto;
+}
+.picker-grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  display: flex;
+  justify-content: center;
+  padding-top: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.picker-grip span {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--mist);
+}
+.picker-grip:hover span {
+  background: var(--ink-3);
+}
+body.resizing-picker {
+  cursor: ns-resize;
+  user-select: none;
+}
+/* Attach menu (📎): photos & videos, document, contact, poll */
+.composer .attach-menu {
+  top: auto;
+  bottom: calc(100% + 8px);
+  left: auto;
+  right: 0;
+  min-width: 200px;
+}
+.attach-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .picker-search {
   display: flex;
   align-items: center;
@@ -2040,6 +2099,17 @@ button.member:disabled {
   }
   .picker-panel {
     height: min(340px, 45vh);
+  }
+  /* Phone: the composer's picker takes most of the screen; nothing to drag */
+  .picker-panel.sizable {
+    height: calc(100dvh - 190px) !important;
+  }
+  .picker-grip,
+  .picker-expand {
+    display: none;
+  }
+  .picker-close.after-expand {
+    margin-left: auto;
   }
 }
 
@@ -4372,8 +4442,8 @@ video.deleted-media {
 .composer .format-menu {
   top: auto;
   bottom: calc(100% + 8px);
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
   min-width: 220px;
 }
 .format-menu button {

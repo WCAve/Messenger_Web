@@ -18,7 +18,7 @@ with sync_playwright() as p:
     page.wait_for_selector('.chat-row:has-text("Alice")', timeout=20000); time.sleep(2)
     page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.msg')
     for f, text in [(big, 'groot'), (turned, 'telefoon'), (vid, 'clip')]:
-        page.set_input_files('input[type=file][multiple]', f); time.sleep(0.5)
+        page.set_input_files('input.attach-photos', f); time.sleep(0.5)
         page.click('textarea'); page.keyboard.type(text); page.keyboard.press('Enter')
         page.wait_for_selector(f'.msg.out:has-text("{text}")')
     stored = None

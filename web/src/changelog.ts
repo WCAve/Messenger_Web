@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-8',
+    date: '24 November 2026',
+    items: [
+      'Emoji, GIFs and stickers each have their own button next to the message box.',
+      'The emoji/GIF/sticker window can be made bigger: drag the bar at its top, or click ⤢ to fill most of the chat (and again to shrink it). Your size is remembered.',
+      'The 📎 button opens a menu: Photos & videos, Document (sent as a file, at full quality), Contact and Poll.',
+    ],
+  },
+  {
     id: '2026-11-24-7',
     date: '24 November 2026',
     items: [

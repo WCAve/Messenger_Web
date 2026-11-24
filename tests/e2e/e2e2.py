@@ -87,7 +87,7 @@ with sync_playwright() as p:
     page.click('button[aria-label=Emoji]')
     page.wait_for_selector('.emoji-grid')
     shot(page, '08-emoji-panel')
-    page.click('.picker-tabs button:has-text("GIF")')
+    page.click('.composer button[aria-label=GIF]')
     page.wait_for_selector('.gif-cell img')
     time.sleep(0.6)
     shot(page, '09-gif-panel')

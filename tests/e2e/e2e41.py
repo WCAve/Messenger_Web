@@ -19,7 +19,7 @@ with sync_playwright() as p:
     page.wait_for_selector('.chat-row:has-text("Alice")', timeout=20000); time.sleep(2)
     page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.img-btn', timeout=15000)
     # a GIF, sent last: not part of the stepping
-    page.set_input_files('input[type=file][multiple]', f'{FIX}/fake.gif'); page.click('textarea'); page.keyboard.press('Enter'); time.sleep(2)
+    page.set_input_files('input.attach-photos', f'{FIX}/fake.gif'); page.click('textarea'); page.keyboard.press('Enter'); time.sleep(2)
     count = lambda: page.locator('.lightbox-count').inner_text()
     alt = lambda: page.locator('.lightbox img').get_attribute('alt')
     def wait_count(want):

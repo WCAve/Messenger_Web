@@ -16,7 +16,7 @@ with sync_playwright() as p:
     page.wait_for_selector(row('Familie'), timeout=20000); time.sleep(6)
     page.click(row('Familie')); page.wait_for_selector('.msg')
     def send(caption):
-        page.set_input_files('input[type=file][multiple]', m4a); page.click('textarea'); page.keyboard.type(caption); page.keyboard.press('Enter')
+        page.set_input_files('input.attach-photos', m4a); page.click('textarea'); page.keyboard.type(caption); page.keyboard.press('Enter')
         for _ in range(60):
             calls = [x for x in wa('/mock/sent') if x['path'] in ('/api/sendVoice', '/api/sendFile') and 'audio' in str(x.get('file', {}).get('mimetype'))]
             if len(calls) > send.n: send.n = len(calls); return calls[-1]

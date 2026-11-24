@@ -43,7 +43,7 @@ with sync_playwright() as p:
     time.sleep(0.5)
     page.screenshot(path=f'{S}/shots/06-sent-reacted.png')
     # failed send + attachment
-    page.set_input_files('input[type=file]', files=[{'name': 'notes.txt', 'mimeType': 'text/plain', 'buffer': b'hello there'}])
+    page.set_input_files('input.attach-photos', files=[{'name': 'notes.txt', 'mimeType': 'text/plain', 'buffer': b'hello there'}])
     page.fill('textarea', 'this will fail')
     page.keyboard.press('Enter')
     page.wait_for_selector('.failed-note', timeout=8000)

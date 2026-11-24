@@ -31,7 +31,7 @@ with sync_playwright() as p:
     page.click('.chat-row:has-text("Alice")'); page.wait_for_selector('.msg')
 
     # 1. Files that can't be sent: said straight away, and the send button stays off
-    page.set_input_files('input[type=file][multiple]', [big, huge])
+    page.set_input_files('input.attach-photos', [big, huge])
     page.wait_for_selector('.pending-file.unsendable >> nth=1')
     notes = page.locator('.shrink-note.problem').all_inner_texts(); print('problems:', notes)
     assert 'Too big to send' in notes[0] and '3 MB' in notes[0], notes
@@ -46,7 +46,7 @@ with sync_playwright() as p:
     page.fill('textarea', '')
 
     # 2. A big video: the note, upload progress, then made smaller on the server
-    page.set_input_files('input[type=file][multiple]', vid)
+    page.set_input_files('input.attach-photos', vid)
     page.wait_for_selector('.shrink-note:has-text("Big video")')
     print('note:', page.locator('.shrink-note').inner_text())
     page.click('textarea'); page.keyboard.type('Filmpje'); page.keyboard.press('Enter')
@@ -103,10 +103,10 @@ with sync_playwright() as p:
 
     # 4. WhatsApp: its own limit (36 MB, for WAHA's 50 MB requests)
     page.click('.chat-row:has-text("Jan Bakker")'); page.wait_for_selector('.msg')
-    page.set_input_files('input[type=file][multiple]', big)  # 25 MB: fine for WhatsApp
+    page.set_input_files('input.attach-photos', big)  # 25 MB: fine for WhatsApp
     time.sleep(0.5); assert not page.locator('.pending-file.unsendable').count()
     page.click('.pending-file .remove')
-    page.set_input_files('input[type=file][multiple]', wavid)
+    page.set_input_files('input.attach-photos', wavid)
     page.wait_for_selector('.shrink-note:has-text("about 36 MB")')
     page.click('textarea'); page.keyboard.type('Groot'); page.keyboard.press('Enter')
     wa = None

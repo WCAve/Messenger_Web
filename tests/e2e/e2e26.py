@@ -58,7 +58,7 @@ with sync_playwright() as p:
 
     # --- the picker is the same everywhere ---
     def open_stickers():
-        page.click('button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+        page.click('.composer button[aria-label=Stickers]')
         page.wait_for_selector('nav.sticker-packs')
     page.click(row('Jan Bakker')); page.wait_for_selector('.msg:has-text("Kijk eens")')
     open_stickers()

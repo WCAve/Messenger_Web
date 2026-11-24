@@ -71,10 +71,10 @@ with sync_playwright() as p:
     # 5. stickers in and out
     wa('/mock/incoming', {'from': 'jan', 'text': '', 'media': 'image/webp', 'extra': {'data': {'type': 'sticker'}}})
     page.click(row('Jan Bakker')); page.wait_for_selector('.msg .bubble.sticker img.sticker-img', timeout=8000)
-    page.click('button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+    page.click('.composer button[aria-label=Stickers]')
     page.click('nav.sticker-packs button[title="WhatsApp stickers not in a pack"]'); page.click('.picker-body .sticker-cell:has(img)')
     until(lambda: any(s.get('file', {}).get('mimetype') == 'image/webp' for s in sent('/api/sendSticker')), 8, 'sticker not sent')
-    page.click('button[aria-label=Emoji]'); page.click('.picker-tabs button:has-text("Stickers")')
+    page.click('.composer button[aria-label=Stickers]')
     page.set_input_files('nav.sticker-packs input[type=file]', os.path.join(MW, 'web/public/icon.svg'))
     until(lambda: any(s.get('file', {}).get('mimetype') == 'image/svg+xml' for s in sent('/api/sendSticker')), 8, 'image sticker not sent')
     print('stickers ok')

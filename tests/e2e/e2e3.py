@@ -17,8 +17,7 @@ with sync_playwright() as p:
         time.sleep(0.8)
         if scheme == 'dark':
             page.screenshot(path=f'{S}/shots3/dark-chat.png'); ctx.close(); continue
-        page.click('button[aria-label=Emoji]')
-        page.click('.picker-tabs button:has-text("Stickers")')
+        page.click('.composer button[aria-label=Stickers]')
         page.wait_for_selector('.sticker-cell img')
         time.sleep(0.6)
         page.screenshot(path=f'{S}/shots3/01-sticker-tab.png')
@@ -30,8 +29,7 @@ with sync_playwright() as p:
         time.sleep(3)
         page.screenshot(path=f'{S}/shots3/02-sticker-sent.png')
         # add pack via link
-        page.click('button[aria-label=Emoji]')
-        page.click('.picker-tabs button:has-text("Stickers")')
+        page.click('.composer button[aria-label=Stickers]')
         page.click('button[aria-label="Add a sticker pack"]')
         page.fill('.sticker-add input', 'https://signal.art/addstickers/#pack_id=00112233445566778899aabbccddeeff&pack_key=' + 'c' * 64)
         page.click('.sticker-add button:has-text("Add pack")')

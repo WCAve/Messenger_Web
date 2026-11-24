@@ -31,7 +31,7 @@ with a comment saying what it does; this is the map.
 | `Chat.tsx` | The open chat: header, message list, attachments, lightbox, composer (map in its header) |
 | `InfoPanel.tsx` | Right panel: chat info, search in chat / go to date, message info |
 | `GroupManage.tsx` | Group management parts of chat info, New group, join by link |
-| `Picker.tsx` | Emoji / sticker / GIF picker |
+| `Picker.tsx` | Emoji / sticker / GIF picker (opened by the composer's own buttons, no tabs then; resizable, size in localStorage `picker-size`) |
 | `StickerManager.tsx` | Sticker manager |
 | `Export.tsx` | The Export window: pick chats, formats, photos, period; progress; saves the ZIP |
 | `VoicePlayer.tsx` | Player for voice messages and audio: picture, play, waveform from the sound, speed |
