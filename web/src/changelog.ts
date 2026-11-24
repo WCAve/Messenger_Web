@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-5',
+    date: '24 November 2026',
+    items: ['Sticker search: the “still reading” count now keeps up by itself while the picker is open.'],
+  },
+  {
     id: '2026-11-24-4',
     date: '24 November 2026',
     items: [

@@ -231,6 +231,8 @@ async function readAll() {
   const t0 = Date.now();
   let n = 0;
   let found = 0;
+  const left = db.prepare<[], { n: number }>('SELECT count(DISTINCT coalesce(hash, id)) AS n FROM sticker_lib WHERE forgotten = 0 AND ocr_at IS NULL').get()!.n;
+  if (left > 20) ocrLog(`stickers: reading the text in ${left} stickers, in the background`);
   try {
     for (;;) {
       const row = nextUnread.get();
@@ -249,7 +251,7 @@ async function readAll() {
         }
         n++;
         if (text) found++;
-        if (n % 250 === 0) ocrLog(`stickers: read ${n} so far (${found} with text)`);
+        if (n % 100 === 0) ocrLog(`stickers: read ${n} of ${left} so far (${found} with text, ${Math.round((Date.now() - t0) / n)} ms each)`);
         await pause(Number(process.env.STICKER_OCR_PAUSE_MS ?? 50)); // room for everything else
       }
       saveText.run(text, Date.now(), row.id, row.hash ?? row.id);

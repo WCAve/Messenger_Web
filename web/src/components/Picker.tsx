@@ -193,6 +193,14 @@ function StickerGrid({
     }, 200);
     return () => ((stop = true), clearTimeout(t));
   }, [query]);
+  // While the text is still being read: the count keeps up (and new results come in)
+  const stillReading = !!found?.reading.available && found.reading.done < found.reading.total;
+  useEffect(() => {
+    const q = query.trim();
+    if (!q || !stillReading) return;
+    const t = setInterval(() => void api.searchStickers(q).then(setFound, () => {}), 5000);
+    return () => clearInterval(t);
+  }, [query, stillReading]);
   const signalFound = useMemo(() => (query.trim() && packs ? signalMatches(packs, query) : []), [query, packs]);
   useEffect(() => setShown(PAGE), [active]);
 
