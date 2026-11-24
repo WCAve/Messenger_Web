@@ -46,7 +46,7 @@ export const MODEL_CHOICES: ModelChoice[] = [
       { role: 'vision', repo: XEN, path: 'onnx/vision_model_quantized.onnx', size: 89117001, sha256: '583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299' },
       arm
         ? { role: 'text', repo: ST, path: 'onnx/model_qint8_arm64.onnx', size: 135336307, sha256: '3bed77e83926519660b5c0833cb3321cfde952331edec4f7d501c7d384b8a8a7' }
-        : { role: 'text', repo: ST, path: 'onnx/model_quint8_avx2.onnx', size: 135377779, sha256: 'fbc8fbeaa5237d96bd1bf430057c70d34de8334a463e933a5faa305f6caeed9' },
+        : { role: 'text', repo: ST, path: 'onnx/model_quint8_avx2.onnx', size: 135377779, sha256: 'fbc8fbeaa5237d96bd1bf430057c70d34de8334a463e933a5faa305f6caeed9c' },
       ...extras,
     ],
   },
