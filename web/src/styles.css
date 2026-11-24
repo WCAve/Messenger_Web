@@ -3487,6 +3487,10 @@ button.stk-pack-head {
 .stk-pack-head small {
   color: var(--ink-3);
 }
+.stk-pack.hidden-pack .stk-pack-head img,
+.stk-pack.hidden-pack .stk-pack-head strong {
+  opacity: 0.45;
+}
 .stk-pack-body {
   padding-bottom: 10px;
 }

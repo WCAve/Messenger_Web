@@ -251,14 +251,15 @@ function StickerGrid({
   useEffect(() => {
     Promise.all([api.stickers(), api.stickersTop()])
       .then(([r, t]) => {
-        packsCache = r.packs;
+        const shown = r.packs.filter((p) => !p.hidden); // hidden in the sticker manager
+        packsCache = shown;
         localCache = r.local;
         topCache = t;
-        setPacks(r.packs);
+        setPacks(shown);
         setLocal(r.local);
         setTop(t);
         const hasTop = t.favorites.length + t.used.length > 0;
-        setActive((a) => (a === 'top' && !hasTop ? (r.packs[0]?.packId ?? (r.local.packs[0] ? r.local.packs[0].id : r.local.unsorted.length ? 'unsorted' : 'add')) : a));
+        setActive((a) => (a === 'top' && !hasTop ? (shown[0]?.packId ?? (r.local.packs[0] ? r.local.packs[0].id : r.local.unsorted.length ? 'unsorted' : 'add')) : a));
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -303,8 +304,8 @@ function StickerGrid({
     setError(null);
     try {
       const r = await api.addStickerPack(link.trim());
-      packsCache = r.packs;
-      setPacks(r.packs);
+      packsCache = r.packs.filter((p) => !p.hidden);
+      setPacks(packsCache);
       const added = /pack_id=([0-9a-f]{32})/i.exec(link)?.[1]?.toLowerCase();
       if (added) setActive(added);
       setLink('');

@@ -211,17 +211,24 @@ export function StickerManager() {
 
         <section className="settings-section">
           <h3>Signal packs</h3>
-          <p className="setting-note muted">Installed in Signal. They work in every chat: as Signal stickers, or sent as WhatsApp stickers in WhatsApp chats. Remove them in Signal on your phone.</p>
+          <p className="setting-note muted">Installed in Signal. They work in every chat: as Signal stickers, or sent as WhatsApp stickers in WhatsApp chats. A pack you hide here stays in Signal but no longer shows in the sticker picker or its search.</p>
           {signal?.map((p) => (
-            <div key={p.packId} className="stk-pack">
+            <div key={p.packId} className={`stk-pack${p.hidden ? ' hidden-pack' : ''}`}>
               <div className="stk-pack-head">
                 <img src={p.cover.url} alt="" />
                 <span>
                   <strong>{p.title}</strong>
                   <small>
-                    {[p.author, `${p.stickers.length} stickers`].filter(Boolean).join(' · ')}
+                    {[p.author, `${p.stickers.length} stickers`, p.hidden ? 'hidden' : ''].filter(Boolean).join(' · ')}
                   </small>
                 </span>
+                <button
+                  className="btn small"
+                  disabled={busy}
+                  onClick={() => void run(async () => setSignal((await api.hideStickerPack(p.packId, !p.hidden)).packs), p.hidden ? `${p.title} shown again` : `${p.title} hidden`)}
+                >
+                  {p.hidden ? 'Show' : 'Hide'}
+                </button>
               </div>
             </div>
           ))}

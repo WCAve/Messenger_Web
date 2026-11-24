@@ -162,6 +162,7 @@ export interface StickerPack {
   title: string;
   author: string;
   installed: boolean;
+  hidden?: boolean; // hidden here (sticker manager); still installed in Signal
   cover: StickerItem;
   stickers: StickerItem[];
 }

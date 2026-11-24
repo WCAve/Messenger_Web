@@ -111,11 +111,30 @@ export interface TopSticker {
 }
 
 /** Favourites, and the stickers you send most (recent use counts a bit more), for the ⭐ tab. */
+// ---------- Signal packs hidden here (they stay installed in Signal: the app can't remove them)
+
+/** kv `hidden_sticker_packs`: Signal pack ids not shown in the picker or its search. */
+export function hiddenPacks(): Set<string> {
+  try {
+    return new Set(JSON.parse(kvGet('hidden_sticker_packs') ?? '[]') as string[]);
+  } catch {
+    return new Set();
+  }
+}
+export function setPackHidden(packId: string, hidden: boolean) {
+  const set = hiddenPacks();
+  if (hidden) set.add(packId.toLowerCase());
+  else set.delete(packId.toLowerCase());
+  kvSet('hidden_sticker_packs', JSON.stringify([...set]));
+}
+
 export function topStickers(): { favorites: TopSticker[]; used: TopSticker[] } {
   const rows = db.prepare<[], { key: string; uses: number; last_at: number | null; favorite: number }>('SELECT key, uses, last_at, favorite FROM sticker_use').all();
   const lib = new Map(listLibrary().map((s) => [s.key, s]));
+  const hidden = hiddenPacks();
   const resolve = (key: string): Pick<TopSticker, 'url' | 'pick'> | null => {
     const sig = /^sig:([0-9a-f]{32}):(\d+)$/i.exec(key);
+    if (sig && hidden.has(sig[1].toLowerCase())) return null; // its pack is hidden
     if (sig) return { url: stickerUrl(sig[1], Number(sig[2])), pick: { packId: sig[1], stickerId: Number(sig[2]) } };
     const s = lib.get(key);
     return s ? { url: s.url, pick: { localId: s.id } } : null;

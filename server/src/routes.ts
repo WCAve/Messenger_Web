@@ -28,7 +28,7 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
-import { libKey, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, signalKey, topStickers } from './stickerlib.js';
+import { hiddenPacks, libKey, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, setPackHidden, signalKey, topStickers } from './stickerlib.js';
 import { cancelDownload, choiceSize, downloadState, installedModel, modelChoices, removeModel, startDownload } from './models.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, packsMatching, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
@@ -475,6 +475,12 @@ function markRead(c: ConversationRow): (() => Promise<void>) | null {
   };
 }
 
+/** Signal packs with `hidden` (hidden here in the sticker manager). */
+function markHidden<T extends { packId: string }>(packs: T[]): (T & { hidden: boolean })[] {
+  const hidden = hiddenPacks();
+  return packs.map((p) => ({ ...p, hidden: hidden.has(p.packId.toLowerCase()) }));
+}
+
 export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string) => void) {
   const r = new Router({
     bodyLimit: Math.ceil(config.maxUploadMb * 1.4 * 1024 * 1024) + 1024 * 1024, // base64 overhead
@@ -718,7 +724,16 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.get('/api/stickers', async () => {
     const account = self.number;
     const packs = account && getState().status === 'connected' ? await listPacks(account, (m) => log('warn', m)).catch(() => []) : [];
-    return { packs, local: localStickers() };
+    return { packs: markHidden(packs), local: localStickers() };
+  });
+  // Hide a Signal pack here (it stays installed in Signal): not in the picker, its search or ⭐
+  r.post('/api/stickers/packs/:packId/hidden', async (ctx) => {
+    const id = String(ctx.params.packId);
+    if (!/^[0-9a-f]{32}$/i.test(id)) throw new HttpError(400, 'Unknown pack');
+    setPackHidden(id, !!ctx.body?.hidden);
+    const account = self.number;
+    const packs = account && getState().status === 'connected' ? await listPacks(account, (m) => log('warn', m)).catch(() => []) : [];
+    return { packs: markHidden(packs) };
   });
   // The picker's search: text read in stickers, and your packs' names (Signal packs: in the browser)
   r.get('/api/stickers/search', async (ctx) => {
@@ -790,7 +805,7 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     await refreshPacks(account, true);
     const m = await getManifest(account, link.packId).catch(() => null);
     if (!m) throw new HttpError(502, 'The pack was added, but its stickers could not be downloaded from Signal yet. Try again in a minute.');
-    return { packs: await listPacks(account, (msg) => log('warn', msg)) };
+    return { packs: markHidden(await listPacks(account, (msg) => log('warn', msg))) };
   });
 
   r.get('/api/stickers/:packId/:stickerId', async (ctx) => {

@@ -81,6 +81,7 @@ Small settings, caches and one-off flags. `<x>` is a variable part.
 | `glabels:<convId>`, `glabels_bk:<convId>`, `glabels_ev:<convId>` | member labels: shown / from the backup / from live changes |
 | `sgedit:`, `sglink:`, `sglink_want:<convId>` | Signal group settings the API doesn't report correctly |
 | `local_sticker_packs` | packs from the sticker manager (the sticker library itself is the `sticker_lib` table; `wa_stickers` was its old 500-sticker list, read once by `migrateStickerLib`, flag `sticker_lib_v1`) |
+| `hidden_sticker_packs` | Signal pack ids hidden in the sticker manager (still installed in Signal): left out of the picker, its search and ⭐ (`/api/stickers` marks them `hidden`) |
 | `*_v1`, `*_v2` (e.g. `wa_dupes_v1`, `wa_hd_pairs_v2`, `wa_mention_lids_v1`) | one-off clean-ups done; bump the version to run one again |
 
 ## WAHA engines (WEBJS and GOWS)

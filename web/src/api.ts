@@ -119,6 +119,7 @@ export const api = {
   forgetStickers: (ids: string[]) => call<LocalStickers>('POST', '/api/stickers/forget', { ids }),
   addStickerImages: (images: string[], packId?: string) => call<LocalStickers>('POST', '/api/stickers/images', { images, packId }),
   sendLocalSticker: (id: number, stickerId: string, quoteId?: number) => call<Message>('POST', `/api/conversations/${id}/local-sticker`, { id: stickerId, quoteId }),
+  hideStickerPack: (packId: string, hidden: boolean) => call<{ packs: StickerPack[] }>('POST', `/api/stickers/packs/${packId}/hidden`, { hidden }),
   addStickerPack: (link: string) => call<{ packs: StickerPack[] }>('POST', '/api/stickers/packs', { link }),
   send: (
     id: number,

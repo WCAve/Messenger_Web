@@ -12,6 +12,11 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-9',
+    date: '24 November 2026',
+    items: ['Signal sticker packs can be hidden in the sticker manager (Hide / Show). They stay installed in Signal, but no longer show in the sticker picker, its search or your most used.'],
+  },
+  {
     id: '2026-11-24-8',
     date: '24 November 2026',
     items: [
