@@ -100,6 +100,16 @@ The app works with either; it asks WAHA which one runs (`state.engine`, from the
   archive flags, so nothing of that is copied from the phone.
 - Switching engines needs linking again (a QR code); the stored messages stay (same WhatsApp ids).
 
+## Sticker search (OCR)
+
+The text in library stickers is read once, in the background (newest first, ~0.5 s each on a 10th-gen
+i5, two threads, a short pause between stickers), into `sticker_lib.ocr_text`; copies share it (hash).
+`ocr.ts` runs PP-OCRv5 through `onnxruntime-node`, which, with the models, is only in the Docker image
+(fetched in the Dockerfile's `ocr` stage, checksums from RapidOCR's default_models.yaml): outside Docker
+there's no OCR and search uses names/emoji only. Animated WebP: ffmpeg 7.1 can't read it, `webpmux`
+takes the first frame. The image test (`tests/docker-smoke.sh`) reads generated stickers with the real
+models; e2e tests use `STICKER_OCR=fake`. Signal stickers are searched in the browser (emoji, pack name).
+
 ## Things that bit us (keep in mind)
 
 - **WEBJS is WhatsApp Web in a browser.** Heavy calls (getChats, looking up many messages) make it

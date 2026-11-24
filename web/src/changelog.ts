@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-4',
+    date: '24 November 2026',
+    items: [
+      'Sticker search: a search box in the sticker picker. It finds stickers by the text in them (the app reads it, in the background: the first time that takes about 45 minutes for all your stickers), your packs by name, and Signal stickers by emoji or pack (“laugh” finds 😂 stickers). A small typo is fine.',
+      'Big sticker collections show 300 at a time, with “Show more”, in the picker and the sticker manager.',
+    ],
+  },
+  {
     id: '2026-11-24-3',
     date: '24 November 2026',
     items: [

@@ -28,8 +28,8 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
-import { libKey, recordStickerUse, setFavorite, signalKey, topStickers } from './stickerlib.js';
-import { addImages, createPack, deletePack, forgetStickers, localStickers, stickerMime, updatePack } from './stickerpacks.js';
+import { libKey, readingProgress, recordStickerUse, searchLibrary, setFavorite, signalKey, topStickers } from './stickerlib.js';
+import { addImages, createPack, deletePack, forgetStickers, localStickers, packsMatching, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
   createPollWa,
@@ -718,6 +718,19 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
     const account = self.number;
     const packs = account && getState().status === 'connected' ? await listPacks(account, (m) => log('warn', m)).catch(() => []) : [];
     return { packs, local: localStickers() };
+  });
+  // The picker's search: text read in stickers, and your packs' names (Signal packs: in the browser)
+  r.get('/api/stickers/search', async (ctx) => {
+    const q = String(ctx.query.get('q') ?? '').slice(0, 100);
+    const seen = new Set<string>();
+    const results: { key: string; url: string; pick: { localId: string }; text?: string }[] = [];
+    for (const s of [...packsMatching(q), ...searchLibrary(q)]) {
+      const key = s.key ?? s.id;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push({ key, url: s.url, pick: { localId: s.id }, ...('text' in s ? { text: s.text } : {}) });
+    }
+    return { results, reading: await readingProgress() };
   });
   // Favourites and most used (the picker's ⭐ tab)
   r.get('/api/stickers/top', () => topStickers());

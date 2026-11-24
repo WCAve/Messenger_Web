@@ -180,6 +180,11 @@ export interface TopSticker {
   uses: number;
   favorite: boolean;
 }
+/** The picker's sticker search: text read in stickers, your packs' names. */
+export interface StickerSearch {
+  results: { key: string; url: string; pick: { localId: string }; text?: string }[];
+  reading: { available: boolean; done: number; total: number };
+}
 export interface TopStickers {
   favorites: TopSticker[];
   used: TopSticker[];
