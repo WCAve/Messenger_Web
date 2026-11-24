@@ -186,6 +186,8 @@ async function fetchFile(f: ModelFile, dest: string, signal: AbortSignal, progre
     await new Promise<void>((r) => out.end(() => r()));
   }
   if (got !== f.size) throw new Error(`${f.path}: incomplete (${got} of ${f.size} bytes)`);
-  if (f.sha256 && sha256.digest('hex') !== f.sha256) throw new Error(`${f.path}: checksum doesn't match`);
-  if (f.gitSha1 && sha1.digest('hex') !== f.gitSha1) throw new Error(`${f.path}: checksum doesn't match`);
+  const got256 = sha256.digest('hex');
+  const got1 = sha1.digest('hex');
+  if (f.sha256 && got256 !== f.sha256) throw new Error(`${f.path}: checksum doesn't match (got ${got256}, Hugging Face says ${res.headers.get('x-linked-etag') ?? '?'})`);
+  if (f.gitSha1 && got1 !== f.gitSha1) throw new Error(`${f.path}: checksum doesn't match (got ${got1})`);
 }
