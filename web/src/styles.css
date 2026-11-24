@@ -4554,3 +4554,145 @@ video.deleted-media {
   gap: 8px;
   margin-top: 8px;
 }
+
+/* ---- Sticker ⋯ menu (search words, favourite, remove), search-word editor, "Undo" after removing */
+.picker-panel {
+  position: relative;
+}
+.sticker-more {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--panel, var(--paper));
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 0;
+  opacity: 0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+}
+.sticker-cell-wrap:hover .sticker-more,
+.sticker-more:focus-visible {
+  opacity: 0.9;
+}
+@media (hover: none) {
+  .sticker-more {
+    opacity: 0.7;
+  }
+}
+.sticker-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.menu.sticker-menu {
+  position: fixed;
+  right: auto;
+  z-index: 41;
+  min-width: 210px;
+}
+.menu .menu-note {
+  display: block;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--ink-3);
+  max-width: 220px;
+}
+.menu button.danger {
+  color: var(--danger, #d33);
+}
+.sticker-tags-dialog {
+  position: absolute;
+  z-index: 30;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  background: var(--paper);
+  border: 1px solid var(--mist);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 12px 36px rgba(27, 31, 59, 0.25);
+}
+.sticker-tags-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.sticker-tags-head img {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+}
+.sticker-tags-head span {
+  display: grid;
+  gap: 2px;
+}
+.sticker-tags-head small {
+  color: var(--ink-3);
+  font-size: 12px;
+}
+.sticker-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 4px;
+}
+.sticker-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: var(--ultra-soft);
+  color: var(--ultra);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sticker-tag.learned {
+  background: var(--haze);
+  color: var(--ink-2);
+  font-weight: 400;
+}
+.sticker-tag button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.sticker-tags-dialog .picker-search {
+  margin: 8px 0;
+}
+.sticker-tags-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.sticker-undo {
+  position: absolute;
+  z-index: 25;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: 0 6px 18px rgba(27, 31, 59, 0.25);
+}
+.sticker-undo .link-btn {
+  color: var(--paper);
+  font-weight: 700;
+}

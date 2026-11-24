@@ -284,6 +284,22 @@ const MIGRATIONS: string[] = [
   ALTER TABLE sticker_lib ADD COLUMN clip BLOB;
   ALTER TABLE sticker_lib ADD COLUMN clip_model TEXT;
   `,
+  `
+  -- Search words on stickers (stickerlib.ts): ones you typed (manual) and ones learned from searches
+  -- you sent a sticker from; key as in sticker_use
+  CREATE TABLE sticker_tags (
+    key TEXT NOT NULL,
+    tag TEXT NOT NULL,                 -- normalised (normText)
+    learned INTEGER NOT NULL DEFAULT 0,
+    uses INTEGER NOT NULL DEFAULT 1,   -- learned: times sent from that search
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (key, tag)
+  );
+  CREATE INDEX sticker_tags_tag ON sticker_tags (tag);
+  -- What a sticker looks like, roughly (look-alike duplicates, for sorting later): 16 hex digits of
+  -- difference hash + 6 of average colour; '' when the file can't be read
+  ALTER TABLE sticker_lib ADD COLUMN look TEXT;
+  `,
 ];
 
 function migrate() {

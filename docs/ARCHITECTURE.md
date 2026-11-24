@@ -107,6 +107,21 @@ The app works with either; it asks WAHA which one runs (`state.engine`, from the
   archive flags, so nothing of that is copied from the phone.
 - Switching engines needs linking again (a QR code); the stored messages stay (same WhatsApp ids).
 
+## Sticker search words and look-alikes
+
+`sticker_tags` (key as in `sticker_use`: `loc:<hash>` or `sig:<pack>:<id>`) holds search words: typed in
+the picker's ⋯ → "Search words…" (`learned = 0`), or learned: sending a sticker you found by searching
+calls `/api/stickers/learn` with the search (`learned = 1`, `uses` counts). `/api/stickers/search` puts
+tag matches first (yours weigh 3×, learned 1–2× by uses), then pack names and text. Signal pack stickers
+can have words too (hidden packs are skipped). The picker's "Remove from stickers" is the sticker
+manager's forget; "Undo" is `/api/stickers/restore`.
+
+Look-alikes: the background worker also takes each sticker's fingerprint (`sticker_lib.look`: a 64-bit
+difference hash of 9×9 pixels over white + average colour, via ffmpeg; '' when unreadable) once text and pictures are done; it runs
+even without OCR or a picture model. `lookAlikeGroups()` joins stickers within 5 bits and a small colour
+difference (flat pictures left out); Settings → Stickers shows the count. Nothing is merged or removed:
+the groups are for the sorting game later.
+
 ## Sticker search (OCR)
 
 The text in library stickers is read once, in the background (newest first, ~0.5 s each on a 10th-gen

@@ -187,9 +187,15 @@ export interface StickerReading {
   done: number;
   total: number;
   pictures: { model: string; done: number } | null; // picture search, when a model is downloaded
+  looks?: { done: number; groups: number; stickers: number }; // fingerprints for look-alikes (sorting later)
+}
+export type StickerPick = { localId: string } | { packId: string; stickerId: number };
+export interface StickerTag {
+  tag: string;
+  learned: boolean; // from a search you sent it after
 }
 export interface StickerSearch {
-  results: { key: string; url: string; pick: { localId: string }; text?: string }[];
+  results: { key: string; url: string; pick: StickerPick; text?: string; tags?: string[] }[];
   pictures: { key: string; url: string; pick: { localId: string }; score: number }[];
   reading: StickerReading;
 }

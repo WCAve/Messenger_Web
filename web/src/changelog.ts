@@ -12,6 +12,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-10',
+    date: '24 November 2026',
+    items: [
+      'Stickers can have search words: hover a sticker in the picker and click ⋯ (or right-click it) → “Search words…”. Searching for one of them finds that sticker first. Works for Signal pack stickers too.',
+      'Sticker search learns: when you send a sticker you found by searching, those words stick to it, so it comes up first next time. You can see and remove learned words in the same place.',
+      'Remove a sticker straight from the picker (⋯ → Remove from stickers), with “Undo” for a few seconds.',
+      'Look-alike stickers (the same sticker saved as different files) are now spotted in the background; Settings → Stickers shows how many. Nothing is removed: they’re for sorting out later.',
+    ],
+  },
+  {
     id: '2026-11-24-9',
     date: '24 November 2026',
     items: ['Signal sticker packs can be hidden in the sticker manager (Hide / Show). They stay installed in Signal, but no longer show in the sticker picker, its search or your most used.'],

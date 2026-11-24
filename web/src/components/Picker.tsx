@@ -10,7 +10,7 @@ import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from
 import { Emojified } from '../emoji/render';
 import { frequentEmoji, loadUsage } from '../emoji/usage';
 import { setState } from '../store';
-import type { LocalStickers, StickerItem, StickerPack, StickerSearch, TopSticker, TopStickers } from '../types';
+import type { LocalStickers, StickerItem, StickerPack, StickerPick, StickerSearch, StickerTag, TopSticker, TopStickers } from '../types';
 import { Icon } from './ui';
 
 export interface PickedGif {
@@ -207,10 +207,27 @@ function signalMatches(packs: StickerPack[], q: string) {
   return out;
 }
 
-/** A sticker in a grid, with a star to make it a favourite (shown on hover, or always when it is one). */
-function StickerCell({ url, title, fav, onPick, onFav }: { url: string; title: string; fav: boolean; onPick: () => void; onFav?: () => void }) {
+/** What the ⋯ menu / right click is about: the sticker's key, and its file when it's one of yours. */
+interface CellRef {
+  key: string;
+  url: string;
+  localId?: string;
+}
+
+/** A sticker in a grid, with a star to make it a favourite (shown on hover, or always when it is one), and ⋯ for more. */
+function StickerCell({ url, title, fav, onPick, onFav, onMenu }: { url: string; title: string; fav: boolean; onPick: () => void; onFav?: () => void; onMenu?: (x: number, y: number) => void }) {
   return (
-    <div className="sticker-cell-wrap">
+    <div
+      className="sticker-cell-wrap"
+      onContextMenu={
+        onMenu
+          ? (e) => {
+              e.preventDefault();
+              onMenu(e.clientX, e.clientY);
+            }
+          : undefined
+      }
+    >
       <button className="sticker-cell" onClick={onPick} title={title}>
         <img src={url} alt={title} loading="lazy" />
       </button>
@@ -219,6 +236,103 @@ function StickerCell({ url, title, fav, onPick, onFav }: { url: string; title: s
           {fav ? '★' : '☆'}
         </button>
       )}
+      {onMenu && (
+        <button
+          className="sticker-more"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onMenu(r.left, r.bottom);
+          }}
+          aria-label="More"
+          title="Tags, favourite, remove"
+        >
+          ⋯
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The search words on a sticker: yours, and learned ones (lighter) you can take off. */
+function TagEditor({ cell, onClose, onSaved }: { cell: CellRef; onClose: () => void; onSaved: () => void }) {
+  const [tags, setTags] = useState<StickerTag[] | null>(null);
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.stickerTags(cell.key).then((r) => setTags(r.tags), (e) => setError(e.message));
+  }, [cell.key]);
+  const add = () => {
+    const words = text
+      .split(',')
+      .map((w) => w.trim().toLowerCase())
+      .filter(Boolean);
+    if (!words.length || !tags) return;
+    setTags([...tags.filter((t) => !words.includes(t.tag)), ...words.map((tag) => ({ tag, learned: false }))]);
+    setText('');
+  };
+  const save = () => {
+    if (!tags) return;
+    const all = text.trim() ? [...tags, ...text.split(',').map((w) => ({ tag: w.trim().toLowerCase(), learned: false })).filter((t) => t.tag)] : tags;
+    setBusy(true);
+    api.setStickerTags(cell.key, all).then(
+      () => (onSaved(), onClose()),
+      (e) => (setError(e.message), setBusy(false)),
+    );
+  };
+  return (
+    <div className="sticker-tags-dialog" role="dialog" aria-label="Search words for this sticker">
+      <div className="sticker-tags-head">
+        <img src={cell.url} alt="" />
+        <span>
+          <strong>Search words</strong>
+          <small>Searching for one of these finds this sticker first. Lighter ones were learned from your searches.</small>
+        </span>
+      </div>
+      {!tags && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
+      {tags && (
+        <div className="sticker-tags">
+          {tags.map((t) => (
+            <span key={t.tag} className={`sticker-tag${t.learned ? ' learned' : ''}`} title={t.learned ? 'Learned from a search' : undefined}>
+              {t.tag}
+              <button onClick={() => setTags(tags.filter((x) => x.tag !== t.tag))} aria-label={`Remove ${t.tag}`}>
+                ×
+              </button>
+            </span>
+          ))}
+          {!tags.length && <small className="muted">None yet.</small>}
+        </div>
+      )}
+      <form
+        className="picker-search"
+        onSubmit={(e) => {
+          e.preventDefault();
+          add();
+        }}
+      >
+        <input
+          ref={(el) => {
+            if (el && tags && !el.dataset.focused) {
+              el.dataset.focused = '1';
+              el.focus();
+            }
+          }}
+          disabled={!tags}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Add a word (Enter; several with commas)"
+          aria-label="Add a search word"
+        />
+      </form>
+      {error && <p className="form-error">{error}</p>}
+      <div className="sticker-tags-actions">
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={save} disabled={busy || !tags}>
+          Save
+        </button>
+      </div>
     </div>
   );
 }
@@ -247,6 +361,11 @@ function StickerGrid({
   const [link, setLink] = useState('');
   const [adding, setAdding] = useState(false);
   const imageInput = useRef<HTMLInputElement>(null);
+  const [menu, setMenu] = useState<(CellRef & { x: number; y: number }) | null>(null);
+  const [tagsFor, setTagsFor] = useState<CellRef | null>(null);
+  const [removed, setRemoved] = useState<{ cell: CellRef; at: number } | null>(null); // for "Undo"
+  const [gone, setGone] = useState<Set<string>>(new Set()); // removed while the picker is open
+  const [nonce, setNonce] = useState(0); // search again (tags changed, undo)
 
   useEffect(() => {
     Promise.all([api.stickers(), api.stickersTop()])
@@ -276,7 +395,7 @@ function StickerGrid({
         .catch((e) => !stop && setError(e.message));
     }, 200);
     return () => ((stop = true), clearTimeout(t));
-  }, [query]);
+  }, [query, nonce]);
   // While the text is still being read: the count keeps up (and new results come in)
   const stillReading = (!!found?.reading.available && found.reading.done < found.reading.total) || (!!found?.reading.pictures && found.reading.pictures.done < found.reading.total);
   useEffect(() => {
@@ -320,7 +439,86 @@ function StickerGrid({
   const pickSignal = (packId: string, s: StickerItem) => ((topCache = null), onPick({ packId, stickerId: s.id }));
   const pickLocal = (s: { id: string; url: string }) => ((topCache = null), onPick({ localId: s.id }));
   const pickTop = (t: TopSticker) => ((topCache = null), onPick(t.pick));
+  // Sent from a search: the search words stick to the sticker (learned), so it's found first next time
+  const pickFound = (key: string, pick: StickerPick) => {
+    topCache = null;
+    if (query.trim()) api.learnSticker(key, query.trim()).catch(() => {});
+    onPick(pick);
+  };
+  const menuFor = (cell: CellRef) => (x: number, y: number) => setMenu({ ...cell, x, y });
 
+  // Escape closes the menu or the tag editor first, not the whole picker
+  useEffect(() => {
+    if (!menu && !tagsFor) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (menu) setMenu(null);
+      else setTagsFor(null);
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [menu, tagsFor]);
+
+  const refreshAll = () =>
+    Promise.all([api.stickers(), api.stickersTop()]).then(([r, t]) => {
+      localCache = r.local;
+      topCache = t;
+      setLocal(r.local);
+      setTop(t);
+      setNonce((n) => n + 1);
+    });
+  async function removeSticker(cell: CellRef) {
+    if (!cell.localId) return;
+    try {
+      const r = await api.forgetStickers([cell.localId]);
+      localCache = r;
+      setLocal(r);
+      setGone((g) => new Set(g).add(cell.key));
+      setRemoved({ cell, at: Date.now() });
+      api.stickersTop().then((t) => ((topCache = t), setTop(t)), () => {});
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  async function undoRemove() {
+    if (!removed?.cell.localId) return;
+    const cell = removed.cell;
+    setRemoved(null);
+    try {
+      await api.restoreStickers([cell.localId!]);
+      setGone((g) => {
+        const n = new Set(g);
+        n.delete(cell.key);
+        return n;
+      });
+      await refreshAll();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  useEffect(() => {
+    if (!removed) return;
+    const t = setTimeout(() => setRemoved(null), 8000);
+    return () => clearTimeout(t);
+  }, [removed]);
+
+  // Search results: ones with matching tags first, then Signal stickers by emoji/pack, then the rest
+  const visible = (found?.results ?? []).filter((r) => !gone.has(r.key));
+  const tagged = visible.filter((r) => r.tags?.length);
+  const taggedKeys = new Set(tagged.map((r) => r.key));
+  const untagged = visible.filter((r) => !r.tags?.length);
+  const foundCell = (r: StickerSearch['results'][number]) => (
+    <StickerCell
+      key={r.key}
+      url={r.url}
+      title={r.tags?.length ? r.tags.join(', ') : (r.text ?? 'Sticker')}
+      fav={favs.has(r.key)}
+      onPick={() => pickFound(r.key, r.pick)}
+      onFav={toggleFav(r.key)}
+      onMenu={menuFor({ key: r.key, url: r.url, ...('localId' in r.pick ? { localId: r.pick.localId } : {}) })}
+    />
+  );
   const signalPack = packs?.find((p) => p.packId === active);
   const localPack = local?.packs.find((p) => p.id === active);
   const loaded = !!packs && !!local;
@@ -389,26 +587,45 @@ function StickerGrid({
                 Picture search is still looking at your stickers: {found.reading.pictures.done.toLocaleString()} of {found.reading.total.toLocaleString()}.
               </p>
             )}
-            {found && !found.results.length && !found.pictures.length && !signalFound.length && <p className="muted picker-empty">No stickers found</p>}
-            {(found?.results.length || signalFound.length) > 0 && found?.pictures.length ? <h4>Text and names</h4> : null}
-            {(found?.results.length || signalFound.length) > 0 && (
+            {found && !visible.length && !found.pictures.filter((r) => !gone.has(r.key)).length && !signalFound.length && <p className="muted picker-empty">No stickers found</p>}
+            {(visible.length || signalFound.length) > 0 && found?.pictures.length ? <h4>Text and names</h4> : null}
+            {(visible.length || signalFound.length) > 0 && (
               <div className="sticker-grid">
-                {signalFound.map(({ pack, s }) => {
+                {tagged.map(foundCell)}
+                {signalFound.filter(({ pack, s }) => !taggedKeys.has(`sig:${pack.packId}:${s.id}`)).map(({ pack, s }) => {
                   const key = `sig:${pack.packId}:${s.id}`;
-                  return <StickerCell key={key} url={s.url} title={`${s.emoji ?? ''} ${pack.title}`.trim()} fav={favs.has(key)} onPick={() => pickSignal(pack.packId, s)} onFav={toggleFav(key)} />;
+                  return (
+                    <StickerCell
+                      key={key}
+                      url={s.url}
+                      title={`${s.emoji ?? ''} ${pack.title}`.trim()}
+                      fav={favs.has(key)}
+                      onPick={() => pickFound(key, { packId: pack.packId, stickerId: s.id })}
+                      onFav={toggleFav(key)}
+                      onMenu={menuFor({ key, url: s.url })}
+                    />
+                  );
                 })}
-                {found?.results.map((r) => (
-                  <StickerCell key={r.key} url={r.url} title={r.text ?? 'Sticker'} fav={favs.has(r.key)} onPick={() => pickLocal({ id: r.pick.localId, url: r.url })} onFav={toggleFav(r.key)} />
-                ))}
+                {untagged.map(foundCell)}
               </div>
             )}
             {!!found?.pictures.length && (
               <>
                 <h4>Looks like “{query.trim()}”</h4>
                 <div className="sticker-grid">
-                  {found.pictures.map((r) => (
-                    <StickerCell key={r.key} url={r.url} title="Sticker" fav={favs.has(r.key)} onPick={() => pickLocal({ id: r.pick.localId, url: r.url })} onFav={toggleFav(r.key)} />
-                  ))}
+                  {found.pictures
+                    .filter((r) => !gone.has(r.key))
+                    .map((r) => (
+                      <StickerCell
+                        key={r.key}
+                        url={r.url}
+                        title="Sticker"
+                        fav={favs.has(r.key)}
+                        onPick={() => pickFound(r.key, r.pick)}
+                        onFav={toggleFav(r.key)}
+                        onMenu={menuFor({ key: r.key, url: r.url, localId: r.pick.localId })}
+                      />
+                    ))}
                 </div>
               </>
             )}
@@ -429,7 +646,7 @@ function StickerGrid({
                 <h4>Favourites</h4>
                 <div className="sticker-grid">
                   {top!.favorites.map((t) => (
-                    <StickerCell key={t.key} url={t.url} title="Sticker" fav onPick={() => pickTop(t)} onFav={toggleFav(t.key)} />
+                    <StickerCell key={t.key} url={t.url} title="Sticker" fav onPick={() => pickTop(t)} onFav={toggleFav(t.key)} onMenu={menuFor({ key: t.key, url: t.url, ...('localId' in t.pick ? { localId: t.pick.localId } : {}) })} />
                   ))}
                 </div>
               </>
@@ -439,7 +656,15 @@ function StickerGrid({
                 <h4>Most used</h4>
                 <div className="sticker-grid">
                   {top!.used.map((t) => (
-                    <StickerCell key={t.key} url={t.url} title={`Sent ${t.uses}×`} fav={false} onPick={() => pickTop(t)} onFav={toggleFav(t.key)} />
+                    <StickerCell
+                      key={t.key}
+                      url={t.url}
+                      title={`Sent ${t.uses}×`}
+                      fav={false}
+                      onPick={() => pickTop(t)}
+                      onFav={toggleFav(t.key)}
+                      onMenu={menuFor({ key: t.key, url: t.url, ...('localId' in t.pick ? { localId: t.pick.localId } : {}) })}
+                    />
                   ))}
                 </div>
               </>
@@ -455,7 +680,7 @@ function StickerGrid({
             <div className="sticker-grid">
               {signalPack.stickers.map((s) => {
                 const key = `sig:${signalPack.packId}:${s.id}`;
-                return <StickerCell key={s.id} url={s.url} title={s.emoji ?? 'Sticker'} fav={favs.has(key)} onPick={() => pickSignal(signalPack.packId, s)} onFav={toggleFav(key)} />;
+                return <StickerCell key={s.id} url={s.url} title={s.emoji ?? 'Sticker'} fav={favs.has(key)} onPick={() => pickSignal(signalPack.packId, s)} onFav={toggleFav(key)} onMenu={menuFor({ key, url: s.url })} />;
               })}
             </div>
           </>
@@ -468,7 +693,15 @@ function StickerGrid({
             </h4>
             <div className="sticker-grid">
               {(localPack ? localPack.stickers : local.unsorted).slice(0, shown).map((s) => (
-                <StickerCell key={s.id} url={s.url} title="Sticker" fav={!!s.key && favs.has(s.key)} onPick={() => pickLocal(s)} onFav={toggleFav(s.key)} />
+                <StickerCell
+                  key={s.id}
+                  url={s.url}
+                  title="Sticker"
+                  fav={!!s.key && favs.has(s.key)}
+                  onPick={() => pickLocal(s)}
+                  onFav={toggleFav(s.key)}
+                  onMenu={s.key ? menuFor({ key: s.key, url: s.url, localId: s.id }) : undefined}
+                />
               ))}
             </div>
             {(localPack ? localPack.stickers : local.unsorted).length > shown && (
@@ -507,6 +740,35 @@ function StickerGrid({
         </>
         )}
       </div>
+      {menu && (
+        <>
+          <div className="sticker-menu-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => (e.preventDefault(), setMenu(null))} />
+          <div className="menu sticker-menu" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), top: Math.min(menu.y, window.innerHeight - 160) }}>
+            <button role="menuitem" onClick={() => (setTagsFor(menu), setMenu(null))}>
+              Search words…
+            </button>
+            <button role="menuitem" onClick={() => (toggleFav(menu.key)?.(), setMenu(null))}>
+              {favs.has(menu.key) ? 'Remove from favourites' : 'Add to favourites'}
+            </button>
+            {menu.localId ? (
+              <button role="menuitem" className="danger" onClick={() => (void removeSticker(menu), setMenu(null))}>
+                Remove from stickers
+              </button>
+            ) : (
+              <span className="menu-note">From a Signal pack: hide the whole pack in the sticker manager</span>
+            )}
+          </div>
+        </>
+      )}
+      {tagsFor && <TagEditor cell={tagsFor} onClose={() => setTagsFor(null)} onSaved={() => setNonce((n) => n + 1)} />}
+      {removed && (
+        <div className="sticker-undo" role="status">
+          <span>Sticker removed</span>
+          <button className="link-btn" onClick={() => void undoRemove()}>
+            Undo
+          </button>
+        </div>
+      )}
     </>
   );
 }

@@ -28,7 +28,7 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
-import { hiddenPacks, libKey, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, setPackHidden, signalKey, topStickers } from './stickerlib.js';
+import { hiddenPacks, learnTag, libKey, restoreToLibrary, searchTags, setStickerTags, stickerTags, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, setPackHidden, signalKey, topStickers } from './stickerlib.js';
 import { cancelDownload, choiceSize, downloadState, installedModel, modelChoices, removeModel, startDownload } from './models.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, packsMatching, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
@@ -739,7 +739,13 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.get('/api/stickers/search', async (ctx) => {
     const q = String(ctx.query.get('q') ?? '').slice(0, 100);
     const seen = new Set<string>();
-    const results: { key: string; url: string; pick: { localId: string }; text?: string }[] = [];
+    const results: { key: string; url: string; pick: { localId: string } | { packId: string; stickerId: number }; text?: string; tags?: string[] }[] = [];
+    // Tags first (yours, then learned from earlier searches), then pack names, then text in the sticker
+    for (const t of searchTags(q)) {
+      if (seen.has(t.key)) continue;
+      seen.add(t.key);
+      results.push({ key: t.key, url: t.url, pick: t.pick, tags: t.tags });
+    }
     for (const s of [...packsMatching(q), ...searchLibrary(q)]) {
       const key = s.key ?? s.id;
       if (seen.has(key)) continue;
@@ -782,6 +788,25 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/stickers/local/:id', (ctx) => updatePack(ctx.params.id, ctx.body ?? {}));
   r.delete('/api/stickers/local/:id', (ctx) => deletePack(ctx.params.id));
   r.post('/api/stickers/forget', (ctx) => forgetStickers(ctx.body?.ids));
+  // The picker's "Undo" after removing a sticker
+  r.post('/api/stickers/restore', (ctx) => {
+    const ids = Array.isArray(ctx.body?.ids) ? (ctx.body.ids as unknown[]).map(String).filter(isSafeId) : [];
+    restoreToLibrary(ids);
+    return { ok: true };
+  });
+  // Search words on a sticker: yours, and learned ones (sent after searching for them)
+  r.get('/api/stickers/tags', (ctx) => ({ tags: stickerTags(String(ctx.query.get('key') ?? '')) }));
+  r.post('/api/stickers/tags', (ctx) => {
+    try {
+      return { tags: setStickerTags(String(ctx.body?.key ?? ''), Array.isArray(ctx.body?.tags) ? ctx.body.tags : []) };
+    } catch {
+      throw new HttpError(400, 'Unknown sticker');
+    }
+  });
+  r.post('/api/stickers/learn', (ctx) => {
+    learnTag(String(ctx.body?.key ?? ''), String(ctx.body?.q ?? '').slice(0, 100));
+    return { ok: true };
+  });
   r.post('/api/stickers/images', (ctx) => addImages(ctx.body?.images, typeof ctx.body?.packId === 'string' ? ctx.body.packId : undefined));
 
   // A sticker from your own packs: a WhatsApp sticker in WhatsApp chats, a picture in Signal chats.

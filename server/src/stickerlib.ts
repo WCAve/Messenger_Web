@@ -10,6 +10,11 @@
  * Text in stickers (OCR, ocr.ts) is read in the background, newest first, once per sticker (copies share
  * it), into sticker_lib.ocr_text; the picker's search looks in it (`searchLibrary`).
  *
+ *   sticker_tags search words per sticker (same keys): typed by you, or learned when you send a sticker
+ *                you found by searching (the search words stick to it). Searching finds tags first.
+ *   look         a rough fingerprint of each sticker (difference hash + average colour), taken in the
+ *                background, so look-alike copies (resized, re-compressed) can be grouped for sorting later.
+ *
  * Until 24 Nov 2026 the library was a list in kv (wa_stickers) capped at 500: `migrateStickerLib` brings
  * back what fell off (backup stickers "stk-<hash>.webp" on disk, stickers in messages) and counts the
  * stickers you sent so "Most used" starts filled.
@@ -20,7 +25,7 @@ import { isSafeId, localPath } from './attachments.js';
 import { config } from './config.js';
 import { db, kvGet, kvSet } from './db.js';
 import { clipModelId, embedImage, embedText, unloadClip } from './clip.js';
-import { ocrAvailable, readSticker } from './ocr.js';
+import { ocrAvailable, readSticker, rgbaSquare } from './ocr.js';
 import { stickerUrl } from './stickers.js';
 
 const url = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
@@ -56,6 +61,15 @@ export function forgetFromLibrary(ids: string[]) {
     const h = getRow.get(id)?.hash ?? hashOf(id);
     if (h) db.prepare('UPDATE sticker_lib SET forgotten = 1 WHERE hash = ?').run(h);
     db.prepare('UPDATE sticker_lib SET forgotten = 1 WHERE id = ?').run(id);
+  }
+}
+
+/** Undo forgetting (the picker's "Undo"). */
+export function restoreToLibrary(ids: string[]) {
+  for (const id of ids) {
+    const h = getRow.get(id)?.hash ?? hashOf(id);
+    if (h) db.prepare('UPDATE sticker_lib SET forgotten = 0 WHERE hash = ?').run(h);
+    db.prepare('UPDATE sticker_lib SET forgotten = 0 WHERE id = ?').run(id);
   }
 }
 
@@ -154,6 +168,82 @@ export function topStickers(): { favorites: TopSticker[]; used: TopSticker[] } {
   };
 }
 
+// ---------- tags: search words on stickers
+
+const KEY_RE = /^(sig:[0-9a-f]{32}:\d+|loc:[\w.-]+)$/i;
+export interface StickerTag {
+  tag: string;
+  learned: boolean;
+}
+export function stickerTags(key: string): StickerTag[] {
+  return db
+    .prepare<[string], { tag: string; learned: number }>('SELECT tag, learned FROM sticker_tags WHERE key = ? ORDER BY learned, added_at')
+    .all(key)
+    .map((r) => ({ tag: r.tag, learned: !!r.learned }));
+}
+/** Replace a sticker's tags (the tag editor: yours, and the learned ones you kept). */
+export function setStickerTags(key: string, tags: StickerTag[]): StickerTag[] {
+  if (!KEY_RE.test(key)) throw new Error('bad sticker key');
+  const now = Date.now();
+  db.transaction(() => {
+    const before = new Map(db.prepare<[string], { tag: string; uses: number; added_at: number }>('SELECT tag, uses, added_at FROM sticker_tags WHERE key = ?').all(key).map((r) => [r.tag, r]));
+    db.prepare('DELETE FROM sticker_tags WHERE key = ?').run(key);
+    const ins = db.prepare<[string, string, number, number, number], never>('INSERT OR REPLACE INTO sticker_tags (key, tag, learned, uses, added_at) VALUES (?, ?, ?, ?, ?)');
+    for (const t of tags.slice(0, 50)) {
+      const tag = normText(String(t.tag ?? '')).slice(0, 40);
+      if (!tag) continue;
+      const old = before.get(tag);
+      ins.run(key, tag, t.learned ? 1 : 0, old?.uses ?? 1, old?.added_at ?? now);
+    }
+  })();
+  return stickerTags(key);
+}
+/** You sent a sticker you found by searching: the search words stick to it (learned, a bit weaker). */
+export function learnTag(key: string, query: string) {
+  const tag = normText(query).slice(0, 40);
+  if (!KEY_RE.test(key) || tag.length < 2) return;
+  db.prepare(
+    'INSERT INTO sticker_tags (key, tag, learned, uses, added_at) VALUES (?, ?, 1, 1, ?) ON CONFLICT(key, tag) DO UPDATE SET uses = uses + 1',
+  ).run(key, tag, Date.now());
+}
+
+export interface TagHit {
+  key: string;
+  url: string;
+  pick: { packId: string; stickerId: number } | { localId: string };
+  tags: string[];
+  score: number;
+}
+/** Stickers whose tags match the search, best first: your own tags count most, learned ones by use. */
+export function searchTags(query: string): TagHit[] {
+  const q = normText(query).split(' ').filter(Boolean);
+  if (!q.length) return [];
+  const best = new Map<string, { score: number; tags: string[] }>();
+  for (const r of db.prepare<[], { key: string; tag: string; learned: number; uses: number }>('SELECT key, tag, learned, uses FROM sticker_tags').all()) {
+    const m = matchScore(q, r.tag);
+    if (!m) continue;
+    const score = m * (r.learned ? 1 + Math.min(r.uses, 5) / 5 : 3) + (r.tag === q.join(' ') ? 5 : 0);
+    const b = best.get(r.key);
+    if (!b) best.set(r.key, { score, tags: [r.tag] });
+    else (b.score = Math.max(b.score, score), b.tags.push(r.tag));
+  }
+  const hidden = hiddenPacks();
+  const fileOf = db.prepare<[string, string], { id: string }>('SELECT id FROM sticker_lib WHERE (hash = ? OR id = ?) AND forgotten = 0 ORDER BY added_at ASC');
+  const out: TagHit[] = [];
+  for (const [key, b] of [...best.entries()].sort((a, c) => c[1].score - a[1].score)) {
+    const sig = /^sig:([0-9a-f]{32}):(\d+)$/i.exec(key);
+    if (sig) {
+      if (hidden.has(sig[1].toLowerCase())) continue;
+      out.push({ key, url: stickerUrl(sig[1], Number(sig[2])), pick: { packId: sig[1], stickerId: Number(sig[2]) }, tags: b.tags, score: b.score });
+      continue;
+    }
+    const h = key.slice(4);
+    const file = fileOf.all(h, h).find((r) => exists(r.id));
+    if (file) out.push({ key, url: url(file.id), pick: { localId: file.id }, tags: b.tags, score: b.score });
+  }
+  return out;
+}
+
 // ---------- once: from the old capped list
 
 export function migrateStickerLib(log: (msg: string) => void) {
@@ -250,6 +340,70 @@ const nextUnseen = db.prepare<[string], { id: string; hash: string | null }>(
 const seenBefore = db.prepare<[string, string], { clip: Uint8Array | null }>('SELECT clip FROM sticker_lib WHERE hash = ? AND clip_model = ? LIMIT 1');
 const saveClip = db.prepare<[Uint8Array | null, string, string, string], never>('UPDATE sticker_lib SET clip = ?, clip_model = ? WHERE id = ? OR hash = ?');
 
+const nextUnlooked = db.prepare<[], { id: string; hash: string | null }>('SELECT id, hash FROM sticker_lib WHERE forgotten = 0 AND look IS NULL ORDER BY added_at DESC LIMIT 1');
+const lookedBefore = db.prepare<[string], { look: string }>('SELECT look FROM sticker_lib WHERE hash = ? AND look IS NOT NULL LIMIT 1');
+const saveLook = db.prepare<[string, string, string], never>('UPDATE sticker_lib SET look = ? WHERE id = ? OR hash = ?');
+
+/**
+ * A sticker's rough fingerprint: 9×9 pixels over white; 64 bits of "is this pixel brighter than the
+ * next one" (difference hash) and the average colour. Survives resizing and re-compression.
+ */
+export async function lookOf(file: string): Promise<string> {
+  const px = await rgbaSquare(file, 9, 'fit');
+  const grey: number[] = [];
+  let r = 0, g = 0, b = 0; // prettier-ignore
+  for (let i = 0; i < 81; i++) {
+    const a = px[i * 4 + 3] / 255;
+    const c = [0, 1, 2].map((k) => px[i * 4 + k] * a + 255 * (1 - a));
+    r += c[0];
+    g += c[1];
+    b += c[2];
+    grey.push(0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]);
+  }
+  let bits = '';
+  for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) bits += grey[y * 9 + x] > grey[y * 9 + x + 1] ? '1' : '0';
+  const hex = (n: number) => Math.round(n / 81).toString(16).padStart(2, '0');
+  return BigInt('0b' + bits).toString(16).padStart(16, '0') + hex(r) + hex(g) + hex(b);
+}
+
+const popcount = (n: number) => {
+  n = n - ((n >>> 1) & 0x55555555);
+  n = (n & 0x33333333) + ((n >>> 2) & 0x33333333);
+  return (((n + (n >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+};
+let groupsCache: { n: number; groups: string[][] } | null = null;
+/**
+ * Look-alike stickers (different files that look (almost) the same), in groups of library keys: for the
+ * sorting game later. Flat pictures (nearly no edges) are left out: their fingerprints say too little.
+ */
+export function lookAlikeGroups(): string[][] {
+  const rows = db.prepare<[], { hash: string | null; id: string; look: string }>("SELECT hash, id, look FROM sticker_lib WHERE forgotten = 0 AND look IS NOT NULL AND look != ''").all();
+  const byKey = new Map<string, string>();
+  for (const r of rows) byKey.set(`loc:${r.hash ?? r.id}`, r.look);
+  if (groupsCache?.n === byKey.size) return groupsCache.groups;
+  const items = [...byKey.entries()]
+    .map(([key, look]) => ({ key, hi: parseInt(look.slice(0, 8), 16), lo: parseInt(look.slice(8, 16), 16), rgb: [16, 18, 20].map((i) => parseInt(look.slice(i, i + 2), 16)) }))
+    .filter((x) => {
+      const ones = popcount(x.hi) + popcount(x.lo);
+      return ones >= 4 && ones <= 60;
+    });
+  const parent = items.map((_, i) => i);
+  const root = (i: number): number => (parent[i] === i ? i : (parent[i] = root(parent[i])));
+  for (let i = 0; i < items.length; i++)
+    for (let j = i + 1; j < items.length; j++) {
+      const a = items[i];
+      const b = items[j];
+      if (popcount(a.hi ^ b.hi) + popcount(a.lo ^ b.lo) > 5) continue;
+      if (Math.abs(a.rgb[0] - b.rgb[0]) + Math.abs(a.rgb[1] - b.rgb[1]) + Math.abs(a.rgb[2] - b.rgb[2]) > 40) continue;
+      parent[root(i)] = root(j);
+    }
+  const groups = new Map<number, string[]>();
+  items.forEach((x, i) => groups.set(root(i), [...(groups.get(root(i)) ?? []), x.key]));
+  const out = [...groups.values()].filter((g) => g.length > 1);
+  groupsCache = { n: byKey.size, groups: out };
+  return out;
+}
+
 /**
  * The background worker: reads the text in stickers (OCR) and, with a picture search model downloaded,
  * looks at them (CLIP), taking turns, newest stickers first, one at a time with a pause in between.
@@ -258,7 +412,6 @@ async function readAll() {
   readTimer = null;
   if (reading) return;
   const ocrOn = await ocrAvailable();
-  if (!ocrOn && !clipModelId()) return;
   reading = true;
   const t0 = Date.now();
   let n = 0;
@@ -312,6 +465,21 @@ async function readAll() {
         }
         if (clipModelId() === model) saveClip.run(vec, model, pic.id, pic.hash ?? pic.id);
       }
+      // Fingerprint (look-alikes): only once text and pictures are done, it's for later
+      const lk = worked ? undefined : nextUnlooked.get();
+      if (lk) {
+        worked = true;
+        let look = lk.hash ? lookedBefore.get(lk.hash)?.look : undefined;
+        if (look === undefined) {
+          try {
+            look = exists(lk.id) ? await lookOf(localPath(lk.id)) : '';
+          } catch {
+            look = ''; // can't be read: no fingerprint
+          }
+          await pause(gap);
+        }
+        saveLook.run(look, lk.id, lk.hash ?? lk.id);
+      }
       if (!worked) break;
     }
     if (n) ocrLog(`stickers: read the text in ${n} sticker${n === 1 ? '' : 's'} (${found} with text)`);
@@ -332,17 +500,31 @@ export function pictureModelChanged() {
 }
 
 /** How far the reading is: different stickers read, of all of them; and looked at for picture search. */
-export async function readingProgress(): Promise<{ available: boolean; done: number; total: number; pictures: { model: string; done: number } | null }> {
+export async function readingProgress(): Promise<{
+  available: boolean;
+  done: number;
+  total: number;
+  pictures: { model: string; done: number } | null;
+  looks: { done: number; groups: number; stickers: number };
+}> {
   const model = clipModelId();
   const r = db
-    .prepare<[string], { total: number; done: number; seen: number }>(
+    .prepare<[string], { total: number; done: number; seen: number; looked: number }>(
       `SELECT count(DISTINCT coalesce(hash, id)) AS total,
               count(DISTINCT CASE WHEN ocr_at IS NOT NULL THEN coalesce(hash, id) END) AS done,
-              count(DISTINCT CASE WHEN clip_model = ? THEN coalesce(hash, id) END) AS seen
+              count(DISTINCT CASE WHEN clip_model = ? THEN coalesce(hash, id) END) AS seen,
+              count(DISTINCT CASE WHEN look IS NOT NULL THEN coalesce(hash, id) END) AS looked
        FROM sticker_lib WHERE forgotten = 0`,
     )
     .get(model)!;
-  return { available: await ocrAvailable(), done: r.done, total: r.total, pictures: model ? { model, done: r.seen } : null };
+  const groups = r.looked >= r.total ? lookAlikeGroups() : [];
+  return {
+    available: await ocrAvailable(),
+    done: r.done,
+    total: r.total,
+    pictures: model ? { model, done: r.seen } : null,
+    looks: { done: r.looked, groups: groups.length, stickers: groups.reduce((n, g) => n + g.length, 0) },
+  };
 }
 
 /** Stickers that look like the search words (picture search), best first; [] without a model. */

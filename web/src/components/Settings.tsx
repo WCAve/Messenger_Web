@@ -98,7 +98,7 @@ function StickerSearchSettings() {
   const lookingAt = r?.pictures && r.pictures.done < r.total;
   // While something is moving: look again every second (download) or few seconds (reading)
   useEffect(() => {
-    if (!info || !(downloading || (r && r.available && r.done < r.total) || lookingAt)) return;
+    if (!info || !(downloading || (r && r.available && r.done < r.total) || lookingAt || (r?.looks && r.looks.done < r.total))) return;
     const t = setTimeout(refresh, downloading ? 1000 : 4000);
     return () => clearTimeout(t);
   }, [info, downloading, r, lookingAt]);
@@ -121,6 +121,15 @@ function StickerSearchSettings() {
               ? `Reading the text in your stickers, in the background: ${info.reading.done.toLocaleString()} of ${info.reading.total.toLocaleString()} done.`
               : `The text in all ${info.reading.total.toLocaleString()} stickers has been read. New stickers are read as they come in.`}
         </p>
+        {info.reading.looks && (
+          <p className="setting-note">
+            {info.reading.looks.done < info.reading.total
+              ? `Looking for look-alike stickers (the same sticker in different files): ${info.reading.looks.done.toLocaleString()} of ${info.reading.total.toLocaleString()} done.`
+              : info.reading.looks.groups
+                ? `Look-alikes: ${info.reading.looks.groups.toLocaleString()} groups (${info.reading.looks.stickers.toLocaleString()} stickers) that look the same. You’ll be able to sort them out later; nothing is removed.`
+                : 'No look-alike stickers found.'}
+          </p>
+        )}
       </Section>
       <Section title="Picture search">
         <p className="setting-note">
