@@ -4423,3 +4423,16 @@ video.deleted-media {
   opacity: 1;
   color: #f5b400;
 }
+
+/* ---- Sticker search (picker) and "show more" in big sticker grids */
+.sticker-search {
+  margin: 6px 10px 0;
+}
+.sticker-reading {
+  font-size: 12.5px;
+  margin: 6px 4px 8px;
+}
+.btn.show-more {
+  display: block;
+  margin: 10px auto 4px;
+}

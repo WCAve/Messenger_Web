@@ -45,5 +45,23 @@ echo "ok: video conversion"
 x 'apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends libheif-plugin-x265 >/dev/null && heif-enc -q 50 -o /tmp/t.heic /tmp/t.png && chmod a+r /tmp/t.heic' || fail "making a test HEIC"
 x 'cd /tmp && setpriv --reuid=99 --regid=100 --clear-groups sh -c "heif-dec t.heic back.png && test -s back.png"' || fail "HEIC conversion"
 echo "ok: HEIC conversion"
+# Sticker OCR: made-up stickers with text (a font for that only in this test container), read by the
+# real models. Transparent with outlined white text; yellow text on a busy picture; an animated WebP
+# (read through webpmux); and one without text.
+x 'apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null' || fail "installing a test font"
+F=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+x "cd /tmp && ffmpeg -v error -y -f lavfi -i color=c=black@0.0:s=512x512,format=rgba -vf \"drawtext=fontfile=$F:text='NEE JOH':fontsize=96:fontcolor=white:borderw=7:bordercolor=black:x=(w-tw)/2:y=h-th-40\" -frames:v 1 -c:v libwebp -lossless 1 s1.webp \
+  && ffmpeg -v error -y -f lavfi -i testsrc2=s=512x512 -vf \"drawtext=fontfile=$F:text='GOEDEMORGEN':fontsize=64:fontcolor=yellow:borderw=4:bordercolor=black:x=(w-tw)/2:y=60\" -frames:v 1 -c:v libwebp s2.webp \
+  && ffmpeg -v error -y -f lavfi -i color=c=black@0.0:s=512x512:r=5:d=0.6,format=rgba -vf \"drawtext=fontfile=$F:text='HAHA':fontsize=120:fontcolor=white:borderw=8:bordercolor=black:x=(w-tw)/2:y=(h-th)/2\" -c:v libwebp -lossless 1 -loop 0 s3.webp \
+  && ffmpeg -v error -y -f lavfi -i testsrc2=s=512x512 -frames:v 1 -c:v libwebp s4.webp && chmod a+r s*.webp" || fail "making test stickers"
+out=$(x 'cd /tmp && setpriv --reuid=99 --regid=100 --clear-groups node /app/server/dist/ocr-cli.js s1.webp s2.webp s3.webp s4.webp')
+echo "$out"
+echo "$out" | grep 's1.webp' | grep -qi 'nee' || fail "OCR: NEE JOH not read"
+echo "$out" | grep 's1.webp' | grep -qi 'joh' || fail "OCR: NEE JOH not read"
+echo "$out" | grep 's2.webp' | grep -qi 'goedemorgen' || fail "OCR: GOEDEMORGEN not read"
+echo "$out" | grep 's3.webp' | grep -qi 'haha' || fail "OCR: animated HAHA not read"
+echo "ok: sticker OCR"
+docker logs "$NAME" 2>&1 | grep -i "ocr\|sticker" || true
+
 docker rm -f "$NAME" >/dev/null
 echo "image smoke test passed"

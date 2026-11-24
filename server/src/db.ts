@@ -274,6 +274,11 @@ const MIGRATIONS: string[] = [
     favorite INTEGER NOT NULL DEFAULT 0
   );
   `,
+  `
+  -- Text read in a sticker (ocr.ts via stickerlib.ts): lines, '' when none; ocr_at null = not read yet
+  ALTER TABLE sticker_lib ADD COLUMN ocr_text TEXT;
+  ALTER TABLE sticker_lib ADD COLUMN ocr_at INTEGER;
+  `,
 ];
 
 function migrate() {

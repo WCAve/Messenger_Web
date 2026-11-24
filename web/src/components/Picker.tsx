@@ -10,7 +10,7 @@ import { CATEGORIES, displayCode, recentEmoji, rememberEmoji, searchEmoji } from
 import { Emojified } from '../emoji/render';
 import { frequentEmoji, loadUsage } from '../emoji/usage';
 import { setState } from '../store';
-import type { LocalStickers, StickerItem, StickerPack, TopSticker, TopStickers } from '../types';
+import type { LocalStickers, StickerItem, StickerPack, StickerSearch, TopSticker, TopStickers } from '../types';
 import { Icon } from './ui';
 
 export interface PickedGif {
@@ -104,6 +104,26 @@ let packsCache: StickerPack[] | null = null;
 let localCache: LocalStickers | null = null;
 let topCache: TopStickers | null = null;
 
+const PAGE = 300; // stickers shown at once in a big grid ("Show more" for the next ones)
+
+/** Signal stickers whose emoji or pack fits the search (emoji by name too: "laugh" finds 😂). */
+function signalMatches(packs: StickerPack[], q: string) {
+  const norm = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const bare = (e: string) => e.replace(/\uFE0F/g, '');
+  const words = norm(q).split(/\s+/).filter(Boolean);
+  const named = new Set(words.length ? searchEmoji(q.trim(), 60).map((r) => bare(r.entry.e)) : []);
+  const typed = new Set([...q].filter((ch) => /\p{Extended_Pictographic}/u.test(ch)).map(bare));
+  const out: { pack: StickerPack; s: StickerItem }[] = [];
+  for (const p of packs) {
+    const packHit = words.length > 0 && words.every((w) => norm(`${p.title} ${p.author}`).includes(w));
+    for (const s of p.stickers) {
+      const e = s.emoji ? bare(s.emoji) : '';
+      if (packHit || (e && (named.has(e) || [...typed].some((t) => e.includes(t))))) out.push({ pack: p, s });
+    }
+  }
+  return out;
+}
+
 /** A sticker in a grid, with a star to make it a favourite (shown on hover, or always when it is one). */
 function StickerCell({ url, title, fav, onPick, onFav }: { url: string; title: string; fav: boolean; onPick: () => void; onFav?: () => void }) {
   return (
@@ -136,6 +156,9 @@ function StickerGrid({
   const [packs, setPacks] = useState<StickerPack[] | null>(packsCache);
   const [local, setLocal] = useState<LocalStickers | null>(localCache);
   const [top, setTop] = useState<TopStickers | null>(topCache);
+  const [query, setQuery] = useState('');
+  const [found, setFound] = useState<StickerSearch | null>(null);
+  const [shown, setShown] = useState(PAGE);
   const [active, setActive] = useState<string>('top');
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState('');
@@ -156,6 +179,22 @@ function StickerGrid({
       })
       .catch((e) => setError(e.message));
   }, []);
+
+  // Search: the server for text in stickers and pack names; Signal stickers here, by emoji and pack
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) return setFound(null);
+    let stop = false;
+    const t = setTimeout(() => {
+      api
+        .searchStickers(q)
+        .then((r) => !stop && setFound(r))
+        .catch((e) => !stop && setError(e.message));
+    }, 200);
+    return () => ((stop = true), clearTimeout(t));
+  }, [query]);
+  const signalFound = useMemo(() => (query.trim() && packs ? signalMatches(packs, query) : []), [query, packs]);
+  useEffect(() => setShown(PAGE), [active]);
 
   const favs = useMemo(() => new Set(top?.favorites.map((t) => t.key) ?? []), [top]);
   const toggleFav = (key: string | null | undefined) =>
@@ -234,8 +273,41 @@ function StickerGrid({
           <Icon name="gear" size={20} />
         </button>
       </nav>
+      <div className="picker-search sticker-search">
+        <Icon name="search" size={18} />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search stickers: text, emoji, pack" aria-label="Search stickers" />
+        {query && (
+          <button className="icon-btn sm" onClick={() => setQuery('')} aria-label="Clear search">
+            <Icon name="close" size={16} />
+          </button>
+        )}
+      </div>
       <div className="picker-body">
         {error && <p className="form-error picker-empty">{error}</p>}
+        {query.trim() && (
+          <>
+            {found?.reading.available && found.reading.done < found.reading.total && (
+              <p className="muted sticker-reading">
+                Still reading the text in stickers: {found.reading.done.toLocaleString()} of {found.reading.total.toLocaleString()} done, so some may be missing.
+              </p>
+            )}
+            {found && !found.reading.available && <p className="muted sticker-reading">This server can’t read the text in stickers: searching emoji and pack names only.</p>}
+            {found && !found.results.length && !signalFound.length && <p className="muted picker-empty">No stickers found</p>}
+            {(found?.results.length || signalFound.length) > 0 && (
+              <div className="sticker-grid">
+                {signalFound.map(({ pack, s }) => {
+                  const key = `sig:${pack.packId}:${s.id}`;
+                  return <StickerCell key={key} url={s.url} title={`${s.emoji ?? ''} ${pack.title}`.trim()} fav={favs.has(key)} onPick={() => pickSignal(pack.packId, s)} onFav={toggleFav(key)} />;
+                })}
+                {found?.results.map((r) => (
+                  <StickerCell key={r.key} url={r.url} title={r.text ?? 'Sticker'} fav={favs.has(r.key)} onPick={() => pickLocal({ id: r.pick.localId, url: r.url })} onFav={toggleFav(r.key)} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        {!query.trim() && (
+        <>
         {!loaded && !error && <div className="spinner picker-spinner" aria-label="Loading" />}
         {active === 'top' && hasTop && (
           <>
@@ -282,10 +354,15 @@ function StickerGrid({
               {asPicture && <span className="muted"> · sent as a picture in Signal chats</span>}
             </h4>
             <div className="sticker-grid">
-              {(localPack ? localPack.stickers : local.unsorted).map((s) => (
+              {(localPack ? localPack.stickers : local.unsorted).slice(0, shown).map((s) => (
                 <StickerCell key={s.id} url={s.url} title="Sticker" fav={!!s.key && favs.has(s.key)} onPick={() => pickLocal(s)} onFav={toggleFav(s.key)} />
               ))}
             </div>
+            {(localPack ? localPack.stickers : local.unsorted).length > shown && (
+              <button className="btn show-more" onClick={() => setShown((n) => n + PAGE)}>
+                Show more ({((localPack ? localPack.stickers : local.unsorted).length - shown).toLocaleString()} left)
+              </button>
+            )}
           </>
         )}
         {loaded && (active === 'add' || (!packs!.length && !local!.packs.length && !local!.unsorted.length && !hasTop)) && (
@@ -313,6 +390,8 @@ function StickerGrid({
               {adding ? 'Adding…' : 'Add pack'}
             </button>
           </form>
+        )}
+        </>
         )}
       </div>
     </>

@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import { isSafeId, localPath } from './attachments.js';
 import { kvGet, kvSet } from './db.js';
 import { HttpError } from './http.js';
-import { libKey } from './stickerlib.js';
+import { libKey, matchScore, normText } from './stickerlib.js';
 import { addSticker, listStickersWa, removeStickerWa } from './whatsapp.js';
 
 interface LocalPack {
@@ -45,6 +45,15 @@ export function localStickers() {
     // Copies of a sticker that's in a pack don't show up again under "not in a pack"
     unsorted: listStickersWa().filter((s) => !inPacks.has(s.id) && !packKeys.has(s.key)),
   };
+}
+
+/** Stickers in your packs whose name matches (for the picker's search). */
+export function packsMatching(query: string): { id: string; url: string; key: string | null; pack: string }[] {
+  const q = normText(query).split(' ').filter(Boolean);
+  if (!q.length) return [];
+  return load()
+    .filter((p) => matchScore(q, normText(p.title)))
+    .flatMap((p) => p.stickers.filter(exists).map((id) => ({ id, url: url(id), key: libKey(id), pack: p.title })));
 }
 
 function cleanTitle(t: unknown) {

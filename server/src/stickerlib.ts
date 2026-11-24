@@ -7,6 +7,9 @@
  *   sticker_use  per sticker (Signal: "sig:<pack>:<id>", library: "loc:<hash>"): how often you sent it,
  *                when last, and whether it's a favourite. The picker's ⭐ tab shows favourites and most used.
  *
+ * Text in stickers (OCR, ocr.ts) is read in the background, newest first, once per sticker (copies share
+ * it), into sticker_lib.ocr_text; the picker's search looks in it (`searchLibrary`).
+ *
  * Until 24 Nov 2026 the library was a list in kv (wa_stickers) capped at 500: `migrateStickerLib` brings
  * back what fell off (backup stickers "stk-<hash>.webp" on disk, stickers in messages) and counts the
  * stickers you sent so "Most used" starts filled.
@@ -16,6 +19,7 @@ import fs from 'node:fs';
 import { isSafeId, localPath } from './attachments.js';
 import { config } from './config.js';
 import { db, kvGet, kvSet } from './db.js';
+import { ocrAvailable, readSticker } from './ocr.js';
 import { stickerUrl } from './stickers.js';
 
 const url = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
@@ -42,6 +46,7 @@ export function addToLibrary(id: string, at = Date.now()) {
   const hash = row?.hash ?? hashOf(id);
   const forgotten = row ? row.forgotten : hash && forgottenHash.get(hash) ? 1 : 0;
   insertRow.run(id, hash, at, forgotten);
+  if (!row) readSoon();
 }
 
 /** Forget stickers (and every copy of them). */
@@ -190,4 +195,146 @@ export function migrateStickerLib(log: (msg: string) => void) {
   })();
   kvSet('sticker_lib_v1', '1');
   log(`stickers: library set up from ${n} files (${listLibrary().length} different stickers) in ${Date.now() - t0} ms`);
+}
+
+// ---------- reading the text in stickers
+
+let reading = false;
+let started = false;
+let readTimer: ReturnType<typeof setTimeout> | null = null;
+let ocrLog: (msg: string) => void = () => {};
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Start reading (after start-up has settled), and keep reading new stickers as they come. */
+export function startStickerOcr(log: (msg: string) => void, delayMs = Number(process.env.STICKER_OCR_DELAY_MS ?? 60_000)) {
+  ocrLog = log;
+  started = true;
+  readTimer = setTimeout(() => void readAll(), delayMs);
+  readTimer.unref?.();
+}
+function readSoon() {
+  if (!started || reading || readTimer) return;
+  readTimer = setTimeout(() => void readAll(), 5000);
+  readTimer.unref?.();
+}
+
+const nextUnread = db.prepare<[], { id: string; hash: string | null }>(
+  'SELECT id, hash FROM sticker_lib WHERE forgotten = 0 AND ocr_at IS NULL ORDER BY added_at DESC LIMIT 1',
+);
+const readBefore = db.prepare<[string], { ocr_text: string | null }>('SELECT ocr_text FROM sticker_lib WHERE hash = ? AND ocr_at IS NOT NULL LIMIT 1');
+const saveText = db.prepare<[string, number, string, string], never>('UPDATE sticker_lib SET ocr_text = ?, ocr_at = ? WHERE id = ? OR hash = ?');
+
+async function readAll() {
+  readTimer = null;
+  if (reading || !(await ocrAvailable())) return;
+  reading = true;
+  const t0 = Date.now();
+  let n = 0;
+  let found = 0;
+  try {
+    for (;;) {
+      const row = nextUnread.get();
+      if (!row) break;
+      let text: string;
+      const known = row.hash ? readBefore.get(row.hash) : undefined;
+      if (known) text = known.ocr_text ?? '';
+      else {
+        try {
+          const lines = exists(row.id) ? await readSticker(localPath(row.id)) : [];
+          if (lines === null) break; // no OCR after all
+          text = lines.join('\n');
+        } catch (e) {
+          text = ''; // a file it can't read (yet): counts as read, without text
+          if (n < 5) ocrLog(`stickers: couldn't read ${row.id}: ${(e as Error).message.slice(0, 200)}`);
+        }
+        n++;
+        if (text) found++;
+        if (n % 250 === 0) ocrLog(`stickers: read ${n} so far (${found} with text)`);
+        await pause(Number(process.env.STICKER_OCR_PAUSE_MS ?? 50)); // room for everything else
+      }
+      saveText.run(text, Date.now(), row.id, row.hash ?? row.id);
+    }
+    if (n) ocrLog(`stickers: read the text in ${n} sticker${n === 1 ? '' : 's'} (${found} with text) in ${Math.round((Date.now() - t0) / 1000)} s`);
+  } finally {
+    reading = false;
+  }
+}
+
+/** How far the reading is: different stickers read, of all of them. */
+export async function readingProgress(): Promise<{ available: boolean; done: number; total: number }> {
+  const r = db
+    .prepare<[], { total: number; done: number }>(
+      `SELECT count(DISTINCT coalesce(hash, id)) AS total,
+              count(DISTINCT CASE WHEN ocr_at IS NOT NULL THEN coalesce(hash, id) END) AS done
+       FROM sticker_lib WHERE forgotten = 0`,
+    )
+    .get()!;
+  return { available: await ocrAvailable(), done: r.done, total: r.total };
+}
+
+// ---------- search
+
+/** Lower case, accents off, only letters and digits: "Néé, JOH!" → "nee joh". */
+export function normText(s: string) {
+  return s
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+/** At most one letter different (OCR mistakes), for longer words. */
+function nearly(a: string, b: string) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  if (i === a.length && i === b.length) return true;
+  return a.slice(i + 1) === b.slice(i + 1) || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i);
+}
+
+/** How well the words match a text (0: not): every word must be found; whole words count more. */
+export function matchScore(queryWords: string[], text: string): number {
+  if (!queryWords.length || !text) return 0;
+  const words = text.split(' ');
+  let score = 0;
+  for (const q of queryWords) {
+    let best = 0;
+    for (const w of words) {
+      if (w === q) best = Math.max(best, 3);
+      else if (w.startsWith(q)) best = Math.max(best, 2);
+      else if (q.length >= 4 && w.includes(q)) best = Math.max(best, 1.5);
+      else if (q.length >= 5 && nearly(q, w)) best = Math.max(best, 1);
+    }
+    if (!best && q.length >= 4 && text.replace(/ /g, '').includes(q)) best = 1; // "neejoh" for "nee joh"
+    if (!best) return 0;
+    score += best;
+  }
+  return score;
+}
+
+/** Library stickers whose text matches, best first (then newest). */
+export function searchLibrary(query: string, limit = 200): (LibSticker & { text: string })[] {
+  const q = normText(query).split(' ').filter(Boolean);
+  if (!q.length) return [];
+  const rows = db
+    .prepare<[], { id: string; hash: string | null; added_at: number; ocr_text: string }>(
+      "SELECT id, hash, added_at, ocr_text FROM sticker_lib WHERE forgotten = 0 AND ocr_text IS NOT NULL AND ocr_text != '' ORDER BY added_at ASC",
+    )
+    .all();
+  const byHash = new Map<string, { id: string; at: number; text: string; score: number }>();
+  for (const r of rows) {
+    const h = r.hash ?? r.id;
+    const seen = byHash.get(h);
+    if (seen) {
+      seen.at = Math.max(seen.at, r.added_at);
+      continue;
+    }
+    const score = matchScore(q, normText(r.ocr_text));
+    if (score && exists(r.id)) byHash.set(h, { id: r.id, at: r.added_at, text: r.ocr_text, score });
+  }
+  return [...byHash.entries()]
+    .sort((a, b) => b[1].score - a[1].score || b[1].at - a[1].at)
+    .slice(0, limit)
+    .map(([h, v]) => ({ id: v.id, url: url(v.id), key: `loc:${h}`, text: v.text }));
 }

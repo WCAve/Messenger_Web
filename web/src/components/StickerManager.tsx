@@ -14,6 +14,7 @@ export function StickerManager() {
   const [signal, setSignal] = useState<StickerPack[] | null>(null);
   const [local, setLocal] = useState<LocalStickers | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [shownUnsorted, setShownUnsorted] = useState(300); // thousands of stickers: shown 300 at a time
   const [open, setOpen] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
   const [target, setTarget] = useState('');
@@ -193,13 +194,18 @@ export function StickerManager() {
             </div>
           )}
           <div className="sticker-grid stk-unsorted">
-            {local?.unsorted.map((s) => (
+            {local?.unsorted.slice(0, shownUnsorted).map((s) => (
               <button key={s.id} className={`sticker-cell stk-cell${selected.has(s.id) ? ' on' : ''}`} onClick={() => toggle(s.id)} aria-pressed={selected.has(s.id)}>
                 <img src={s.url} alt="Sticker" loading="lazy" />
                 {selected.has(s.id) && <span className="stk-check">✓</span>}
               </button>
             ))}
           </div>
+          {local && local.unsorted.length > shownUnsorted && (
+            <button className="btn show-more" onClick={() => setShownUnsorted((n) => n + 300)}>
+              Show more ({(local.unsorted.length - shownUnsorted).toLocaleString()} left)
+            </button>
+          )}
           {local && !local.unsorted.length && <p className="setting-note">Nothing here. Stickers you receive on WhatsApp appear here.</p>}
         </section>
 
