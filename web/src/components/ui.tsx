@@ -124,6 +124,23 @@ export function Icon({ name, size = 22, title }: { name: keyof typeof PATHS | st
   );
 }
 
+/** Whether a picture really loads (a profile picture can be a known address with nothing behind it). */
+export function useImageLoads(src: string | null | undefined): boolean {
+  const [ok, setOk] = useState(false);
+  useEffect(() => {
+    setOk(false);
+    if (!src) return;
+    let live = true;
+    const img = new Image();
+    img.onload = () => live && setOk(true);
+    img.src = src;
+    return () => {
+      live = false;
+    };
+  }, [src]);
+  return ok;
+}
+
 const failedAvatars = new Set<string>(); // URLs that 404'd this session: don't retry on every render
 
 // Pictures load only once their avatar is (nearly) on screen, a few at a time: a chat list asking for

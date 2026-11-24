@@ -29,7 +29,7 @@ with a comment saying what it does; this is the map.
 | **components/** | |
 | `Sidebar.tsx` | Left column: chat list, archived, New chat, New group, Settings, sticker manager |
 | `Chat.tsx` | The open chat: header, message list, attachments, lightbox, composer (map in its header) |
-| `InfoPanel.tsx` | Right panel: chat info, search in chat / go to date, message info |
+| `InfoPanel.tsx` | Right panel: chat info, search in chat / go to date, message info, a group member's profile (`PersonPanel`, from their name or picture in a group message) |
 | `GroupManage.tsx` | Group management parts of chat info, New group, join by link |
 | `Picker.tsx` | Emoji / sticker / GIF picker (opened by the composer's own buttons, no tabs then; resizable, size in localStorage `picker-size`) |
 | `StickerManager.tsx` | Sticker manager |

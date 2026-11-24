@@ -4696,3 +4696,59 @@ video.deleted-media {
   color: var(--paper);
   font-weight: 700;
 }
+
+/* ---- Group messages: the sender's picture beside their first message in a row; name and picture open
+   their profile (PersonPanel) */
+.msg.in.with-avatar {
+  padding-left: 38px;
+  max-width: calc(65% + 38px);
+}
+.msg-avatar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  line-height: 0;
+}
+.msg-avatar:disabled {
+  cursor: default;
+}
+.msg-avatar:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+.author-name {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.author-name:hover {
+  text-decoration: underline;
+}
+.profile-photo.view {
+  cursor: zoom-in;
+}
+.person-label {
+  margin: 2px 0 4px;
+}
+.person-actions {
+  display: grid;
+  gap: 8px;
+}
+.person-actions .btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+@media (max-width: 760px) {
+  .msg.in.with-avatar {
+    max-width: calc(86% + 38px);
+  }
+}

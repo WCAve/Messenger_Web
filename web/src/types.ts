@@ -51,7 +51,7 @@ export interface Conversation {
   number: string | null;
   username: string | null;
   avatar: string | null;
-  members?: { key: string; name: string; label?: string | null }[];
+  members?: { key: string; name: string; label?: string | null; avatar?: string | null }[];
   lastMessageAt: number | null;
   lastMessage: { text: string; outgoing: boolean; status: string | null; authorName: string | null } | null;
   unread: number;

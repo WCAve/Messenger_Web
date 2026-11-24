@@ -10,7 +10,7 @@ import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';
 import { ChatView, EditHistory, DeletedMessage, Lightbox, type LightboxItem } from './components/Chat';
 import { WhatsNew, useWhatsNewAfterUpdate } from './components/WhatsNew';
-import { ChatInfoPanel, MessageInfoPanel, SearchPanel } from './components/InfoPanel';
+import { ChatInfoPanel, MessageInfoPanel, PersonPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
 import { ForwardDialog } from './components/Extras';
 import { loadUsage } from './emoji/usage';
@@ -53,10 +53,12 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const forwarding = useStore((s) => s.forwarding);
   const sidebarWidth = usePrefs().sidebarWidth;
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
+  // A profile or group picture, big (no date; downloads as a picture)
+  const openImage = (src: string, title: string) => setLightbox({ att: { id: 'picture', contentType: 'image/jpeg' }, authorName: title, sentAt: 0, src, downloadName: `${title}.jpg` });
 
   // Message info belongs to one chat: close it when switching chats.
   useEffect(() => {
-    setState((s) => (s.panel?.kind === 'message' || s.panel?.kind === 'search' ? { panel: null } : {}));
+    setState((s) => (s.panel?.kind === 'message' || s.panel?.kind === 'search' || s.panel?.kind === 'person' ? { panel: null } : {}));
   }, [activeId]);
 
   // Ctrl+F (⌘F): search in the open chat (or the chat list when none is open). Pressed again while
@@ -191,8 +193,9 @@ function Main({ onLogout }: { onLogout: () => void }) {
         </section>
       )}
       {active && panel?.kind === 'chat' && (
-        <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt, messageId) => setLightbox({ att, authorName, sentAt, conversationId: active.id, messageId })} />
+        <ChatInfoPanel conversation={active} onOpenMedia={(att, authorName, sentAt, messageId) => setLightbox({ att, authorName, sentAt, conversationId: active.id, messageId })} onOpenImage={openImage} />
       )}
+      {active && panel?.kind === 'person' && <PersonPanel key={panel.key} conversation={active} personKey={panel.key} name={panel.name} onOpenImage={openImage} />}
       {active && panel?.kind === 'message' && <MessageInfoPanel messageId={panel.messageId} />}
       {active && panel?.kind === 'search' && <SearchPanel key={panel.query ?? ''} conversation={active} date={!!panel.date} initial={panel.query} />}
       {forwarding && <ForwardDialog message={forwarding} onClose={() => setState({ forwarding: null })} />}

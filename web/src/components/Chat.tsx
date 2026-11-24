@@ -49,7 +49,12 @@ export interface LightboxItem {
   messageId?: number;
   /** Shown from here instead of the attachment's own address (Signal pack stickers aren't attachments) */
   src?: string;
+  /** With `src`: the name to save it as (a sticker otherwise) */
+  downloadName?: string;
 }
+
+/** A group member's profile in the side panel (their name or picture in a group message). */
+const openPerson = (key: string, name: string) => setState({ panel: { kind: 'person', key, name } });
 
 const EDIT_WINDOW_MS = 24 * 3600_000 - 60_000; // Signal allows edits for 24 hours
 
@@ -451,6 +456,7 @@ function MessageList({
 
   const items: ReactNode[] = [];
   const labels = new Map((conversation.members ?? []).filter((x) => x.label).map((x) => [x.key, x.label!]));
+  const avatars = new Map((conversation.members ?? []).filter((x) => x.avatar).map((x) => [x.key, x.avatar!]));
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
     if (!prev || !sameDay(prev.sentAt, m.sentAt)) {
@@ -477,6 +483,8 @@ function MessageList({
         m={m}
         group={conversation.kind === 'group'}
         label={labels.get(m.author)}
+        avatar={avatars.get(m.author)}
+        onOpenPerson={openPerson}
         network={conversation.network}
         continued={continued}
         selected={selected === m.id}
@@ -739,6 +747,8 @@ const MessageItem = memo(function MessageItem({
   m,
   group,
   label,
+  avatar,
+  onOpenPerson,
   network,
   continued,
   selected,
@@ -754,6 +764,8 @@ const MessageItem = memo(function MessageItem({
   m: Message;
   group: boolean;
   label?: string;
+  avatar?: string | null; // the sender's picture (groups)
+  onOpenPerson?: (key: string, name: string) => void;
   network: Network;
   continued: boolean;
   selected: boolean;
@@ -815,11 +827,14 @@ const MessageItem = memo(function MessageItem({
   }
 
   const grouped = m.reactions.reduce<Record<string, string[]>>((acc, r) => ((acc[r.emoji] ??= []).push(r.authorName), acc), {});
+  // Groups: the sender's picture beside their first message in a row; their name and picture open their profile
+  const showAvatar = group && !m.outgoing; // system lines aren't MessageItems
+  const person = m.author && m.author !== 'unknown' && onOpenPerson ? () => onOpenPerson(m.author, m.authorName) : undefined;
   const myReaction = m.reactions.find((r) => r.author === 'self')?.emoji;
 
   return (
     <div
-      className={`msg ${m.outgoing ? 'out' : 'in'}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}${lingering ? ' lingering' : ''}${picking ? ' picking' : ''}${picked ? ' picked' : ''}`}
+      className={`msg ${m.outgoing ? 'out' : 'in'}${showAvatar ? ' with-avatar' : ''}${continued ? ' cont' : ''}${selected ? ' selected' : ''}${m.reactions.length ? ' has-reactions' : ''}${lingering ? ' lingering' : ''}${picking ? ' picking' : ''}${picked ? ' picked' : ''}`}
       data-ts={m.sentAt}
       onClickCapture={(e) => {
         if (!picking) return;
@@ -843,6 +858,11 @@ const MessageItem = memo(function MessageItem({
         }, LINGER_MS);
       }}
     >
+      {showAvatar && !continued && (
+        <button className="msg-avatar" onClick={person} disabled={!person} aria-label={`${m.authorName}: profile`} title={m.authorName} tabIndex={-1}>
+          <Avatar name={m.authorName} seed={m.author} size={30} src={avatar} />
+        </button>
+      )}
       {picking && (
         <span className="pick-mark" aria-hidden="true">
           {picked && <Icon name="check" size={16} />}
@@ -857,7 +877,13 @@ const MessageItem = memo(function MessageItem({
       >
         {group && !m.outgoing && !continued && (
           <div className="author" style={{ ['--hue' as string]: hueFor(m.author) }}>
-            <Emojified text={m.authorName} />
+            {person ? (
+              <button className="author-name" onClick={person} title={`${m.authorName}: profile`}>
+                <Emojified text={m.authorName} />
+              </button>
+            ) : (
+              <Emojified text={m.authorName} />
+            )}
             {label && <span className="author-label">{label}</span>}
           </div>
         )}
@@ -1479,17 +1505,17 @@ export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () =>
     >
       <header onClick={(e) => e.stopPropagation()}>
         <span>
-          <strong>{shown.authorName}</strong> {formatDay(shown.sentAt)}, {formatTime(shown.sentAt)}
+          <strong>{shown.authorName}</strong> {shown.sentAt ? `${formatDay(shown.sentAt)}, ${formatTime(shown.sentAt)}` : ''}
           {pos !== null && total > 1 && <span className="lightbox-count">{`${pos + 1} of ${total}`}</span>}
         </span>
-        <a className="icon-btn" href={pos === null && item.src ? item.src : attachmentUrl(att.id, att.filename ?? att.id)} download={pos === null && item.src ? 'sticker.webp' : undefined} aria-label="Download">
+        <a className="icon-btn" href={pos === null && item.src ? item.src : attachmentUrl(att.id, att.filename ?? att.id)} download={pos === null && item.src ? (item.downloadName ?? 'sticker.webp') : undefined} aria-label="Download">
           <Icon name="download" />
         </a>
         <button className="icon-btn" onClick={close} aria-label="Close">
           <Icon name="close" />
         </button>
       </header>
-      <LightboxMedia key={att.id} att={att} src={pos === null ? item.src : undefined} />
+      <LightboxMedia key={att.id} att={att} src={pos === null ? item.src : undefined} what={item.downloadName ? 'picture' : 'sticker'} />
       {canPrev && (
         <button className="lightbox-nav prev" onClick={(e) => (e.stopPropagation(), void go(-1))} aria-label="Previous photo or video">
           <Icon name="prev" size={32} />
@@ -1506,7 +1532,7 @@ export function Lightbox({ item, onClose }: { item: LightboxItem; onClose: () =>
 
 /** One photo or video in the viewer. Remounted per item, so a playing video stops when you step away. A
  *  file from imported WhatsApp history that isn't here yet is fetched; it's tried again until it arrives. */
-function LightboxMedia({ att, src: own }: { att: Attachment; src?: string }) {
+function LightboxMedia({ att, src: own, what = 'sticker' }: { att: Attachment; src?: string; what?: string }) {
   const [tries, setTries] = useState(0);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -1517,7 +1543,7 @@ function LightboxMedia({ att, src: own }: { att: Attachment; src?: string }) {
   const waiting = tries > 0 && !loaded && !failed;
   const src = own ?? attachmentUrl(att.id) + (tries ? `?try=${tries}` : '');
   const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
-  if (failed) return <p className="lightbox-note">{own ? 'This sticker couldn’t be loaded.' : 'Couldn’t get this from WhatsApp.'}</p>;
+  if (failed) return <p className="lightbox-note">{own ? `This ${what} couldn’t be loaded.` : 'Couldn’t get this from WhatsApp.'}</p>;
   return (
     <>
       {att.contentType.startsWith('video/') ? (

@@ -12,6 +12,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-11',
+    date: '24 November 2026',
+    items: [
+      'Group chats show the sender’s profile picture beside their messages.',
+      'Click a name or picture in a group chat to see that person’s profile (number, label, about), with a button to message them.',
+      'Click a profile picture (in someone’s profile or contact info, or a group’s picture) to see it big.',
+    ],
+  },
+  {
     id: '2026-11-24-10',
     date: '24 November 2026',
     items: [

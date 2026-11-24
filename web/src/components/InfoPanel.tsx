@@ -1,7 +1,8 @@
 /**
  * The panel on the right: chat info (picture, name, about/description, media and links, members,
  * group management from GroupManage.tsx, disappearing messages, block, WhatsApp contact actions),
- * search in the chat (and "go to date"), and message info (who received/read it). Which one is open
+ * search in the chat (and "go to date"), message info (who received/read it), and a group member's
+ * profile (PersonPanel). Which one is open
  * is `panel` in the store.
  */
 import { type ReactNode, useEffect, useRef, useState } from 'react';
@@ -11,7 +12,7 @@ import { jumpToMessage } from '../jump';
 import { NETWORK_LABEL, capsFor, useWaFeature } from '../networks';
 import type { Attachment, Conversation, ConversationInfo, Member, Message, Recipient, SearchResult } from '../types';
 import { durationLabel, formatDay, formatListTime, formatSize, formatTime, safeHref, squareAvatar, TIMER_OPTIONS } from '../util';
-import { Avatar, Icon, StatusMark } from './ui';
+import { Avatar, Icon, StatusMark, useImageLoads } from './ui';
 import { EditableText, GroupManageSections, MemberMenu, useGroup } from './GroupManage';
 
 function closePanel() {
@@ -31,13 +32,94 @@ function PanelHead({ title }: { title: string }) {
 
 // ---------------------------------------------------------------------------
 
-export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Conversation; onOpenMedia: (a: Attachment, authorName: string, sentAt: number, messageId: number) => void }) {
+/**
+ * A group member's profile (their name or picture in a group message): picture (big on click), name,
+ * label, number, about; "Message" opens your one-to-one chat with them.
+ */
+export function PersonPanel({ conversation, personKey, name, onOpenImage }: { conversation: Conversation; personKey: string; name: string; onOpenImage: (src: string, title: string) => void }) {
+  const [info, setInfo] = useState<ConversationInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.info(conversation.id).then(
+      (r) => !cancelled && setInfo(r),
+      (e) => !cancelled && setError(e.message),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation.id]);
+  const m: Member | undefined = info?.members?.find((x) => x.key === personKey);
+  const shownName = m?.name ?? name;
+  const avatar = m?.avatar ?? conversation.members?.find((x) => x.key === personKey)?.avatar ?? null;
+  const label = m?.label ?? conversation.members?.find((x) => x.key === personKey)?.label ?? null;
+  const photoLoads = useImageLoads(avatar);
+  async function message() {
+    try {
+      const c = await api.startChat(personKey.startsWith('wa:') ? { network: 'whatsapp', jid: personKey.slice(3) } : personKey.startsWith('+') ? { number: personKey } : { uuid: personKey, number: m?.number ?? undefined });
+      upsertConversation(c);
+      setState({ activeId: c.id, panel: null });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+  return (
+    <aside className="panel person-panel" aria-label={`${shownName}: profile`}>
+      <PanelHead title="Profile" />
+      <div className="panel-body">
+        <section className="panel-hero">
+          {avatar && photoLoads ? (
+            <button className="profile-photo view" onClick={() => onOpenImage(avatar, shownName)} title="Show the picture big" aria-label="Show the picture big">
+              <Avatar name={shownName} seed={personKey} size={120} src={avatar} />
+            </button>
+          ) : (
+            <Avatar name={shownName} seed={personKey} size={120} src={null} />
+          )}
+          <h3>{shownName}</h3>
+          {label && <span className="member-label person-label">{label}</span>}
+          <p className="muted">{[m?.number, m?.username ? '@' + m.username : null].filter(Boolean).join('  ')}</p>
+          {m?.admin && <span className="admin-badge">Group admin</span>}
+        </section>
+        {error && <p className="form-error pad">{error}</p>}
+        {m?.about && (
+          <section className="panel-section">
+            <h4>About</h4>
+            <p className="panel-text">{m.about}</p>
+          </section>
+        )}
+        {info && !m && <p className="muted pad">{shownName} is no longer in {conversation.title}.</p>}
+        <section className="panel-section person-actions">
+          <button className="btn primary" onClick={() => void message()}>
+            <Icon name="chat" size={18} /> Message {shownName.split(' ')[0]}
+          </button>
+          <button className="btn" onClick={() => setState({ panel: { kind: 'chat' } })}>
+            <Icon name="group" size={18} /> {conversation.title}: group info
+          </button>
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+export function ChatInfoPanel({
+  conversation,
+  onOpenMedia,
+  onOpenImage,
+}: {
+  conversation: Conversation;
+  onOpenMedia: (a: Attachment, authorName: string, sentAt: number, messageId: number) => void;
+  /** Show a profile or group picture big */
+  onOpenImage: (src: string, title: string) => void;
+}) {
   const [info, setInfo] = useState<ConversationInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'media' | 'files' | 'links'>('media');
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState('');
   const id = conversation.id;
+  const photoLoads = useImageLoads(conversation.avatar);
   const groupTick = useStore((s) => s.groupTick[id] ?? 0);
 
   // Reload when the chat changes, new messages/members arrive, or the group changes (admins, labels).
@@ -105,6 +187,10 @@ export function ChatInfoPanel({ conversation, onOpenMedia }: { conversation: Con
             <button className="profile-photo" onClick={() => photoInput.current?.click()} title="Change group picture" aria-label="Change group picture" disabled={photoBusy}>
               <Avatar key={conversation.avatar ?? ''} name={conversation.title} seed={String(conversation.title)} group size={120} src={conversation.avatar} />
               <span className="photo-overlay">{photoBusy ? <span className="spinner small" /> : <Icon name="camera" size={26} />}</span>
+            </button>
+          ) : conversation.avatar && photoLoads ? (
+            <button className="profile-photo view" onClick={() => onOpenImage(conversation.avatar!, conversation.title)} title="Show the picture big" aria-label="Show the picture big">
+              <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={group} size={120} src={conversation.avatar} />
             </button>
           ) : (
             <Avatar name={conversation.title} seed={String(conversation.number ?? conversation.title)} group={group} size={120} src={conversation.avatar} />

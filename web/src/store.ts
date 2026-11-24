@@ -39,7 +39,12 @@ export interface State {
   presence: Record<number, { online: boolean; lastSeen: number | null }>;
   activeId: number | null;
   /** Right-hand panel: info about the open chat, or delivery info for one of your messages. */
-  panel: { kind: 'chat' } | { kind: 'search'; date?: boolean; query?: string } | { kind: 'message'; messageId: number } | null;
+  panel:
+    | { kind: 'chat' }
+    | { kind: 'search'; date?: boolean; query?: string }
+    | { kind: 'message'; messageId: number }
+    | { kind: 'person'; key: string; name: string } // a group member's profile (from their name or picture)
+    | null;
   /** Unsent text per chat (this browser only). */
   drafts: Record<number, Draft>;
   /** The message being forwarded (the forward dialog is open). */
