@@ -4,7 +4,7 @@ from playwright.sync_api import sync_playwright
 S = sys.argv[1]; errors = []
 EXPECT = {'Profile': 'input[aria-label="WhatsApp name"]', 'Chats': '.setting-row:has-text("Enter sends the message")', 'Appearance': '.emoji-styles',
           'Notifications': '.setting-row:has-text("Desktop notifications"), .insecure-help', 'Privacy': '.setting-row:has-text("Send read receipts")',
-          'WhatsApp': 'button:has-text("Unlink WhatsApp")', 'History and backup': '.history-settings', 'Account': 'button:has-text("Sign out everywhere")'}
+          'Stickers': '.model-choice:has-text("Compact")', 'WhatsApp': 'button:has-text("Unlink WhatsApp")', 'History and backup': '.history-settings', 'Account': 'button:has-text("Sign out everywhere")'}
 with sync_playwright() as p:
     b = p.chromium.launch(); page = b.new_page(viewport={'width': 1400, 'height': 900})
     page.on('pageerror', lambda e: errors.append(str(e)))
