@@ -7,7 +7,7 @@ IMAGE=$1
 DATA=$(mktemp -d)
 NAME=mw-smoke-$$
 fail() { echo "FAIL: $*"; docker logs "$NAME" 2>&1 | tail -30; docker rm -f "$NAME" >/dev/null 2>&1; exit 1; }
-docker run -d --name "$NAME" -p 3999:3000 -e APP_PASSWORD=smoke -e PUID=99 -e PGID=100 -v "$DATA:/data" "$IMAGE" >/dev/null
+docker run -d --name "$NAME" -p 3999:3000 -e APP_PASSWORD=smoke-test-pw -e PUID=99 -e PGID=100 -v "$DATA:/data" "$IMAGE" >/dev/null
 ok=
 for i in $(seq 1 60); do
   if curl -fs localhost:3999/healthz >/dev/null; then ok=1; break; fi
