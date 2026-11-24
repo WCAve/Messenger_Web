@@ -18,7 +18,7 @@ echo "ok: health check answers"
 uid=$(docker exec "$NAME" sh -c 'grep -E "^(Uid|Gid):" /proc/1/status | awk "{print \$2}" | paste -sd:')
 [ "$uid" = "99:100" ] || fail "app runs as $uid, expected 99:100"
 echo "ok: runs as 99:100"
-owner=$(stat -c '%u:%g' "$DATA"/*.db | sort -u)
+owner=$(docker exec "$NAME" sh -c 'stat -c "%u:%g" /data /data/*.db | sort -u')
 [ "$owner" = "99:100" ] || fail "database owned by $owner"
 echo "ok: database owned by 99:100"
 for i in $(seq 1 30); do
