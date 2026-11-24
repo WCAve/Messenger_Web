@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-12',
+    date: '24 November 2026',
+    items: [
+      'Sort your stickers, one at a time: swipe right (or →) to keep, left (or ←) to throw away, ↓ to skip, and add search words on the way. Open it from the sticker manager (“Start sorting”) or Settings → Stickers. Undo goes back a step.',
+      'Look-alikes: for stickers that are the same picture in different files, keep the best copy; the others go and their search words and use count move to it. Or say they’re not the same.',
+    ],
+  },
+  {
     id: '2026-11-24-11',
     date: '24 November 2026',
     items: [

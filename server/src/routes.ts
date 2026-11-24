@@ -28,6 +28,7 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
+import { decide, decideLookAlikes, lookAlikesToSort, nextToSort, undecide, undoLookAlikesOk } from './stickersort.js';
 import { hiddenPacks, learnTag, libKey, restoreToLibrary, searchTags, setStickerTags, stickerTags, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, setPackHidden, signalKey, topStickers } from './stickerlib.js';
 import { cancelDownload, choiceSize, downloadState, installedModel, modelChoices, removeModel, startDownload } from './models.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, packsMatching, stickerMime, updatePack } from './stickerpacks.js';
@@ -788,6 +789,28 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
   r.post('/api/stickers/local/:id', (ctx) => updatePack(ctx.params.id, ctx.body ?? {}));
   r.delete('/api/stickers/local/:id', (ctx) => deletePack(ctx.params.id));
   r.post('/api/stickers/forget', (ctx) => forgetStickers(ctx.body?.ids));
+  // The sorting game (stickersort.ts)
+  r.post('/api/stickers/sort/next', (ctx) => nextToSort(Array.isArray(ctx.body?.exclude) ? (ctx.body.exclude as unknown[]).map(String).slice(0, 5000) : []));
+  r.post('/api/stickers/sort', (ctx) => {
+    try {
+      decide(String(ctx.body?.id ?? ''), !!ctx.body?.keep, Array.isArray(ctx.body?.tags) ? (ctx.body.tags as unknown[]).map(String).slice(0, 50) : undefined);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    return { ok: true };
+  });
+  r.post('/api/stickers/sort/undo', (ctx) => (undecide(Array.isArray(ctx.body?.ids) ? (ctx.body.ids as unknown[]).map(String) : []), { ok: true }));
+  r.get('/api/stickers/lookalikes', () => lookAlikesToSort());
+  r.post('/api/stickers/lookalikes/undo', (ctx) => (undoLookAlikesOk(Array.isArray(ctx.body?.ids) ? (ctx.body.ids as unknown[]).map(String) : []), { ok: true }));
+  r.post('/api/stickers/lookalikes', (ctx) => {
+    try {
+      const ids = Array.isArray(ctx.body?.ids) ? (ctx.body.ids as unknown[]).map(String) : [];
+      const keep = Array.isArray(ctx.body?.keep) ? (ctx.body.keep as unknown[]).map(String) : [];
+      return decideLookAlikes(ids, keep);
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+  });
   // The picker's "Undo" after removing a sticker
   r.post('/api/stickers/restore', (ctx) => {
     const ids = Array.isArray(ctx.body?.ids) ? (ctx.body.ids as unknown[]).map(String).filter(isSafeId) : [];

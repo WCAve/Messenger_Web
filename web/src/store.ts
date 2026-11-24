@@ -61,6 +61,7 @@ export interface State {
   pins: Record<number, Pin[]>; // pinned messages by conversation (loaded when a chat opens)
   /** The sticker manager is open (in the chat list column). */
   stickerManager: boolean;
+  stickerSorter: boolean; // the sorting game (StickerSorter.tsx)
   whatsNew: 'unseen' | 'all' | null; // the What's new window
 }
 
@@ -81,6 +82,7 @@ let state: State = {
   groupTick: {},
   pins: {},
   stickerManager: false,
+  stickerSorter: false,
   whatsNew: null,
   drafts: loadDrafts(),
   forwarding: null,

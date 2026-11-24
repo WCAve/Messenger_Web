@@ -4,7 +4,7 @@
  * through uploadBackup (XMLHttpRequest, for progress); big files to send through uploadInPieces. Server routes: server/src/routes.ts and
  * groups.ts.
  */
-import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, ModelsInfo, Network, StickerSearch, StickerTag, TopStickers, WaContact, WaState } from './types';
+import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, ModelsInfo, Network, SortCard, StickerSearch, StickerTag, TopStickers, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Pin, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -116,6 +116,12 @@ export const api = {
   createStickerPack: (title: string, ids: string[]) => call<LocalStickers>('POST', '/api/stickers/local', { title, ids }),
   updateStickerPack: (id: string, patch: { title?: string; add?: string[]; remove?: string[]; order?: string[] }) => call<LocalStickers>('POST', `/api/stickers/local/${encodeURIComponent(id)}`, patch),
   deleteStickerPack: (id: string) => call<LocalStickers>('DELETE', `/api/stickers/local/${encodeURIComponent(id)}`),
+  sortNext: (exclude: string[]) => call<{ cards: SortCard[]; left: number; total: number }>('POST', '/api/stickers/sort/next', { exclude }),
+  sortDecide: (id: string, keep: boolean, tags?: string[]) => call<{ ok: true }>('POST', '/api/stickers/sort', { id, keep, tags }),
+  sortUndo: (ids: string[]) => call<{ ok: true }>('POST', '/api/stickers/sort/undo', { ids }),
+  lookAlikes: () => call<{ groups: SortCard[][]; left: number }>('GET', '/api/stickers/lookalikes'),
+  decideLookAlikes: (ids: string[], keep: string[]) => call<{ thrown: string[] }>('POST', '/api/stickers/lookalikes', { ids, keep }),
+  undoLookAlikesOk: (ids: string[]) => call<{ ok: true }>('POST', '/api/stickers/lookalikes/undo', { ids }),
   restoreStickers: (ids: string[]) => call<{ ok: true }>('POST', '/api/stickers/restore', { ids }),
   stickerTags: (key: string) => call<{ tags: StickerTag[] }>('GET', `/api/stickers/tags?key=${encodeURIComponent(key)}`),
   setStickerTags: (key: string, tags: StickerTag[]) => call<{ tags: StickerTag[] }>('POST', '/api/stickers/tags', { key, tags }),

@@ -342,3 +342,13 @@ export interface Pin {
   pinnedAt: number;
   expiresAt: number | null;
 }
+
+/** The sticker sorting game (StickerSorter.tsx) */
+export interface SortCard {
+  id: string;
+  key: string;
+  url: string;
+  tags: string[];
+  size: number;
+  animated: boolean;
+}

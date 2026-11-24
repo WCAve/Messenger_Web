@@ -10,6 +10,7 @@ import { setFaviconCount } from './favicon';
 import { api, onUnauthorized } from './api';
 import { ChatView, EditHistory, DeletedMessage, Lightbox, type LightboxItem } from './components/Chat';
 import { WhatsNew, useWhatsNewAfterUpdate } from './components/WhatsNew';
+import { StickerSorter } from './components/StickerSorter';
 import { ChatInfoPanel, MessageInfoPanel, PersonPanel, SearchPanel } from './components/InfoPanel';
 import { hideSpoilers } from './format';
 import { ForwardDialog } from './components/Extras';
@@ -46,6 +47,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
   const live = useStore((s) => s.live);
   const activeId = useStore((s) => s.activeId);
   const stickerManager = useStore((s) => s.stickerManager);
+  const stickerSorter = useStore((s) => s.stickerSorter);
   const active = useStore((s) => (s.activeId ? s.conversations[s.activeId] : undefined));
   // Muted chats don't count towards the number in the tab title.
   const totalUnread = useStore((s) => Object.values(s.conversations).reduce((n, c) => n + (c.mutedUntil > Date.now() ? 0 : c.unread || (c.markedUnread ? 1 : 0)), 0));
@@ -204,6 +206,7 @@ function Main({ onLogout }: { onLogout: () => void }) {
       <DeletedMessage onOpenMedia={setLightbox} />
       <ExportDialog />
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
+      {stickerSorter && <StickerSorter />}
     </div>
   );
 }

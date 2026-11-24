@@ -33,6 +33,11 @@ const url = (id: string) => `/api/attachments/${encodeURIComponent(id)}`;
 const exists = (id: string) => isSafeId(id) && fs.existsSync(localPath(id));
 
 /** Your packs, and the WhatsApp stickers that aren't in one yet. */
+/** Sticker files in your own packs (the sorting game counts them as kept). */
+export function packStickerIds(): Set<string> {
+  return new Set(load().flatMap((p) => p.stickers));
+}
+
 export function localStickers() {
   const packs = load();
   const inPacks = new Set(packs.flatMap((p) => p.stickers));

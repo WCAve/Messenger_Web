@@ -300,6 +300,10 @@ const MIGRATIONS: string[] = [
   -- difference hash + 6 of average colour; '' when the file can't be read
   ALTER TABLE sticker_lib ADD COLUMN look TEXT;
   `,
+  `
+  -- The sticker sorting game (stickersort.ts): you chose to keep it (ms); thrown away = forgotten
+  ALTER TABLE sticker_lib ADD COLUMN kept_at INTEGER;
+  `,
 ];
 
 function migrate() {

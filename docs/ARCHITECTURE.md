@@ -120,7 +120,14 @@ Look-alikes: the background worker also takes each sticker's fingerprint (`stick
 difference hash of 9×9 pixels over white + average colour, via ffmpeg; '' when unreadable) once text and pictures are done; it runs
 even without OCR or a picture model. `lookAlikeGroups()` joins stickers within 5 bits and a small colour
 difference (flat pictures left out); Settings → Stickers shows the count. Nothing is merged or removed:
-the groups are for the sorting game later.
+the groups are for the sorting game.
+
+The sorting game (`stickersort.ts`, web `StickerSorter.tsx`, opened from the sticker manager or Settings
+→ Stickers): "keep or throw away" goes through undecided library stickers newest first
+(`sticker_lib.kept_at` null; stickers in your own packs count as kept); throwing away is the sticker
+manager's forget, keeping sets `kept_at` on every copy. "Look-alikes" shows `lookAlikeGroups()`: keeping
+one forgets the rest and moves their `sticker_tags` and `sticker_use` to it; "not the same" stores the
+group in kv `lookalike_ok`. Undo: `/api/stickers/sort/undo`, `/api/stickers/lookalikes/undo`.
 
 ## Sticker search (OCR)
 

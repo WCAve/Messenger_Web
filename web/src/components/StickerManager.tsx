@@ -75,6 +75,13 @@ export function StickerManager() {
       <div className="settings-body">
         {error && <p className="form-error pad">{error}</p>}
         {note && <p className="muted pad">{note}</p>}
+        <section className="settings-section sorter-entry">
+          <h3>Sort your stickers</h3>
+          <p className="setting-note muted">One sticker at a time: keep it or throw it away, add search words, and pick the best of look-alike copies.</p>
+          <button className="btn primary" onClick={() => setState({ stickerSorter: true })}>
+            Start sorting
+          </button>
+        </section>
         <input ref={images} type="file" accept="image/webp,image/png,image/jpeg,image/gif" multiple hidden onChange={(e) => (void addImages(e.target.files), (e.target.value = ''))} />
 
         <section className="settings-section">

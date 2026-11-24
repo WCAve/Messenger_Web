@@ -33,6 +33,7 @@ with a comment saying what it does; this is the map.
 | `GroupManage.tsx` | Group management parts of chat info, New group, join by link |
 | `Picker.tsx` | Emoji / sticker / GIF picker (opened by the composer's own buttons, no tabs then; resizable, size in localStorage `picker-size`) |
 | `StickerManager.tsx` | Sticker manager |
+| `StickerSorter.tsx` | The sticker sorting game (full screen): swipe to keep / throw away, search words, look-alikes |
 | `Export.tsx` | The Export window: pick chats, formats, photos, period; progress; saves the ZIP |
 | `VoicePlayer.tsx` | Player for voice messages and audio: picture, play, waveform from the sound, speed |
 | `Settings.tsx` | Settings main list and pages |

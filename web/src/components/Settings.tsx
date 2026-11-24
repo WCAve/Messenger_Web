@@ -14,7 +14,7 @@ import { type NotifyState, notifyState, requestNotifications, testNotification }
 import { formatSize, squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
 import { Avatar, Icon } from './ui';
-import { useStore } from '../store';
+import { setState, useStore } from '../store';
 
 /** Why notifications can't work on plain http://, and how to fix it. */
 export function InsecureHelp() {
@@ -126,8 +126,11 @@ function StickerSearchSettings() {
             {info.reading.looks.done < info.reading.total
               ? `Looking for look-alike stickers (the same sticker in different files): ${info.reading.looks.done.toLocaleString()} of ${info.reading.total.toLocaleString()} done.`
               : info.reading.looks.groups
-                ? `Look-alikes: ${info.reading.looks.groups.toLocaleString()} groups (${info.reading.looks.stickers.toLocaleString()} stickers) that look the same. You’ll be able to sort them out later; nothing is removed.`
-                : 'No look-alike stickers found.'}
+                ? `Look-alikes: ${info.reading.looks.groups.toLocaleString()} groups (${info.reading.looks.stickers.toLocaleString()} stickers) that look the same. Nothing is removed by itself.`
+                : 'No look-alike stickers found.'}{' '}
+            <button className="link-btn" onClick={() => setState({ stickerSorter: true })}>
+              Sort stickers
+            </button>
           </p>
         )}
       </Section>
