@@ -181,9 +181,23 @@ export interface TopSticker {
   favorite: boolean;
 }
 /** The picker's sticker search: text read in stickers, your packs' names. */
+export interface StickerReading {
+  available: boolean; // text reading (OCR) on this server
+  done: number;
+  total: number;
+  pictures: { model: string; done: number } | null; // picture search, when a model is downloaded
+}
 export interface StickerSearch {
   results: { key: string; url: string; pick: { localId: string }; text?: string }[];
-  reading: { available: boolean; done: number; total: number };
+  pictures: { key: string; url: string; pick: { localId: string }; score: number }[];
+  reading: StickerReading;
+}
+/** Optional models (Settings → Stickers) */
+export interface ModelsInfo {
+  choices: { id: string; label: string; description: string; size: number }[];
+  installed: string | null;
+  download: { id: string; done: number; total: number; error?: string; finished?: boolean } | null;
+  reading: StickerReading;
 }
 export interface TopStickers {
   favorites: TopSticker[];

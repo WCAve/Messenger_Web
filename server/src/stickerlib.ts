@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import { isSafeId, localPath } from './attachments.js';
 import { config } from './config.js';
 import { db, kvGet, kvSet } from './db.js';
+import { clipModelId, embedImage, embedText, unloadClip } from './clip.js';
 import { ocrAvailable, readSticker } from './ocr.js';
 import { stickerUrl } from './stickers.js';
 
@@ -224,54 +225,134 @@ const nextUnread = db.prepare<[], { id: string; hash: string | null }>(
 const readBefore = db.prepare<[string], { ocr_text: string | null }>('SELECT ocr_text FROM sticker_lib WHERE hash = ? AND ocr_at IS NOT NULL LIMIT 1');
 const saveText = db.prepare<[string, number, string, string], never>('UPDATE sticker_lib SET ocr_text = ?, ocr_at = ? WHERE id = ? OR hash = ?');
 
+const nextUnseen = db.prepare<[string], { id: string; hash: string | null }>(
+  'SELECT id, hash FROM sticker_lib WHERE forgotten = 0 AND (clip_model IS NULL OR clip_model != ?) ORDER BY added_at DESC LIMIT 1',
+);
+const seenBefore = db.prepare<[string, string], { clip: Uint8Array | null }>('SELECT clip FROM sticker_lib WHERE hash = ? AND clip_model = ? LIMIT 1');
+const saveClip = db.prepare<[Uint8Array | null, string, string, string], never>('UPDATE sticker_lib SET clip = ?, clip_model = ? WHERE id = ? OR hash = ?');
+
+/**
+ * The background worker: reads the text in stickers (OCR) and, with a picture search model downloaded,
+ * looks at them (CLIP), taking turns, newest stickers first, one at a time with a pause in between.
+ */
 async function readAll() {
   readTimer = null;
-  if (reading || !(await ocrAvailable())) return;
+  if (reading) return;
+  const ocrOn = await ocrAvailable();
+  if (!ocrOn && !clipModelId()) return;
   reading = true;
   const t0 = Date.now();
   let n = 0;
   let found = 0;
+  let looked = 0;
+  const gap = Number(process.env.STICKER_OCR_PAUSE_MS ?? 50);
   const left = db.prepare<[], { n: number }>('SELECT count(DISTINCT coalesce(hash, id)) AS n FROM sticker_lib WHERE forgotten = 0 AND ocr_at IS NULL').get()!.n;
-  if (left > 20) ocrLog(`stickers: reading the text in ${left} stickers, in the background`);
+  if (ocrOn && left > 20) ocrLog(`stickers: reading the text in ${left} stickers, in the background`);
   try {
     for (;;) {
-      const row = nextUnread.get();
-      if (!row) break;
-      let text: string;
-      const known = row.hash ? readBefore.get(row.hash) : undefined;
-      if (known) text = known.ocr_text ?? '';
-      else {
-        try {
-          const lines = exists(row.id) ? await readSticker(localPath(row.id)) : [];
-          if (lines === null) break; // no OCR after all
-          text = lines.join('\n');
-        } catch (e) {
-          text = ''; // a file it can't read (yet): counts as read, without text
-          if (n < 5) ocrLog(`stickers: couldn't read ${row.id}: ${(e as Error).message.slice(0, 200)}`);
+      let worked = false;
+      // Text
+      const row = ocrOn ? nextUnread.get() : undefined;
+      if (row) {
+        worked = true;
+        let text: string;
+        const known = row.hash ? readBefore.get(row.hash) : undefined;
+        if (known) text = known.ocr_text ?? '';
+        else {
+          try {
+            const lines = exists(row.id) ? await readSticker(localPath(row.id)) : [];
+            text = (lines ?? []).join('\n');
+          } catch (e) {
+            text = ''; // a file it can't read: counts as read, without text
+            if (n < 5) ocrLog(`stickers: couldn't read ${row.id}: ${(e as Error).message.slice(0, 200)}`);
+          }
+          n++;
+          if (text) found++;
+          if (n % 100 === 0) ocrLog(`stickers: read ${n} of ${left} so far (${found} with text, ${Math.round((Date.now() - t0) / n)} ms each)`);
+          await pause(gap);
         }
-        n++;
-        if (text) found++;
-        if (n % 100 === 0) ocrLog(`stickers: read ${n} of ${left} so far (${found} with text, ${Math.round((Date.now() - t0) / n)} ms each)`);
-        await pause(Number(process.env.STICKER_OCR_PAUSE_MS ?? 50)); // room for everything else
+        saveText.run(text, Date.now(), row.id, row.hash ?? row.id);
       }
-      saveText.run(text, Date.now(), row.id, row.hash ?? row.id);
+      // Picture
+      const model = clipModelId();
+      const pic = model ? nextUnseen.get(model) : undefined;
+      if (pic) {
+        worked = true;
+        const known = pic.hash ? seenBefore.get(pic.hash, model) : undefined;
+        let vec: Uint8Array | null = known?.clip ?? null;
+        if (!known) {
+          try {
+            const v = exists(pic.id) ? await embedImage(localPath(pic.id)) : null;
+            vec = v ? new Uint8Array(v.buffer.slice(0)) : null;
+          } catch (e) {
+            if (looked < 5) ocrLog(`stickers: couldn't look at ${pic.id}: ${(e as Error).message.slice(0, 200)}`);
+          }
+          looked++;
+          if (looked % 250 === 0) ocrLog(`stickers: looked at ${looked} for picture search`);
+          await pause(gap);
+        }
+        if (clipModelId() === model) saveClip.run(vec, model, pic.id, pic.hash ?? pic.id);
+      }
+      if (!worked) break;
     }
-    if (n) ocrLog(`stickers: read the text in ${n} sticker${n === 1 ? '' : 's'} (${found} with text) in ${Math.round((Date.now() - t0) / 1000)} s`);
+    if (n) ocrLog(`stickers: read the text in ${n} sticker${n === 1 ? '' : 's'} (${found} with text)`);
+    if (looked) ocrLog(`stickers: looked at ${looked} sticker${looked === 1 ? '' : 's'} for picture search`);
   } finally {
     reading = false;
   }
 }
 
-/** How far the reading is: different stickers read, of all of them. */
-export async function readingProgress(): Promise<{ available: boolean; done: number; total: number }> {
+/** A picture search model was downloaded or removed: look at everything (again). */
+export function pictureModelChanged() {
+  unloadClip();
+  if (!clipModelId()) db.prepare('UPDATE sticker_lib SET clip = NULL, clip_model = NULL').run();
+  if (!started) return;
+  if (readTimer) clearTimeout(readTimer);
+  readTimer = null;
+  readSoon();
+}
+
+/** How far the reading is: different stickers read, of all of them; and looked at for picture search. */
+export async function readingProgress(): Promise<{ available: boolean; done: number; total: number; pictures: { model: string; done: number } | null }> {
+  const model = clipModelId();
   const r = db
-    .prepare<[], { total: number; done: number }>(
+    .prepare<[string], { total: number; done: number; seen: number }>(
       `SELECT count(DISTINCT coalesce(hash, id)) AS total,
-              count(DISTINCT CASE WHEN ocr_at IS NOT NULL THEN coalesce(hash, id) END) AS done
+              count(DISTINCT CASE WHEN ocr_at IS NOT NULL THEN coalesce(hash, id) END) AS done,
+              count(DISTINCT CASE WHEN clip_model = ? THEN coalesce(hash, id) END) AS seen
        FROM sticker_lib WHERE forgotten = 0`,
     )
-    .get()!;
-  return { available: await ocrAvailable(), done: r.done, total: r.total };
+    .get(model)!;
+  return { available: await ocrAvailable(), done: r.done, total: r.total, pictures: model ? { model, done: r.seen } : null };
+}
+
+/** Stickers that look like the search words (picture search), best first; [] without a model. */
+export async function searchPictures(query: string, limit = 60): Promise<(LibSticker & { score: number })[]> {
+  const model = clipModelId();
+  if (!model || !query.trim()) return [];
+  const q = await embedText(query.trim());
+  if (!q) return [];
+  const rows = db
+    .prepare<[string], { id: string; hash: string | null; clip: Uint8Array }>('SELECT id, hash, clip FROM sticker_lib WHERE forgotten = 0 AND clip_model = ? AND clip IS NOT NULL ORDER BY added_at ASC')
+    .all(model);
+  const byHash = new Map<string, { id: string; score: number }>();
+  for (const r of rows) {
+    const h = r.hash ?? r.id;
+    if (byHash.has(h) || !exists(r.id)) continue;
+    const v = new Float32Array(r.clip.buffer.slice(r.clip.byteOffset, r.clip.byteOffset + r.clip.byteLength));
+    let s = 0;
+    for (let i = 0; i < v.length && i < q.length; i++) s += v[i] * q[i];
+    byHash.set(h, { id: r.id, score: s });
+  }
+  const sorted = [...byHash.entries()].sort((a, b) => b[1].score - a[1].score);
+  if (!sorted.length) return [];
+  // CLIP's scores are only meaningful compared with each other: the best, and whatever is nearly as good
+  const best = sorted[0][1].score;
+  const floor = Math.max(Number(process.env.CLIP_MIN_SCORE ?? 0.18), best - Number(process.env.CLIP_SPREAD ?? 0.06));
+  return sorted
+    .filter(([, v]) => v.score >= floor)
+    .slice(0, limit)
+    .map(([h, v]) => ({ id: v.id, url: url(v.id), key: `loc:${h}`, score: Math.round(v.score * 1000) / 1000 }));
 }
 
 // ---------- search

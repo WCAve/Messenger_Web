@@ -63,5 +63,27 @@ echo "$out" | grep 's3.webp' | grep -qi 'haha' || fail "OCR: animated HAHA not r
 echo "ok: sticker OCR"
 docker logs "$NAME" 2>&1 | grep -i "ocr\|sticker" || true
 
+# Picture search: download the compact model through the app (as you would in Settings), then compare a
+# Dutch and an English search on a red and a blue picture.
+curl -fs -c /tmp/mw-jar -H 'content-type: application/json' -d '{"password":"smoke-test-pw"}' localhost:3999/api/login >/dev/null || fail "login"
+curl -fs -b /tmp/mw-jar -X POST localhost:3999/api/models/clip-multi-compact/download >/dev/null || fail "starting the model download"
+ok=
+for i in $(seq 1 300); do
+  st=$(curl -fs -b /tmp/mw-jar localhost:3999/api/models)
+  echo "$st" | grep -q '"installed":"clip-multi-compact"' && { ok=1; break; }
+  echo "$st" | grep -q '"error"' && fail "model download: $(echo "$st" | grep -o '"error":"[^"]*"')"
+  sleep 2
+done
+[ -n "$ok" ] || fail "model download took too long"
+echo "ok: picture search model downloaded and checked"
+x "cd /tmp && ffmpeg -v error -y -f lavfi -i color=c=red:s=512x512 -frames:v 1 red.png && ffmpeg -v error -y -f lavfi -i color=c=blue:s=512x512 -frames:v 1 blue.png && chmod a+r red.png blue.png" || fail "making test pictures"
+score() { x "cd /tmp && setpriv --reuid=99 --regid=100 --clear-groups env DATA_DIR=/data node /app/server/dist/clip-cli.js '$1' red.png blue.png"; }
+nl=$(score 'een rode achtergrond'); echo "$nl"
+en=$(score 'a blue background'); echo "$en"
+pick() { echo "$1" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=s.trim().split("\n").map(JSON.parse);r.sort((a,b)=>b.score-a.score);console.log(r[0].file)})'; }
+[ "$(pick "$nl")" = red.png ] || fail "picture search: 'een rode achtergrond' didn't pick red"
+[ "$(pick "$en")" = blue.png ] || fail "picture search: 'a blue background' didn't pick blue"
+echo "ok: picture search (Dutch and English)"
+
 docker rm -f "$NAME" >/dev/null
 echo "image smoke test passed"

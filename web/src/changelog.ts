@@ -12,6 +12,14 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-24-6',
+    date: '24 November 2026',
+    items: [
+      'Picture search for stickers: find stickers by what’s in them, in Dutch or English (“kat”, “thumbs up”, “huilen”). It’s optional: choose and download a model in Settings → Stickers (Compact 228 MB or Full quality 894 MB). It runs on your own server, and your stickers are looked at once in the background. Results show under “Looks like” in the sticker search.',
+      'Settings → Stickers also shows how far reading the text in your stickers is.',
+    ],
+  },
+  {
     id: '2026-11-24-5',
     date: '24 November 2026',
     items: ['Sticker search: the “still reading” count now keeps up by itself while the picker is open.'],

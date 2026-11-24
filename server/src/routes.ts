@@ -28,7 +28,8 @@ import { forgetQuickReactions, quickReactions } from './reactions.js';
 import { PIN_DURATIONS, applyPin, applyUnpin, listPins } from './pins.js';
 import { waha } from './waha-api.js';
 import { groupRoutes } from './groups.js';
-import { libKey, readingProgress, recordStickerUse, searchLibrary, setFavorite, signalKey, topStickers } from './stickerlib.js';
+import { libKey, readingProgress, recordStickerUse, searchLibrary, searchPictures, setFavorite, signalKey, topStickers } from './stickerlib.js';
+import { cancelDownload, choiceSize, downloadState, installedModel, modelChoices, removeModel, startDownload } from './models.js';
 import { addImages, createPack, deletePack, forgetStickers, localStickers, packsMatching, stickerMime, updatePack } from './stickerpacks.js';
 import { importStickersFromFolder, backupDir, backupFileInfo, backupMediaWaiting, cancelBackupImport, receiveBackupUpload, refreshBackupInfo, startBackupImport, startMediaScan } from './wabackup.js';
 import {
@@ -730,8 +731,28 @@ export function buildRouter(log: (level: 'info' | 'warn' | 'error', msg: string)
       seen.add(key);
       results.push({ key, url: s.url, pick: { localId: s.id }, ...('text' in s ? { text: s.text } : {}) });
     }
-    return { results, reading: await readingProgress() };
+    // What's in the picture (with a downloaded model): the ones not already found by their text
+    const pictures = (await searchPictures(q).catch(() => [])).filter((s) => !seen.has(s.key)).map((s) => ({ key: s.key, url: s.url, pick: { localId: s.id }, score: s.score }));
+    return { results, pictures, reading: await readingProgress() };
   });
+  // Optional models (Settings → Stickers): picture search
+  const modelsInfo = async () => ({
+    choices: modelChoices().map((c) => ({ id: c.id, label: c.label, description: c.description, size: choiceSize(c) })),
+    installed: installedModel()?.choice.id ?? null,
+    download: downloadState(),
+    reading: await readingProgress(),
+  });
+  r.get('/api/models', modelsInfo);
+  r.post('/api/models/:id/download', async (ctx) => {
+    try {
+      startDownload(ctx.params.id, (m) => log('info', m));
+    } catch (e) {
+      throw new HttpError(400, (e as Error).message);
+    }
+    return modelsInfo();
+  });
+  r.post('/api/models/cancel', async () => (cancelDownload(), modelsInfo()));
+  r.delete('/api/models', async () => (removeModel(), modelsInfo()));
   // Favourites and most used (the picker's ⭐ tab)
   r.get('/api/stickers/top', () => topStickers());
   r.post('/api/stickers/favorite', (ctx) => {

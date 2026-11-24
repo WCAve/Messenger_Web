@@ -4436,3 +4436,47 @@ video.deleted-media {
   display: block;
   margin: 10px auto 4px;
 }
+
+/* ---- Settings → Stickers: picture search model choice */
+.model-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}
+.model-choice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--mist);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.model-choice.on {
+  border-color: var(--ultra, var(--ink-2));
+}
+.model-choice span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.model-choice small {
+  color: var(--ink-2);
+}
+.model-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+.model-progress progress {
+  flex: 1;
+  min-width: 160px;
+}
+.model-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
