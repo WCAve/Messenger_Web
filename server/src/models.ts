@@ -179,11 +179,11 @@ async function fetchFile(f: ModelFile, dest: string, signal: AbortSignal, progre
       if (got > f.size) throw new Error(`${f.path}: bigger than expected`);
       sha256.update(chunk);
       sha1.update(chunk);
-      if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
+      if (!out.write(chunk)) await new Promise<void>((r) => out.once('drain', () => r()));
       progress(chunk.length);
     }
   } finally {
-    await new Promise((r) => out.end(r));
+    await new Promise<void>((r) => out.end(() => r()));
   }
   if (got !== f.size) throw new Error(`${f.path}: incomplete (${got} of ${f.size} bytes)`);
   if (f.sha256 && sha256.digest('hex') !== f.sha256) throw new Error(`${f.path}: checksum doesn't match`);
