@@ -194,7 +194,7 @@ function StickerGrid({
     return () => ((stop = true), clearTimeout(t));
   }, [query]);
   // While the text is still being read: the count keeps up (and new results come in)
-  const stillReading = !!found?.reading.available && found.reading.done < found.reading.total;
+  const stillReading = (!!found?.reading.available && found.reading.done < found.reading.total) || (!!found?.reading.pictures && found.reading.pictures.done < found.reading.total);
   useEffect(() => {
     const q = query.trim();
     if (!q || !stillReading) return;
@@ -300,7 +300,13 @@ function StickerGrid({
               </p>
             )}
             {found && !found.reading.available && <p className="muted sticker-reading">This server can’t read the text in stickers: searching emoji and pack names only.</p>}
-            {found && !found.results.length && !signalFound.length && <p className="muted picker-empty">No stickers found</p>}
+            {found?.reading.pictures && found.reading.pictures.done < found.reading.total && (
+              <p className="muted sticker-reading">
+                Picture search is still looking at your stickers: {found.reading.pictures.done.toLocaleString()} of {found.reading.total.toLocaleString()}.
+              </p>
+            )}
+            {found && !found.results.length && !found.pictures.length && !signalFound.length && <p className="muted picker-empty">No stickers found</p>}
+            {(found?.results.length || signalFound.length) > 0 && found?.pictures.length ? <h4>Text and names</h4> : null}
             {(found?.results.length || signalFound.length) > 0 && (
               <div className="sticker-grid">
                 {signalFound.map(({ pack, s }) => {
@@ -311,6 +317,21 @@ function StickerGrid({
                   <StickerCell key={r.key} url={r.url} title={r.text ?? 'Sticker'} fav={favs.has(r.key)} onPick={() => pickLocal({ id: r.pick.localId, url: r.url })} onFav={toggleFav(r.key)} />
                 ))}
               </div>
+            )}
+            {!!found?.pictures.length && (
+              <>
+                <h4>Looks like “{query.trim()}”</h4>
+                <div className="sticker-grid">
+                  {found.pictures.map((r) => (
+                    <StickerCell key={r.key} url={r.url} title="Sticker" fav={favs.has(r.key)} onPick={() => pickLocal({ id: r.pick.localId, url: r.url })} onFav={toggleFav(r.key)} />
+                  ))}
+                </div>
+              </>
+            )}
+            {found && !found.reading.pictures && (
+              <p className="muted sticker-reading">
+                Tip: search by what’s in a sticker (“kat”, “thumbs up”) after downloading picture search in Settings → Stickers.
+              </p>
             )}
           </>
         )}

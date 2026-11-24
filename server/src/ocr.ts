@@ -32,6 +32,12 @@ const MIN_CONFIDENCE = 0.55;
 const modelsDir = process.env.OCR_MODELS_DIR ?? '/app/models/ocr';
 const fake = process.env.STICKER_OCR === 'fake';
 
+export function onnxRuntime(): Promise<Ort | null> {
+  ortP ??= import('onnxruntime-node' as string).catch(() => null);
+  return ortP;
+}
+let ortP: Promise<Ort | null> | null = null;
+
 let engine: Promise<{ ort: Ort; det: Ort; rec: Ort; chars: string[] } | null> | null = null;
 
 function load() {
@@ -39,8 +45,8 @@ function load() {
     const files = ['det.onnx', 'rec.onnx', 'dict.txt'].map((f) => path.join(modelsDir, f));
     if (!files.every((f) => fs.existsSync(f))) return null;
     try {
-      const name = 'onnxruntime-node';
-      const ort: Ort = await import(name);
+      const ort: Ort = await onnxRuntime();
+      if (!ort) return null;
       // Two threads: reading stickers in the background shouldn't take the whole machine.
       const opts = { intraOpNumThreads: 2, interOpNumThreads: 1, graphOptimizationLevel: 'all' };
       const det = await ort.InferenceSession.create(files[0], opts);
@@ -76,26 +82,34 @@ function run(cmd: string, args: string[], timeoutMs = 30_000): Promise<Buffer> {
   });
 }
 
-/** The sticker as SIZE×SIZE RGBA pixels (fitted in, the rest transparent). */
-async function rgba(file: string): Promise<Buffer> {
-  const vf = `scale=${SIZE}:${SIZE}:force_original_aspect_ratio=decrease:flags=bicubic,pad=${SIZE}:${SIZE}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba`;
+/**
+ * The first frame of an image as size×size RGBA pixels: `fit` fits it in (the rest transparent), `fill`
+ * fills the square and cuts off the edges (as CLIP looks at pictures). Animated WebP, which this ffmpeg
+ * can't read, goes through webpmux. Also used by clip.ts.
+ */
+export async function rgbaSquare(file: string, size: number, mode: 'fit' | 'fill' = 'fit'): Promise<Buffer> {
+  const vf =
+    mode === 'fit'
+      ? `scale=${size}:${size}:force_original_aspect_ratio=decrease:flags=bicubic,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba`
+      : `scale=${size}:${size}:force_original_aspect_ratio=increase:flags=bicubic,crop=${size}:${size},format=rgba`;
   const args = (input: string) => ['-v', 'error', '-i', input, '-frames:v', '1', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'rgba', 'pipe:1'];
   try {
     const buf = await run('ffmpeg', args(file));
-    if (buf.length === SIZE * SIZE * 4) return buf;
+    if (buf.length === size * size * 4) return buf;
   } catch {
     /* animated WebP, probably: below */
   }
-  const tmp = path.join(os.tmpdir(), `ocr-${process.pid}-${Date.now()}.webp`);
+  const tmp = path.join(os.tmpdir(), `img-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.webp`);
   try {
     await run('webpmux', ['-get', 'frame', '1', file, '-o', tmp]);
     const buf = await run('ffmpeg', args(tmp));
-    if (buf.length !== SIZE * SIZE * 4) throw new Error('unexpected image size');
+    if (buf.length !== size * size * 4) throw new Error('unexpected image size');
     return buf;
   } finally {
     fs.rm(tmp, { force: true }, () => {});
   }
 }
+const rgba = (file: string) => rgbaSquare(file, SIZE);
 
 /** Fill in transparency over a plain background; returns BGR bytes (what PaddleOCR's models expect). */
 function flatten(px: Buffer, bg: number): Uint8Array {

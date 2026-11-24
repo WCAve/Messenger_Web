@@ -4,7 +4,7 @@
  * through uploadBackup (XMLHttpRequest, for progress); big files to send through uploadInPieces. Server routes: server/src/routes.ts and
  * groups.ts.
  */
-import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, Network, StickerSearch, TopStickers, WaContact, WaState } from './types';
+import type { Attachment, BackupFile, GroupAction, GroupDetails, LinkPreview, MediaItem, ModelsInfo, Network, StickerSearch, TopStickers, WaContact, WaState } from './types';
 import type { Conversation, ConversationInfo, DirectoryContact, LocalStickers, Message, Pin, Recipient, SearchResult, SignalState, StickerPack, StyleRange } from './types';
 
 /** Text for sending: U+FFFC where each mention goes, plus style and mention ranges. */
@@ -107,6 +107,10 @@ export const api = {
   logoutAll: () => call<{ ok: true }>('POST', '/api/logout-all'),
   stickers: () => call<{ packs: StickerPack[]; local: LocalStickers }>('GET', '/api/stickers'),
   stickersTop: () => call<TopStickers>('GET', '/api/stickers/top'),
+  models: () => call<ModelsInfo>('GET', '/api/models'),
+  downloadModel: (id: string) => call<ModelsInfo>('POST', `/api/models/${encodeURIComponent(id)}/download`),
+  cancelModelDownload: () => call<ModelsInfo>('POST', '/api/models/cancel'),
+  removeModel: () => call<ModelsInfo>('DELETE', '/api/models'),
   searchStickers: (q: string) => call<StickerSearch>('GET', `/api/stickers/search?q=${encodeURIComponent(q)}`),
   stickerFavorite: (key: string, on: boolean) => call<TopStickers>('POST', '/api/stickers/favorite', { key, on }),
   createStickerPack: (title: string, ids: string[]) => call<LocalStickers>('POST', '/api/stickers/local', { title, ids }),

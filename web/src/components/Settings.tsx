@@ -9,7 +9,7 @@
 import { refreshQuickReactions, useQuickReactions } from '../quickReactions';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Profile, type ServerSettings, type WaProfile, api, uploadBackup } from '../api';
-import type { BackupFile } from '../types';
+import type { BackupFile, ModelsInfo } from '../types';
 import { type NotifyState, notifyState, requestNotifications, testNotification } from '../notifications';
 import { formatSize, squareAvatar } from '../util';
 import { type Prefs, setPrefs, usePrefs } from '../prefs';
@@ -78,6 +78,106 @@ function EmojiSample({ set }: { set: 'fluent' | 'twemoji' }) {
 }
 
 /** Your WhatsApp profile: name, about and picture. Changes go to your phone and contacts. */
+const mb = (n: number) => `${Math.round(n / 1e6).toLocaleString()} MB`;
+
+/**
+ * Settings → Stickers: how far reading the text in stickers is, and picture search ("cat", "duim
+ * omhoog"), which needs a model you download here (models.ts on the server). Pick one, download, remove.
+ */
+function StickerSearchSettings() {
+  const [info, setInfo] = useState<ModelsInfo | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const refresh = () => api.models().then(setInfo, (e) => setError(e.message));
+  useEffect(() => {
+    void refresh();
+  }, []);
+  const downloading = !!info?.download && !info.download.finished && !info.download.error;
+  const r = info?.reading;
+  const lookingAt = r?.pictures && r.pictures.done < r.total;
+  // While something is moving: look again every second (download) or few seconds (reading)
+  useEffect(() => {
+    if (!info || !(downloading || (r && r.available && r.done < r.total) || lookingAt)) return;
+    const t = setTimeout(refresh, downloading ? 1000 : 4000);
+    return () => clearTimeout(t);
+  }, [info, downloading, r, lookingAt]);
+  const act = (f: () => Promise<ModelsInfo>) => {
+    setBusy(true);
+    setError(null);
+    f().then(setInfo, (e) => setError(e.message)).finally(() => setBusy(false));
+  };
+  if (!info) return error ? <p className="form-error pad">{error}</p> : <div className="spinner" aria-label="Loading" />;
+  const installed = info.choices.find((c) => c.id === info.installed);
+  const chosen = pick ?? info.installed ?? info.choices[0]?.id;
+  const d = info.download;
+  return (
+    <>
+      <Section title="Text in stickers">
+        <p className="setting-note">
+          {!info.reading.available
+            ? 'This server can’t read the text in stickers (it needs the Docker image). Search uses pack names and emoji.'
+            : info.reading.done < info.reading.total
+              ? `Reading the text in your stickers, in the background: ${info.reading.done.toLocaleString()} of ${info.reading.total.toLocaleString()} done.`
+              : `The text in all ${info.reading.total.toLocaleString()} stickers has been read. New stickers are read as they come in.`}
+        </p>
+      </Section>
+      <Section title="Picture search">
+        <p className="setting-note">
+          Find stickers by what’s in them, in Dutch or English: “kat”, “thumbs up”, “huilen”. It needs a model that runs here on your server; download it once (from Hugging Face), nothing is sent anywhere.
+        </p>
+        {installed && (
+          <p className="setting-note">
+            <strong>Installed: {installed.label}</strong> ({mb(installed.size)}).{' '}
+            {r?.pictures && r.pictures.done < r.total ? `Looking at your stickers: ${r.pictures.done.toLocaleString()} of ${r.total.toLocaleString()} done.` : r?.pictures ? 'All stickers looked at.' : ''}
+          </p>
+        )}
+        <div className="model-choices" role="radiogroup" aria-label="Picture search model">
+          {info.choices.map((c) => (
+            <label key={c.id} className={`model-choice${chosen === c.id ? ' on' : ''}`}>
+              <input type="radio" name="clip-model" checked={chosen === c.id} onChange={() => setPick(c.id)} disabled={downloading} />
+              <span>
+                <strong>
+                  {c.label} · {mb(c.size)}
+                  {c.id === info.installed && <em className="muted"> · installed</em>}
+                </strong>
+                <small>{c.description}</small>
+              </span>
+            </label>
+          ))}
+        </div>
+        {downloading && d && (
+          <div className="model-progress">
+            <progress max={d.total} value={d.done} />
+            <span>
+              Downloading {mb(d.done)} of {mb(d.total)}
+            </span>
+            <button className="btn" onClick={() => act(api.cancelModelDownload)} disabled={busy}>
+              Cancel
+            </button>
+          </div>
+        )}
+        {d?.error && <p className="form-error">Download failed: {d.error}</p>}
+        {error && <p className="form-error">{error}</p>}
+        {!downloading && (
+          <div className="model-actions">
+            {chosen !== info.installed && (
+              <button className="btn primary" disabled={busy || !chosen} onClick={() => act(() => api.downloadModel(chosen!))}>
+                {installed ? `Switch to ${info.choices.find((c) => c.id === chosen)?.label}` : 'Download'} ({mb(info.choices.find((c) => c.id === chosen)?.size ?? 0)})
+              </button>
+            )}
+            {installed && (
+              <button className="btn danger" disabled={busy} onClick={() => confirm('Remove the picture search model? Text search keeps working.') && act(api.removeModel)}>
+                Remove
+              </button>
+            )}
+          </div>
+        )}
+      </Section>
+    </>
+  );
+}
+
 function WaProfileSection() {
   const [profile, setProfile] = useState<WaProfile | null>(null);
   const [name, setName] = useState('');
@@ -685,7 +785,7 @@ const THEMES: { value: Prefs['theme']; label: string }[] = [
   { value: 'dark-green', label: 'Dark green' },
 ];
 
-export type SettingsPage = 'profile' | 'chats' | 'appearance' | 'notifications' | 'privacy' | 'whatsapp' | 'history' | 'account';
+export type SettingsPage = 'profile' | 'chats' | 'appearance' | 'notifications' | 'privacy' | 'stickers' | 'whatsapp' | 'history' | 'account';
 
 export function SettingsView({ onClose, onLogout, initialPage = null }: { onClose: () => void; onLogout: () => void; initialPage?: SettingsPage | null }) {
   const quickReactions = useQuickReactions();
@@ -762,6 +862,7 @@ export function SettingsView({ onClose, onLogout, initialPage = null }: { onClos
       icon: 'lock',
       summary: server ? `Read receipts ${server.sendReadReceipts ? 'on' : 'off'} · typing ${server.sendTypingIndicators ? 'on' : 'off'} · link previews ${server.sendLinkPreviews ? 'on' : 'off'}` : 'Read receipts, typing, link previews, online',
     },
+    { id: 'stickers', title: 'Stickers', icon: 'sticker', summary: 'Search: text in stickers, picture search' },
     ...(waOn
       ? [
           {
@@ -998,6 +1099,8 @@ export function SettingsView({ onClose, onLogout, initialPage = null }: { onClos
 
         {page === 'whatsapp' && <WhatsAppSection part="connection" />}
         {page === 'history' && <WhatsAppSection part="history" />}
+
+        {page === 'stickers' && <StickerSearchSettings />}
 
         {page === 'account' && (
           <>

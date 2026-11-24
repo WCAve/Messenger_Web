@@ -279,6 +279,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE sticker_lib ADD COLUMN ocr_text TEXT;
   ALTER TABLE sticker_lib ADD COLUMN ocr_at INTEGER;
   `,
+  `
+  -- Picture search (clip.ts): the sticker's 512 numbers (float32) and which downloaded model made them
+  ALTER TABLE sticker_lib ADD COLUMN clip BLOB;
+  ALTER TABLE sticker_lib ADD COLUMN clip_model TEXT;
+  `,
 ];
 
 function migrate() {

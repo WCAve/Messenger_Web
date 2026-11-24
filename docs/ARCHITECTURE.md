@@ -110,6 +110,16 @@ there's no OCR and search uses names/emoji only. Animated WebP: ffmpeg 7.1 can't
 takes the first frame. The image test (`tests/docker-smoke.sh`) reads generated stickers with the real
 models; e2e tests use `STICKER_OCR=fake`. Signal stickers are searched in the browser (emoji, pack name).
 
+**Picture search** (optional): the models are downloaded from Settings → Stickers (models.ts; Compact
+~228 MB or Full ~894 MB, into DATA_DIR/models, checked against fixed SHA-256/Git SHA-1 values), not
+carried in the image. clip.ts: OpenAI CLIP ViT-B/32's picture model (Xenova's ONNX) and
+sentence-transformers' multilingual text model (DistilBERT → mean → 2_Dense to 512), so Dutch searches
+land near the right pictures. The same background worker as the OCR takes turns with it; each sticker's
+512 numbers go in `sticker_lib.clip` with the model id (`clip_model`), so switching models redoes them.
+Results whose score is within 0.06 of the best (and ≥ 0.18) show as "Looks like" (CLIP_SPREAD,
+CLIP_MIN_SCORE). Tests: `STICKER_CLIP=fake` + MODELS_TEST/MODELS_BASE_URL (tiny files from a local
+server); the image test downloads the real Compact model and checks a Dutch and an English search.
+
 ## Things that bit us (keep in mind)
 
 - **WEBJS is WhatsApp Web in a browser.** Heavy calls (getChats, looking up many messages) make it

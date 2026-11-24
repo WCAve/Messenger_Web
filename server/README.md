@@ -39,6 +39,9 @@ How it all fits together: [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 | **Both** | |
 | `ocr.ts` | Reading the text in stickers: PaddleOCR PP-OCRv5 (detector + Latin reader) through onnxruntime-node; the models are in the Docker image (`OCR_MODELS_DIR`); `STICKER_OCR=fake` for tests |
 | `ocr-cli.ts` | `node server/dist/ocr-cli.js <files>`: OCR by hand, on the server or in the image test |
+| `models.ts` | Optional models downloaded from the app (Settings → Stickers): the picture search choices with fixed files and checksums, download with progress into DATA_DIR/models, remove |
+| `clip.ts` | Picture search: multilingual CLIP (picture model + multilingual text model, WordPiece tokenizer, 2_Dense) on the ONNX runtime; `STICKER_CLIP=fake` for tests |
+| `clip-cli.ts` | `node server/dist/clip-cli.js "words" <files>`: picture search scores by hand |
 | `stickerlib.ts` | The sticker library (`sticker_lib`: each file, copies share a hash) and sticker use (`sticker_use`: times sent, favourites) for the picker's ⭐ tab |
 | `stickerpacks.ts` | Your own sticker packs (sticker manager) |
 | `linkpreview.ts` | Link previews for messages you send (public addresses only) |
